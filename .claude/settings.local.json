@@ -12,7 +12,9 @@
       "Bash(git remote *)",
       "Bash(git branch *)",
       "Bash(git push *)",
-      "Bash(git tag *)"
+      "Bash(git tag *)",
+      "Skill(code-review)",
+      "Skill(code-review:*)"
     ]
   }
 }
