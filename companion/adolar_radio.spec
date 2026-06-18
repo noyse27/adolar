@@ -1,4 +1,4 @@
-# PyInstaller spec for AdolarRadio
+# PyInstaller spec for AdolarRadio – single-file exe
 # Build: pyinstaller adolar_radio.spec
 
 block_cipher = None
@@ -7,8 +7,14 @@ a = Analysis(
     ['adolar_radio.py'],
     pathex=[],
     binaries=[],
-    datas=[],
-    hiddenimports=['webview', 'webview.platforms.winforms'],
+    datas=[
+        ('logo.svg', '.'),
+    ],
+    hiddenimports=[
+        'webview',
+        'webview.platforms.winforms',
+        'clr',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -41,4 +47,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=None,
+    onefile=True,
 )

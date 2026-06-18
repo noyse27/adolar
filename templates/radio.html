@@ -174,6 +174,13 @@
   <img src="/static/logo.svg" alt="Adolar">
   <span>Adolar</span>
   <span id="titlebar-sub">Radio</span>
+  <button id="btn-settings" title="Einstellungen" onclick="openSettings()" style="
+    margin-left:auto; background:none; border:none; cursor:pointer;
+    color:#5C5C58; padding:4px; border-radius:4px;
+    display:flex; align-items:center; -webkit-app-region:no-drag;
+    transition:color .15s;">
+    <i class="ti ti-settings" style="font-size:15px"></i>
+  </button>
 </div>
 
 <div id="cover-wrap">
@@ -516,6 +523,13 @@ document.getElementById("btn-love").onclick = async () => {
 const ch = new BroadcastChannel("musikarchiv-player");
 audio.addEventListener("play",  () => ch.postMessage({ type: "playstate", playing: true }));
 audio.addEventListener("pause", () => ch.postMessage({ type: "playstate", playing: false }));
+
+// ── Settings (calls Python via pywebview) ─────────────────
+function openSettings() {
+  if (window.pywebview) {
+    window.pywebview.api.open_settings();
+  }
+}
 
 // ── Init ──────────────────────────────────────────────────
 lfmInit().then(() => startRadio());

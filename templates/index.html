@@ -1529,7 +1529,9 @@ function startTitleScroll(text) {
 function updatePlayerUI(t) {
   $("player-title").textContent  = t.title  || "—";
   $("player-artist").textContent = t.artist || "";
-  startTitleScroll(t.title && t.artist ? `${t.title} – ${t.artist}` : null);
+  startTitleScroll(t.title && t.artist
+    ? `${t.title} – ${t.artist}${t.year ? " (" + t.year + ")" : ""}`
+    : null);
   updateMiniPlayer(t);
   const wrap = $("player-cover-wrap");
   wrap.innerHTML = "";

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img">
+  <title>Adolar</title>
+  <defs>
+    <linearGradient id="bodyShine" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6B63CC"/>
+      <stop offset="45%" style="stop-color:#9E98E8"/>
+      <stop offset="100%" style="stop-color:#6B63CC"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(200,200) rotate(45) translate(-200,-200)">
+    <ellipse style="fill:#FF8C00;" cx="200" cy="318" rx="42" ry="58"/>
+    <ellipse style="fill:#FFD600;" cx="200" cy="312" rx="27" ry="40"/>
+    <ellipse style="fill:#FFF0A0;" cx="200" cy="306" rx="14" ry="23"/>
+
+    <path style="fill:#534AB7;stroke:#3C3489;stroke-width:2.5;" d="M158,280 C130,295 108,335 116,358 L158,322 Z"/>
+    <path style="fill:#534AB7;stroke:#3C3489;stroke-width:2.5;" d="M242,280 C270,295 292,335 284,358 L242,322 Z"/>
+
+    <ellipse style="fill:url(#bodyShine);stroke:#3C3489;stroke-width:2.5;" cx="200" cy="230" rx="76" ry="122"/>
+
+    <path style="fill:none;stroke:#AFA9EC;stroke-width:3;stroke-dasharray:8 6;opacity:0.5;" d="M130,246 Q200,262 270,246"/>
+
+    <path style="fill:#534AB7;stroke:#3C3489;stroke-width:2.5;" d="M200,72 C175,108 128,174 128,210 Q162,194 200,190 Q238,194 272,210 C272,174 225,108 200,72 Z"/>
+
+    <circle style="fill:#1E1E1C;stroke:#AFA9EC;stroke-width:2.5;" cx="200" cy="224" r="34"/>
+    <circle style="fill:#7F77DD;" cx="200" cy="224" r="26"/>
+
+    <g transform="translate(200,224) rotate(-45)">
+      <text style="fill:#1E1E1C;font-size:28px;font-weight:700;text-anchor:middle;dominant-baseline:central;">♫</text>
+    </g>
+
+    <circle style="fill:#AFA9EC;stroke:#3C3489;stroke-width:1.5;" cx="136" cy="208" r="4"/>
+    <circle style="fill:#AFA9EC;stroke:#3C3489;stroke-width:1.5;" cx="264" cy="208" r="4"/>
+    <circle style="fill:#AFA9EC;stroke:#3C3489;stroke-width:1.5;" cx="133" cy="256" r="4"/>
+    <circle style="fill:#AFA9EC;stroke:#3C3489;stroke-width:1.5;" cx="267" cy="256" r="4"/>
+  </g>
+</svg>

@@ -1,47 +1,175 @@
 """
 AdolarRadio – Windows companion app for Adolar.
-Opens the /radio page in a native frameless window using pywebview.
-
-Usage:
-    python adolar_radio.py [--host HOST] [--port PORT]
-
-Build to .exe:
-    pip install pywebview pyinstaller
-    pyinstaller adolar_radio.spec
+Single-file pywebview app. Build to .exe with: pyinstaller adolar_radio.spec
 """
 
-import argparse
+import json
+import os
 import sys
 import webview
 
-DEFAULT_HOST = "localhost"
-DEFAULT_PORT = 15002
+CONFIG_PATH = os.path.join(os.environ.get("APPDATA", "."), "AdolarRadio", "config.json")
+
+SETTINGS_HTML = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>AdolarRadio – Einstellungen</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #1E1E1C; color: #ECECEC;
+    height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 24px;
+    user-select: none;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; }
+  .logo img { width: 40px; height: 40px; }
+  .logo span {
+    font-family: "Orbitron", monospace; font-size: 22px; font-weight: 700;
+    letter-spacing: 0.08em;
+    background: linear-gradient(135deg, #7F77DD, #b8b4f0);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  label { font-size: 12px; color: #9A9A96; margin-bottom: 6px; display: block; }
+  input {
+    width: 100%; padding: 9px 12px;
+    background: #3A3A38; border: 0.5px solid #505050;
+    border-radius: 8px; color: #ECECEC; font-size: 14px; outline: none;
+    margin-bottom: 16px;
+  }
+  input:focus { border-color: #7F77DD; }
+  button {
+    width: 100%; padding: 10px;
+    background: #7F77DD; border: none; border-radius: 8px;
+    color: #fff; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: background .15s;
+  }
+  button:hover { background: #9E98E8; }
+  .hint { font-size: 11px; color: #5C5C58; margin-top: 12px; text-align: center; line-height: 1.5; }
+  .error { color: #e03e3e; font-size: 12px; margin-top: 8px; display: none; }
+</style>
+</head>
+<body>
+<div class="logo">
+  <img src="data:image/svg+xml;base64,{LOGO_B64}" alt="Adolar">
+  <span>Adolar</span>
+</div>
+<div style="width:100%;max-width:280px">
+  <label>Adolar Server URL</label>
+  <input type="text" id="url" placeholder="http://192.168.1.X:15002" value="{CURRENT_URL}">
+  <button onclick="save()">Speichern &amp; Starten</button>
+  <div class="error" id="err">Ungültige URL – bitte http://host:port eingeben.</div>
+  <p class="hint">Beispiel: http://192.168.1.100:15002<br>oder http://localhost:15002</p>
+</div>
+<script>
+function save() {
+  const url = document.getElementById("url").value.trim().replace(/\\/$/, "");
+  if (!url.startsWith("http")) {
+    document.getElementById("err").style.display = "block"; return;
+  }
+  document.getElementById("err").style.display = "none";
+  window.pywebview.api.save_and_launch(url);
+}
+document.getElementById("url").addEventListener("keydown", e => {
+  if (e.key === "Enter") save();
+});
+</script>
+</body>
+</html>"""
+
+
+def load_config():
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_config(data: dict):
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def logo_b64() -> str:
+    """Return base64-encoded logo.svg from same dir as this script / the exe."""
+    import base64
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "logo.svg"),
+        os.path.join(os.path.dirname(sys.executable), "logo.svg"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.svg"),
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+    return ""
+
+
+class Api:
+    def __init__(self, win_ref):
+        self._win = win_ref   # list so we can replace the window reference
+
+    def save_and_launch(self, url: str):
+        save_config({"url": url})
+        self._win[0].load_url(url.rstrip("/") + "/radio")
+        self._win[0].set_title("AdolarRadio")
+        self._win[0].resize(320, 520)
+
+    def open_settings(self):
+        cfg = load_config()
+        html = _build_settings_html(cfg.get("url", ""))
+        self._win[0].load_html(html)
+        self._win[0].set_title("AdolarRadio – Einstellungen")
+        self._win[0].resize(320, 340)
+
+
+def _build_settings_html(current_url: str) -> str:
+    b64 = logo_b64()
+    return (SETTINGS_HTML
+            .replace("{LOGO_B64}", b64)
+            .replace("{CURRENT_URL}", current_url))
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AdolarRadio companion app")
-    parser.add_argument("--host", default=DEFAULT_HOST, help="Adolar server host")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Adolar server port")
-    args = parser.parse_args()
+    cfg = load_config()
+    url = cfg.get("url", "")
 
-    url = f"http://{args.host}:{args.port}/radio"
+    win_ref = [None]
+    api = Api(win_ref)
 
-    window = webview.create_window(
-        title="AdolarRadio",
-        url=url,
-        width=320,
-        height=520,
-        resizable=False,
-        frameless=False,
-        on_top=True,
-        min_size=(280, 420),
-    )
+    if url:
+        radio_url = url.rstrip("/") + "/radio"
+        win = webview.create_window(
+            title="AdolarRadio",
+            url=radio_url,
+            width=320,
+            height=520,
+            resizable=False,
+            on_top=True,
+            min_size=(280, 420),
+            js_api=api,
+        )
+    else:
+        html = _build_settings_html("")
+        win = webview.create_window(
+            title="AdolarRadio – Einstellungen",
+            html=html,
+            width=320,
+            height=340,
+            resizable=False,
+            on_top=True,
+            js_api=api,
+        )
 
-    webview.start(
-        debug=False,
-        private_mode=False,
-        storage_path=None,
-    )
+    win_ref[0] = win
+    webview.start(debug=False, private_mode=False)
 
 
 if __name__ == "__main__":
