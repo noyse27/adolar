@@ -278,7 +278,9 @@
       border-radius: 8px;
       padding: 7px 12px;
     }
-    .search-input-wrap i { font-size: 16px; color: var(--text-tertiary); }
+    .search-input-wrap i { font-size: 16px; color: var(--text-tertiary); transition: color .2s; }
+    .search-input-wrap.searching { border-color: var(--accent-border); }
+    .search-input-wrap.searching i { color: var(--accent); animation: spin 0.7s linear infinite; }
     #search {
       flex: 1;
       border: none;
@@ -1391,8 +1393,22 @@ function makeCover(track, size = 42) {
 }
 
 // ── Fetch ─────────────────────────────────────────────────
+function _setSearching(on) {
+  const wrap = document.querySelector('.search-input-wrap');
+  const icon = wrap?.querySelector('i');
+  if (!wrap || !icon) return;
+  if (on) {
+    wrap.classList.add('searching');
+    icon.className = 'ti ti-loader';
+  } else {
+    wrap.classList.remove('searching');
+    icon.className = 'ti ti-search';
+  }
+}
+
 async function loadTracks(page = 1, forceCount = false) {
   if (radio.active) return;
+  _setSearching(true);
   // Skip COUNT if we already have the total and are just paging
   const needCount = page === 1 || forceCount || state.total === 0;
   state.page = page;
@@ -1433,6 +1449,7 @@ async function loadTracks(page = 1, forceCount = false) {
     state.pages = Math.max(1, Math.ceil(state.total / 50));
   }
 
+  _setSearching(false);
   renderTracks();
   renderPagination();
 
