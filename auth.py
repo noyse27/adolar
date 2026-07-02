@@ -17,8 +17,8 @@ SESSION_TTL_LONG = 30 * 24 * 3600   # 30 days (remember-me)
 BF_WINDOW        = 5 * 60     # 5 minute rolling window
 BF_SOFT_LIMIT    = 5          # attempts before soft-block
 BF_SOFT_BLOCK    = 15 * 60    # 15 min block
-BF_HARD_LIMIT    = 20         # attempts before hard-block
-BF_HARD_BLOCK    = 3600       # 1 hour block
+BF_HARD_LIMIT    = 10         # attempts before permanent block
+BF_HARD_BLOCK    = 253402300800  # permanent (year 9999); admin must unblock manually
 
 # Routes that don't require authentication
 PUBLIC_PREFIXES = (
