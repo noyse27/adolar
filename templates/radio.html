@@ -423,23 +423,38 @@ function startCrossfade() {
   const doFade = () => {
     radio.cfActive = true;
     const dur = CF_IN * 1000;
-    const start = performance.now();
+    let start = performance.now();
     const volSlider = document.getElementById("volume");
 
     inactive.volume = 0;
     inactive.play().catch(() => {});
 
+    // When the page is hidden, RAF pauses. Track hidden time and shift `start`
+    // forward so elapsed doesn't jump when the page becomes visible again.
+    let hiddenSince = null;
+    const onVisibility = () => {
+      if (document.hidden) {
+        hiddenSince = performance.now();
+      } else if (hiddenSince !== null) {
+        start += performance.now() - hiddenSince;
+        hiddenSince = null;
+        radio.cfTimer = requestAnimationFrame(tick);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     const tick = () => {
+      if (document.hidden) return; // RAF resumed briefly — wait for visibilitychange
       const elapsed = performance.now() - start;
       const progress = Math.min(elapsed / dur, 1);
-      const t = progress;
       const vol = volSlider.valueAsNumber;
-      audio.volume    = Math.cos(t * Math.PI / 2) * vol;
-      inactive.volume = Math.sin(t * Math.PI / 2) * vol;
+      audio.volume    = Math.cos(progress * Math.PI / 2) * vol;
+      inactive.volume = Math.sin(progress * Math.PI / 2) * vol;
 
       if (progress < 1) {
         radio.cfTimer = requestAnimationFrame(tick);
       } else {
+        document.removeEventListener("visibilitychange", onVisibility);
         const old = audio;
         audio = inactive;
         audio.volume = vol;
