@@ -1753,7 +1753,7 @@ function renderTracks(overrideTracks) {
     const meta = document.createElement("div");
     meta.className = "track-meta";
     const bpmStr = track.bpm ? `<span class="track-bpm" title="BPM">${Math.round(track.bpm)}</span>` : '';
-    const pcStr  = track.user_play_count > 0 ? `<span class="track-playcount" title="${lang==='de'?'Abgespielt':'Play count'}">▶ ${track.user_play_count}×</span>` : '';
+    const pcStr  = track.user_play_count != null ? `<span class="track-playcount" title="${lang==='de'?'Abgespielt':'Play count'}">▶ ${track.user_play_count}×</span>` : '';
     meta.innerHTML = `<span class="format-badge">${esc(track.format)}</span>
                       ${bpmStr}
                       ${pcStr}
@@ -2347,7 +2347,11 @@ $("btn-loved-filter").onclick = () => {
   if (!lfm.connected) return;
   state.filters.loved = !state.filters.loved;
   updateLovedFilterButton();
-  loadTracks(1, true);
+  if (state.filters.loved) {
+    startLovedSync();   // sync then reload (startLovedSync calls loadTracks when done)
+  } else {
+    loadTracks(1, true);
+  }
 };
 
 $("btn-loved-sync").onclick = () => startLovedSync();
