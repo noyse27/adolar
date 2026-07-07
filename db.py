@@ -331,7 +331,7 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
             SELECT id, path, title, artist, album, genre, year, track_no, duration,
                    bitrate, size, cover_hash, bpm, loved, loved_at, user_play_count, last_played_at
             FROM ranked WHERE rn=1
-            ORDER BY {order}
+            ORDER BY {order.replace("t.", "").replace("upc.", "").replace("l.", "")}
             LIMIT ? OFFSET ?"""
         count_sql = f"""WITH ranked AS (
                 SELECT ROW_NUMBER() OVER (
