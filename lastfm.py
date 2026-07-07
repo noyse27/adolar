@@ -77,13 +77,25 @@ def unlove(session_key: str, artist: str, title: str) -> dict:
 
 
 def get_track_info(session_key: str, artist: str, title: str) -> dict:
-    """Returns track info including userloved (0 or 1)."""
+    """Returns track info including userloved (0 or 1) and userplaycount."""
     try:
         data = _get({"method": "track.getInfo", "sk": session_key,
                      "artist": artist, "track": title, "username": ""})
         return data.get("track", {})
     except Exception:
         return {}
+
+
+def get_user_track_playcount(username: str, artist: str, title: str) -> int | None:
+    """Fetch userplaycount for a single track. Returns None on error."""
+    try:
+        data = _get({"method": "track.getInfo", "api_key": API_KEY,
+                     "artist": artist, "track": title, "username": username})
+        track = data.get("track", {})
+        raw = track.get("userplaycount")
+        return int(raw) if raw is not None else None
+    except Exception:
+        return None
 
 
 def get_loved_tracks(username: str, limit: int = 200) -> list[dict]:

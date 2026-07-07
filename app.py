@@ -799,6 +799,7 @@ def api_lastfm_disconnect():
 
 
 _lastfm_loved_sync = {"running": False, "error": None, "count": 0, "finished_at": None}
+_lastfm_pc_sync    = {"running": False, "error": None, "done": 0, "total": 0, "finished_at": None}
 
 
 def _sync_lastfm_loved_tracks():
@@ -846,6 +847,73 @@ def api_lastfm_loved_sync():
     status = db.get_lastfm_loved_status()
     status.update(_lastfm_loved_sync)
     return jsonify(status)
+
+
+def _sync_lastfm_playcounts():
+    global _lastfm_pc_sync
+    username = db.get_setting("lastfm_username")
+    sk       = db.get_setting("lastfm_session_key")
+    if not username or not sk:
+        _lastfm_pc_sync.update(running=False, error="not connected")
+        return
+    log = logging.getLogger(__name__)
+    try:
+        with db.db() as conn:
+            tracks = conn.execute(
+                "SELECT id, path, artist, title FROM tracks WHERE artist IS NOT NULL AND title IS NOT NULL"
+            ).fetchall()
+        total = len(tracks)
+        _lastfm_pc_sync.update(total=total, done=0)
+        updated = 0
+        for i, row in enumerate(tracks):
+            _lastfm_pc_sync["done"] = i + 1
+            try:
+                pc = lastfm.get_user_track_playcount(username, row["artist"], row["title"])
+                if pc and pc > 0:
+                    # Update user_play_counts for admin (user_id=1), only if Last.fm count is higher
+                    with db.db() as conn:
+                        conn.execute("""
+                            INSERT INTO user_play_counts (user_id, track_id, count, last_played_at)
+                            VALUES (1, ?, ?, NULL)
+                            ON CONFLICT(user_id, track_id) DO UPDATE SET
+                                count = MAX(count, excluded.count)
+                        """, (row["id"], pc))
+                    # Write PCNT tag to file
+                    path = _safe_path(row["path"])
+                    if path and os.path.isfile(path):
+                        try:
+                            _write_play_count_tag(path, pc)
+                        except Exception:
+                            log.debug("Could not write play count tag to %s", path)
+                    updated += 1
+            except Exception:
+                log.debug("Playcount sync failed for %s - %s", row["artist"], row["title"])
+        _lastfm_pc_sync.update(running=False, error=None, done=total,
+                               updated=updated, finished_at=_time.time())
+    except Exception as e:
+        log.exception("Last.fm playcount sync failed")
+        _lastfm_pc_sync.update(running=False, error=str(e), finished_at=_time.time())
+
+
+@app.get("/api/lastfm/playcount/status")
+def api_lastfm_pc_status():
+    err = _require_admin_or_401()
+    if err: return err
+    return jsonify(_lastfm_pc_sync)
+
+
+@app.post("/api/lastfm/playcount/sync")
+def api_lastfm_pc_sync():
+    err = _require_admin_or_401()
+    if err: return err
+    if not db.get_setting("lastfm_session_key"):
+        return jsonify({"error": "not connected"}), 401
+    if _lastfm_pc_sync.get("running"):
+        return jsonify({"error": "already running"}), 409
+    _lastfm_pc_sync.update(running=True, error=None, done=0, total=0)
+    import threading
+    threading.Thread(target=_sync_lastfm_playcounts, daemon=True).start()
+    return jsonify({"ok": True, "message": "sync started"})
 
 
 @app.post("/api/lastfm/nowplaying")

@@ -16,6 +16,7 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **HTTP range streaming** — seekable audio in the browser
 - **Radio / Shuffle mode** — equal-power crossfade (12s out / 8s in), next track pre-buffered; crossfade skipped for short tracks
 - **AdolarRadio** — Windows companion app: native window, auto-starts radio, About dialog, buildable to `.exe`
+- **Adolar Radio Android** — Android companion project with phone WebView and Android Auto media playback for local developer installs
 - **Mini-player** — popup window with cover art, controls, progress bar, Last.fm love button
 - **Download basket** — select tracks, export as ZIP
 - **BPM support** — reads TBPM tag (Mixmeister-compatible), background librosa analysis for untagged tracks, writes result back to file tag; BPM shown in search results and filter
@@ -76,6 +77,10 @@ Cover images failing with `--verbose` are corrupt embedded tags — normal, they
 
 Download the latest `.exe` from [Releases](https://github.com/noyse27/adolar/releases).
 Enter your Adolar server URL in the settings dialog, click Save & Start — radio begins immediately.
+
+## Adolar Radio Android
+
+Open [`adolar-android`](adolar-android) in Android Studio to install the app directly to your phone via USB debugging. It stores your Adolar server URL, opens `/radio` in a WebView on the phone, and exposes a simple Android Auto media service for random radio playback.
 
 ## First Run
 

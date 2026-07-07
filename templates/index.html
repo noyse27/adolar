@@ -1020,9 +1020,17 @@
     </div>
 
     <div class="filter-section">
-      <button id="btn-loved-filter" title="Loved Tracks aus Last.fm">
+      <button id="btn-loved-filter" title="Loved Tracks anzeigen">
         <i class="ti ti-heart"></i>
         <span>Last.fm Loved</span>
+      </button>
+      <button id="btn-loved-sync" title="Lieblingstitel von Last.fm laden" style="margin-top:4px">
+        <i class="ti ti-refresh"></i>
+        <span>Loved laden</span>
+      </button>
+      <button id="btn-pc-sync" title="Abspielzähler von Last.fm laden" style="margin-top:4px;display:none">
+        <i class="ti ti-chart-bar"></i>
+        <span>Plays laden</span>
       </button>
     </div>
 
@@ -1285,7 +1293,10 @@ const LANG = {
     lfm_connect:      "Last.fm verbinden",
     lfm_disconnect:   "Trennen",
     lfm_loved_filter:   "Loved in Last.fm",
-    lfm_loved_sync:     "Loved wird geladen…",
+    lfm_loved_sync:     "Loved laden",
+    lfm_loved_syncing:  "Wird geladen…",
+    lfm_pc_sync:        "Plays laden",
+    lfm_pc_syncing:     (done, total) => `Plays: ${done}/${total}…`,
     bm_add:             "Zu Playlist hinzufügen",
     bm_new_playlist:    "Neue Playlist erstellen",
     bm_new_prompt:      "Name der neuen Playlist:",
@@ -1345,7 +1356,10 @@ const LANG = {
     lfm_connect:      "Connect Last.fm",
     lfm_disconnect:   "Disconnect",
     lfm_loved_filter:    "Loved in Last.fm",
-    lfm_loved_sync:      "Loading loved…",
+    lfm_loved_sync:      "Load loved",
+    lfm_loved_syncing:   "Loading…",
+    lfm_pc_sync:         "Load plays",
+    lfm_pc_syncing:      (done, total) => `Plays: ${done}/${total}…`,
     bm_add:              "Add to playlist",
     bm_new_playlist:     "New playlist",
     bm_new_prompt:       "New playlist name:",
@@ -2203,6 +2217,8 @@ function renderLfmStatus() {
       <button id="lastfm-connect" onclick="lfmDisconnect()" title="${t().lfm_disconnect}">✕</button>`;
     $("player-love").style.display = "";
     $("btn-loved-filter").style.display = "flex";
+    $("btn-loved-sync").style.display = "flex";
+    $("btn-pc-sync").style.display = "flex";
   } else {
     el.innerHTML = `
       <button id="lastfm-connect" onclick="location.href='/api/lastfm/auth'">
@@ -2212,6 +2228,8 @@ function renderLfmStatus() {
       </button>`;
     $("player-love").style.display = "none";
     $("btn-loved-filter").style.display = "none";
+    $("btn-loved-sync").style.display = "none";
+    $("btn-pc-sync").style.display = "none";
     state.filters.loved = false;
     updateLovedFilterButton();
   }
@@ -2255,34 +2273,81 @@ async function lfmToggleLove(track, btn) {
   } catch (e) { console.error("Last.fm love failed", e); }
 }
 
-function updateLovedFilterButton(running = false) {
+function updateLovedFilterButton() {
   const btn = $("btn-loved-filter");
   if (!btn) return;
   btn.classList.toggle("active", state.filters.loved);
-  btn.classList.toggle("running", running);
-  btn.innerHTML = running
-    ? `<i class="ti ti-loader"></i><span>${t().lfm_loved_sync}</span>`
-    : `<i class="ti ${state.filters.loved ? "ti-heart-filled" : "ti-heart"}"></i><span>${t().lfm_loved_filter}</span>`;
+  btn.innerHTML = `<i class="ti ${state.filters.loved ? "ti-heart-filled" : "ti-heart"}"></i><span>${t().lfm_loved_filter}</span>`;
 }
 
-async function startLovedSync(reloadWhenDone = false) {
+function updateLovedSyncButton(running = false) {
+  const btn = $("btn-loved-sync");
+  if (!btn) return;
+  btn.classList.toggle("running", running);
+  btn.disabled = running;
+  btn.innerHTML = running
+    ? `<i class="ti ti-loader"></i><span>${t().lfm_loved_syncing}</span>`
+    : `<i class="ti ti-refresh"></i><span>${t().lfm_loved_sync}</span>`;
+}
+
+async function startLovedSync() {
   if (!lfm.connected) return;
   try {
-    updateLovedFilterButton(true);
+    updateLovedSyncButton(true);
     await fetch(`${API}/api/lastfm/loved/sync`, { method: "POST" });
-    updateLovedFilterButton(false);
-    if (reloadWhenDone && state.filters.loved) loadTracks(1, true);
+    updateLovedSyncButton(false);
+    if (state.filters.loved) loadTracks(1, true);
   } catch {
-    updateLovedFilterButton(false);
+    updateLovedSyncButton(false);
   }
 }
 
-$("btn-loved-filter").onclick = async () => {
+$("btn-loved-filter").onclick = () => {
   if (!lfm.connected) return;
   state.filters.loved = !state.filters.loved;
-  updateLovedFilterButton(false);
-  if (state.filters.loved) startLovedSync(true);
+  updateLovedFilterButton();
   loadTracks(1, true);
+};
+
+$("btn-loved-sync").onclick = () => startLovedSync();
+
+// ── Last.fm Playcount Sync ────────────────────────────────
+let _pcPollTimer = null;
+
+function updatePcSyncButton(running = false, done = 0, total = 0) {
+  const btn = $("btn-pc-sync");
+  if (!btn) return;
+  btn.disabled = running;
+  btn.innerHTML = running
+    ? `<i class="ti ti-loader"></i><span>${t().lfm_pc_syncing(done, total)}</span>`
+    : `<i class="ti ti-chart-bar"></i><span>${t().lfm_pc_sync}</span>`;
+}
+
+async function pollPcSync() {
+  try {
+    const r = await fetch(`${API}/api/lastfm/playcount/status`);
+    const s = await r.json();
+    if (s.running) {
+      updatePcSyncButton(true, s.done, s.total);
+      _pcPollTimer = setTimeout(pollPcSync, 2000);
+    } else {
+      updatePcSyncButton(false);
+      clearTimeout(_pcPollTimer);
+      loadTracks(1, true); // refresh to show updated counts
+    }
+  } catch {
+    updatePcSyncButton(false);
+  }
+}
+
+$("btn-pc-sync").onclick = async () => {
+  if (!lfm.connected) return;
+  try {
+    const r = await fetch(`${API}/api/lastfm/playcount/sync`, { method: "POST" });
+    if (!r.ok) return;
+    updatePcSyncButton(true, 0, 0);
+    _pcPollTimer = setTimeout(pollPcSync, 1000);
+  } catch {}
 };
 
 function applyLovedState(btn, loved) {

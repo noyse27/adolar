@@ -315,21 +315,45 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
         pc_join = f"LEFT JOIN user_play_counts upc ON upc.track_id=t.id AND upc.user_id={_uid}"
         pc_select = "COALESCE(upc.count,0) AS user_play_count, upc.last_played_at"
 
-    with db() as conn:
-        rows = conn.execute(
-            f"""SELECT t.id, t.path, t.title, t.artist, t.album, t.genre,
+    # When filtering loved-only, deduplicate by artist+title (same song on multiple albums)
+    # Keep the track with the highest play count, fall back to lowest track_no / album name
+    if loved_only:
+        dedup = f"""WITH ranked AS (
+                SELECT t.id, t.path, t.title, t.artist, t.album, t.genre,
+                       t.year, t.track_no, t.duration, t.bitrate, t.size,
+                       t.cover_hash, t.bpm, {loved_select}, {pc_select},
+                       ROW_NUMBER() OVER (
+                           PARTITION BY LOWER(COALESCE(t.artist,'')), LOWER(COALESCE(t.title,''))
+                           ORDER BY COALESCE(upc.count,0) DESC, t.album, t.track_no
+                       ) AS rn
+                FROM tracks t {loved_join} {pc_join} {where}
+            )
+            SELECT id, path, title, artist, album, genre, year, track_no, duration,
+                   bitrate, size, cover_hash, bpm, loved, loved_at, user_play_count, last_played_at
+            FROM ranked WHERE rn=1
+            ORDER BY {order}
+            LIMIT ? OFFSET ?"""
+        count_sql = f"""WITH ranked AS (
+                SELECT ROW_NUMBER() OVER (
+                    PARTITION BY LOWER(COALESCE(t.artist,'')), LOWER(COALESCE(t.title,''))
+                    ORDER BY t.id
+                ) AS rn
+                FROM tracks t {loved_join} {pc_join} {where}
+            ) SELECT COUNT(*) FROM ranked WHERE rn=1"""
+    else:
+        dedup = f"""SELECT t.id, t.path, t.title, t.artist, t.album, t.genre,
                        t.year, t.track_no, t.duration, t.bitrate, t.size,
                        t.cover_hash, t.bpm, {loved_select}, {pc_select}
                 FROM tracks t {loved_join} {pc_join} {where}
                 ORDER BY {order}
-                LIMIT ? OFFSET ?""",
-            params + [per_page, offset],
-        ).fetchall()
+                LIMIT ? OFFSET ?"""
+        count_sql = f"SELECT COUNT(*) FROM tracks t {loved_join} {pc_join} {where}"
+
+    with db() as conn:
+        rows = conn.execute(dedup, params + [per_page, offset]).fetchall()
 
         if count:
-            total = conn.execute(
-                f"SELECT COUNT(*) FROM tracks t {loved_join} {pc_join} {where}", params
-            ).fetchone()[0]
+            total = conn.execute(count_sql, params).fetchone()[0]
         else:
             total = offset + len(rows) + (1 if len(rows) == per_page else 0)
 
@@ -506,6 +530,13 @@ def upsert_track(data: dict):
                 bpm=CASE WHEN excluded.bpm IS NOT NULL THEN excluded.bpm ELSE bpm END,
                 loved=CASE WHEN excluded.loved=1 THEN 1 ELSE loved END
         """, data)
+        # Seed user_play_counts for admin (user_id=1) from file tag if not yet recorded
+        if data.get("play_count", 0) > 0:
+            conn.execute("""
+                INSERT INTO user_play_counts (user_id, track_id, count, last_played_at)
+                SELECT 1, id, ?, NULL FROM tracks WHERE path=?
+                ON CONFLICT(user_id, track_id) DO NOTHING
+            """, (data["play_count"], data["path"]))
 
 
 def save_cover(hash_: str, data: bytes, mime: str = "image/jpeg"):
