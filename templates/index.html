@@ -602,6 +602,11 @@
       font-variant-numeric: tabular-nums;
     }
     .track-bpm::after { content: " BPM"; }
+    .track-playcount {
+      font-size: var(--text-xs);
+      color: var(--text-tertiary);
+      font-variant-numeric: tabular-nums;
+    }
 
     /* Inline play button */
     .track-play-btn {
@@ -1153,6 +1158,8 @@
         <option value="album">Album A–Z</option>
         <option value="year">Nach Jahr</option>
         <option value="duration">Nach Dauer</option>
+        <option value="top_played">Meistgespielt</option>
+        <option value="loved_at">Zuletzt geliked</option>
       </select>
       <button id="btn-radio" title="Radio / Shuffle">
         <i class="ti ti-radio"></i> Radio
@@ -1250,6 +1257,8 @@ const LANG = {
     sort_album:       "Album A–Z",
     sort_year:        "Nach Jahr",
     sort_duration:    "Nach Dauer",
+    sort_top_played:  "Meistgespielt",
+    sort_loved_at:    "Zuletzt geliked",
     radio:            "Radio",
     basket:           "Korb",
     basket_empty:     "Korb ist leer",
@@ -1308,6 +1317,8 @@ const LANG = {
     sort_album:       "Album A–Z",
     sort_year:        "By year",
     sort_duration:    "By duration",
+    sort_top_played:  "Most played",
+    sort_loved_at:    "Last liked",
     radio:            "Radio",
     basket:           "Cart",
     basket_empty:     "Cart is empty",
@@ -1376,7 +1387,7 @@ function applyLang() {
   $("album-search").placeholder = L.album_search_ph;
   updateLovedFilterButton(false);
   // Sort options
-  const sortMap = { artist: "sort_artist", title: "sort_title", album: "sort_album", year: "sort_year", duration: "sort_duration" };
+  const sortMap = { artist: "sort_artist", title: "sort_title", album: "sort_album", year: "sort_year", duration: "sort_duration", top_played: "sort_top_played", loved_at: "sort_loved_at" };
   document.querySelectorAll("#sort-select option").forEach(o => {
     const k = sortMap[o.value];
     if (k) o.textContent = L[k];
@@ -1695,8 +1706,10 @@ function renderTracks(overrideTracks) {
     const meta = document.createElement("div");
     meta.className = "track-meta";
     const bpmStr = track.bpm ? `<span class="track-bpm" title="BPM">${Math.round(track.bpm)}</span>` : '';
+    const pcStr  = track.user_play_count > 0 ? `<span class="track-playcount" title="${lang==='de'?'Abgespielt':'Play count'}">▶ ${track.user_play_count}×</span>` : '';
     meta.innerHTML = `<span class="format-badge">${esc(track.format)}</span>
                       ${bpmStr}
+                      ${pcStr}
                       <span class="track-dur">${track.duration_fmt || fmt(track.duration)}</span>`;
     row.appendChild(meta);
 

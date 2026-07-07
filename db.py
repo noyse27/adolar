@@ -256,18 +256,19 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
         conditions.append("t.bpm <= ?")
         params.append(float(bpm_max))
 
+    # loved JOIN — needed for loved_only filter, loved_at sort, or include_loved
     loved_join = ""
-    loved_select = "0 AS loved"
-    if loved_only or include_loved:
+    loved_select = "0 AS loved, NULL AS loved_at"
+    if loved_only or include_loved or sort == "loved_at":
         loved_join = """LEFT JOIN lastfm_loved_tracks l
                   ON l.artist_norm = LOWER(COALESCE(t.artist, ''))
                  AND l.title_norm = LOWER(COALESCE(t.title, ''))"""
-        loved_select = "CASE WHEN l.artist_norm IS NULL THEN 0 ELSE 1 END AS loved"
+        loved_select = "CASE WHEN l.artist_norm IS NULL THEN 0 ELSE 1 END AS loved, l.loved_at"
     if loved_only:
         conditions.append("l.artist_norm IS NOT NULL")
 
     # Play-count-based sort options — require JOIN on user_play_counts
-    _PC_SORTS = {"recent", "top_played", "newest_added", "disco_top"}
+    _PC_SORTS = {"recent", "top_played", "newest_added", "disco_top", "loved_at"}
     pc_join = ""
     pc_select = "0 AS user_play_count, NULL AS last_played_at"
     pc_uid = 0  # disco = user_id 0
@@ -275,6 +276,9 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
     if sort in _PC_SORTS:
         if sort == "newest_added":
             order_expr = "t.indexed_at DESC"
+        elif sort == "loved_at":
+            # Sort by when track was loved on Last.fm (desc), loved tracks first
+            order_expr = "l.loved_at DESC NULLS LAST, t.artist, t.title"
         elif sort == "recent":
             pc_uid = user_id or 0
             pc_join = f"LEFT JOIN user_play_counts upc ON upc.track_id=t.id AND upc.user_id={int(pc_uid)}"
@@ -285,8 +289,7 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
             pc_uid = user_id or 0
             pc_join = f"LEFT JOIN user_play_counts upc ON upc.track_id=t.id AND upc.user_id={int(pc_uid)}"
             pc_select = "COALESCE(upc.count,0) AS user_play_count, upc.last_played_at"
-            conditions.append("upc.count > 0")
-            order_expr = "upc.count DESC"
+            order_expr = "upc.count DESC NULLS LAST, t.artist"
         else:  # disco_top
             pc_join = "LEFT JOIN user_play_counts upc ON upc.track_id=t.id AND upc.user_id=0"
             pc_select = "COALESCE(upc.count,0) AS user_play_count, upc.last_played_at"
@@ -305,6 +308,12 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     offset = (page - 1) * per_page
+
+    # Always include user play count for display in track list
+    if not pc_join:
+        _uid = int(user_id or 0)
+        pc_join = f"LEFT JOIN user_play_counts upc ON upc.track_id=t.id AND upc.user_id={_uid}"
+        pc_select = "COALESCE(upc.count,0) AS user_play_count, upc.last_played_at"
 
     with db() as conn:
         rows = conn.execute(
