@@ -342,6 +342,27 @@
       background: color-mix(in srgb, #e03e3e 12%, var(--bg-primary));
     }
     #btn-loved-filter.running { color: var(--accent); border-color: var(--accent-border); }
+    /* Wartung panel */
+    #btn-wartung-toggle {
+      display: flex; align-items: center; gap: 6px;
+      width: 100%; padding: 6px 10px;
+      background: transparent; border: 0.5px solid var(--border-medium);
+      border-radius: 6px; font-size: var(--text-base);
+      color: var(--text-secondary); cursor: pointer; transition: background .1s;
+    }
+    #btn-wartung-toggle:hover { background: var(--bg-secondary); }
+    #wartung-panel { display: none; margin-top: 6px; }
+    #wartung-panel button {
+      display: flex; align-items: center; gap: 6px;
+      width: 100%; padding: 6px 10px; margin-top: 6px;
+      background: transparent; border: 0.5px solid var(--border-medium);
+      border-radius: 6px; font-size: var(--text-base);
+      color: var(--text-secondary); cursor: pointer; transition: background .1s;
+    }
+    #wartung-panel button:first-child { margin-top: 0; }
+    #wartung-panel button:hover { background: var(--bg-secondary); }
+    #wartung-panel button.running { color: var(--accent); }
+    #btn-loved-sync, #btn-pc-sync { display: none; }
 
     /* ── Content area ─────────────────────────────────── */
     #content {
@@ -1024,14 +1045,6 @@
         <i class="ti ti-heart"></i>
         <span>Last.fm Loved</span>
       </button>
-      <button id="btn-loved-sync" title="Lieblingstitel von Last.fm laden" style="margin-top:4px">
-        <i class="ti ti-refresh"></i>
-        <span>Loved laden</span>
-      </button>
-      <button id="btn-pc-sync" title="Abspielzähler von Last.fm laden" style="margin-top:4px;display:none">
-        <i class="ti ti-chart-bar"></i>
-        <span>Plays laden</span>
-      </button>
     </div>
 
     <div class="filter-section">
@@ -1136,18 +1149,33 @@
     </div>
 
     <div class="sidebar-scan">
-      <button id="btn-scan">
-        <i class="ti ti-refresh"></i>
-        Bibliothek scannen
+      <button id="btn-wartung-toggle" onclick="toggleWartung()">
+        <i class="ti ti-tool"></i>
+        <span data-i18n="wartung">Wartung</span>
+        <i class="ti ti-chevron-down" id="wartung-chevron" style="margin-left:auto;font-size:11px"></i>
       </button>
-      <button id="btn-bpm-tag" title="BPM aus Datei-Tags lesen und DB aktualisieren (schnell)">
-        <i class="ti ti-music-bolt"></i>
-        BPM-Tags einlesen
-      </button>
-      <button id="btn-bpm-calc" title="BPM für Tracks ohne Tag per librosa berechnen (langsam)">
-        <i class="ti ti-waveform"></i>
-        BPM berechnen
-      </button>
+      <div id="wartung-panel">
+        <button id="btn-scan">
+          <i class="ti ti-refresh"></i>
+          <span data-i18n="scan_lib">Bibliothek scannen</span>
+        </button>
+        <button id="btn-bpm-tag" title="BPM aus Datei-Tags lesen und DB aktualisieren (schnell)">
+          <i class="ti ti-music-bolt"></i>
+          <span data-i18n="bpm_tags">BPM-Tags einlesen</span>
+        </button>
+        <button id="btn-bpm-calc" title="BPM für Tracks ohne Tag per librosa berechnen (langsam)">
+          <i class="ti ti-waveform"></i>
+          <span data-i18n="bpm_calc">BPM berechnen</span>
+        </button>
+        <button id="btn-loved-sync" title="Lieblingstitel von Last.fm laden">
+          <i class="ti ti-heart-share"></i>
+          <span data-i18n="lfm_loved_sync">Loved laden</span>
+        </button>
+        <button id="btn-pc-sync" title="Abspielzähler von Last.fm laden">
+          <i class="ti ti-chart-bar"></i>
+          <span data-i18n="lfm_pc_sync">Plays laden</span>
+        </button>
+      </div>
     </div>
 
   </aside>
@@ -1254,8 +1282,11 @@ const LANG = {
     format:           "Format",
     min_bitrate:      "Mindest-Bitrate",
     all:              "Alle",
+    wartung:          "Wartung",
     scan_lib:         "Bibliothek scannen",
     scanning:         "Bibliothek wird gescannt…",
+    bpm_tags:         "BPM-Tags einlesen",
+    bpm_calc:         "BPM berechnen",
     search_ph:        "Titel, Interpret, Album durchsuchen…",
     artist_search_ph: "Interpret suchen…",
     title_search_ph:  "Titel suchen…",
@@ -1351,6 +1382,9 @@ const LANG = {
     radio_tracks:     (n) => `Radio – ${n} tracks`,
     no_tracks:        "No tracks found.",
     mini_title:       "Pop out mini-player",
+    wartung:          "Maintenance",
+    bpm_tags:         "Read BPM tags",
+    bpm_calc:         "Calculate BPM",
     lfm_love:         "Love on Last.fm",
     lfm_unlove:       "Unlove on Last.fm",
     lfm_connect:      "Connect Last.fm",
@@ -1392,8 +1426,7 @@ function applyLang() {
   });
   // Sidebar "Alle" chips
   document.querySelectorAll(".chip-alle").forEach(el => el.textContent = L.all);
-  // Scan button
-  $("btn-scan").innerHTML = `<i class="ti ti-refresh"></i> ${L.scan_lib}`;
+  // Wartung toggle label (spans use data-i18n, handled above)
   // Search
   $("search").placeholder = L.search_ph;
   $("artist-search").placeholder = L.artist_search_ph;
@@ -2233,6 +2266,14 @@ function renderLfmStatus() {
     state.filters.loved = false;
     updateLovedFilterButton();
   }
+}
+
+function toggleWartung() {
+  const panel = $("wartung-panel");
+  const chevron = $("wartung-chevron");
+  const open = panel.style.display === "block";
+  panel.style.display = open ? "none" : "block";
+  chevron.className = open ? "ti ti-chevron-down" : "ti ti-chevron-up";
 }
 
 async function lfmDisconnect() {
