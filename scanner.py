@@ -144,6 +144,20 @@ def _scan_file(path: str) -> dict | None:
         except Exception:
             pass
 
+        # Read loved status from tag (TXXX:LOVE RATING for MP3, LOVE RATING vorbis comment for others)
+        loved = False
+        try:
+            txxx = tags.get("TXXX:LOVE RATING")              # MP3
+            if txxx is not None:
+                loved = str(txxx).strip().upper() == "L"
+            else:
+                raw = (tags.get("LOVE RATING")               # FLAC/OGG
+                       or tags.get("----:com.apple.iTunes:LOVE RATING"))  # M4A
+                if raw:
+                    loved = str(raw[0]).strip().upper() == "L"
+        except Exception:
+            pass
+
         return {
             "path": path,
             "title": pick("title", "TIT2"),
@@ -159,6 +173,7 @@ def _scan_file(path: str) -> dict | None:
             "bpm": bpm,
             "mtime": stat.st_mtime,
             "play_count": play_count,
+            "loved": loved,
         }
     except Exception as e:
         log.warning("Failed to scan %s: %s", path, e)
@@ -224,6 +239,77 @@ def _write_bpm_tag(path: str, bpm: float):
         from mutagen.mp4 import MP4
         audio = MP4(path)
         audio["tmpo"] = [int(round(bpm))]
+        audio.save()
+
+
+def read_love_tag(path: str) -> bool | None:
+    """Return True/False if LOVE RATING tag exists, None if absent."""
+    try:
+        ext = os.path.splitext(path)[1].lower()
+        audio = MutagenFile(path, easy=False)
+        if audio is None:
+            return None
+        tags = audio.tags or {}
+        if ext == ".mp3":
+            txxx = tags.get("TXXX:LOVE RATING")
+            if txxx is None:
+                return None
+            return str(txxx).strip().upper() == "L"
+        else:
+            raw = tags.get("LOVE RATING") or tags.get("----:com.apple.iTunes:LOVE RATING")
+            if not raw:
+                return None
+            return str(raw[0]).strip().upper() == "L"
+    except Exception:
+        return None
+
+
+def write_love_tag(path: str, loved: bool):
+    """Write LOVE RATING tag into the file (skips if already matches)."""
+    current = read_love_tag(path)
+    if current == loved:
+        return  # already correct, skip
+    ext = os.path.splitext(path)[1].lower()
+    value = "L" if loved else ""
+
+    if ext == ".mp3":
+        from mutagen.id3 import ID3, TXXX
+        try:
+            tags = ID3(path)
+        except Exception:
+            tags = ID3()
+        if loved:
+            tags["TXXX:LOVE RATING"] = TXXX(encoding=3, desc="LOVE RATING", text=value)
+        else:
+            tags.delall("TXXX:LOVE RATING")
+        tags.save(path)
+
+    elif ext == ".flac":
+        from mutagen.flac import FLAC
+        audio = FLAC(path)
+        if loved:
+            audio["LOVE RATING"] = [value]
+        else:
+            audio.pop("LOVE RATING", None)
+        audio.save()
+
+    elif ext in (".ogg", ".opus"):
+        from mutagen.oggvorbis import OggVorbis
+        audio = OggVorbis(path)
+        if loved:
+            audio["LOVE RATING"] = [value]
+        else:
+            audio.pop("LOVE RATING", None)
+        audio.save()
+
+    elif ext in (".m4a", ".mp4", ".aac"):
+        from mutagen.mp4 import MP4
+        audio = MP4(path)
+        key = "----:com.apple.iTunes:LOVE RATING"
+        if loved:
+            audio[key] = [value.encode()]
+        else:
+            audio.pop(key, None)
         audio.save()
 
 

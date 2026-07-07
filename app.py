@@ -810,7 +810,18 @@ def _sync_lastfm_loved_tracks():
     try:
         items = lastfm.get_loved_tracks(username)
         count = db.replace_lastfm_loved_tracks(items)
-        _lastfm_loved_sync.update(running=False, error=None, count=count, finished_at=_time.time())
+
+        # Write LOVE RATING tag to files that don't have it yet
+        tagged = 0
+        for track in db.get_loved_tracks_for_tag_write():
+            try:
+                scanner.write_love_tag(track["path"], True)
+                tagged += 1
+            except Exception:
+                logging.getLogger(__name__).warning("Could not write love tag to %s", track["path"])
+
+        _lastfm_loved_sync.update(running=False, error=None, count=count,
+                                  tagged=tagged, finished_at=_time.time())
     except Exception as e:
         logging.getLogger(__name__).exception("Last.fm loved sync failed")
         _lastfm_loved_sync.update(running=False, error=str(e), finished_at=_time.time())

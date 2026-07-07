@@ -373,6 +373,19 @@ def replace_lastfm_loved_tracks(items: list[dict]):
     return len(rows)
 
 
+def get_loved_tracks_for_tag_write() -> list[dict]:
+    """Return tracks that Last.fm says are loved, for writing the tag to disk."""
+    with db() as conn:
+        rows = conn.execute("""
+            SELECT t.id, t.path, t.artist, t.title
+            FROM tracks t
+            JOIN lastfm_loved_tracks l
+              ON LOWER(TRIM(COALESCE(t.artist,''))) = l.artist_norm
+             AND LOWER(TRIM(COALESCE(t.title,'')))  = l.title_norm
+        """).fetchall()
+    return [dict(r) for r in rows]
+
+
 def set_lastfm_loved(artist: str, title: str, loved: bool):
     artist_norm = _norm_text(artist)
     title_norm = _norm_text(title)
@@ -467,12 +480,13 @@ def get_scanner_status():
 def upsert_track(data: dict):
     data.setdefault("play_count", 0)
     data.setdefault("bpm", None)
+    data.setdefault("loved", False)
     with db() as conn:
         conn.execute("""
             INSERT INTO tracks (path, title, artist, album, genre, year, track_no,
-                                duration, bitrate, size, cover_hash, bpm, mtime, play_count)
+                                duration, bitrate, size, cover_hash, bpm, mtime, play_count, loved)
             VALUES (:path, :title, :artist, :album, :genre, :year, :track_no,
-                    :duration, :bitrate, :size, :cover_hash, :bpm, :mtime, :play_count)
+                    :duration, :bitrate, :size, :cover_hash, :bpm, :mtime, :play_count, :loved)
             ON CONFLICT(path) DO UPDATE SET
                 title=excluded.title, artist=excluded.artist, album=excluded.album,
                 genre=excluded.genre, year=excluded.year, track_no=excluded.track_no,
@@ -480,7 +494,8 @@ def upsert_track(data: dict):
                 cover_hash=excluded.cover_hash, mtime=excluded.mtime,
                 indexed_at=unixepoch(),
                 play_count=MAX(play_count, excluded.play_count),
-                bpm=CASE WHEN excluded.bpm IS NOT NULL THEN excluded.bpm ELSE bpm END
+                bpm=CASE WHEN excluded.bpm IS NOT NULL THEN excluded.bpm ELSE bpm END,
+                loved=CASE WHEN excluded.loved=1 THEN 1 ELSE loved END
         """, data)
 
 
