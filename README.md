@@ -1,5 +1,7 @@
 # Adolar
 
+Current version: **1.1.0**
+
 A self-hosted music archive web app for Synology NAS (or any Docker host). Browse, search, and stream your local MP3/FLAC/M4A collection from any browser — no cloud required.
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
@@ -25,7 +27,8 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Adolar Disco badge** — shows 🪩 Disco in topbar when Adolar Disco is connected
 - **User authentication** — first-run setup, login with remember-me, brute-force protection (IP ban after 10 failed attempts), admin-managed user accounts
 - **Per-user permissions** — admin controls download access per user; Last.fm and scan functions are admin-only
-- **Per-user play counts** — each user tracks their own play history; Adolar Disco plays stored separately (never written to file tags)
+- **Per-user play counts** — each user tracks their own play history; optionally authorized users contribute plays to a durable archive count
+- **Durable archive counts** — the highest value from database, Last.fm, or file tag wins; changed tags are written nightly or manually
 - **Playlists** — smart playlists (saved filter/sort state) and static playlists; 4 system playlists for all users (Recently played, Most played, Newest 100, Disco Hits)
 - **Bookmark button** — add any track to a personal playlist directly from the track list; create new playlists on the fly
 - **Radio bookmarks** — log in via Adolar Radio companion to bookmark tracks into a personal "Radio Favourites" playlist

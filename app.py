@@ -13,6 +13,7 @@ logging.basicConfig(level=logging.INFO,
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", os.urandom(32))
+APP_VERSION = "1.1.0"
 
 # Restrict CORS to origins defined via env var (space-separated).
 # Default: deny all cross-origin requests (safe for local NAS use).
@@ -192,6 +193,7 @@ def api_me():
         "username":       g.user["username"],
         "role":           g.user["role"],
         "allow_download": is_admin or bool(g.user["allow_download"]),
+        "contributes_playcount": bool(g.user["contributes_playcount"]),
     })
 
 
@@ -243,6 +245,15 @@ def api_users_set_download(user_id):
     _auth.set_allow_download(user_id, allow)
     return jsonify({"ok": True, "allow_download": allow})
 
+
+@app.post("/api/users/<int:user_id>/playcount")
+@_auth.admin_required
+def api_users_set_playcount(user_id):
+    data = request.get_json(silent=True) or {}
+    allow = bool(data.get("allow", False))
+    _auth.set_contributes_playcount(user_id, allow)
+    return jsonify({"ok": True, "contributes_playcount": allow})
+
 @app.get("/api/me-optional")
 def api_me_optional():
     """Like /api/me but returns null instead of 401 — used by Radio Companion."""
@@ -256,6 +267,7 @@ def api_me_optional():
                 "username":       user["username"],
                 "role":           user["role"],
                 "allow_download": is_admin or bool(user["allow_download"]),
+                "contributes_playcount": bool(user["contributes_playcount"]),
             })
     return jsonify(None)
 
@@ -446,6 +458,7 @@ def api_genres():
 def api_stats():
     stats = db.get_stats()
     sc = scanner.status()
+    stats["version"] = APP_VERSION
     stats["last_scan"] = sc.get("finished_at")
     stats["disco_active"] = _disco_active()
     return jsonify(stats)
@@ -654,28 +667,16 @@ def api_track_played(track_id):
     if not user:
         abort(401)
 
-    # Always record per-user play count
-    db.increment_user_play_count(user["id"], track_id)
+    contributes = bool(user.get("contributes_playcount"))
+    new_count, _ = db.record_user_play(user["id"], track_id, contributes)
+    if new_count is None:
+        abort(404)
 
-    # Only admin writes to the global counter and file tag
-    if user["role"] == "admin":
-        new_count, raw_path = db.increment_play_count(track_id)
-        if raw_path is None:
-            abort(404)
-        path = _safe_path(raw_path)
-        if path and os.path.isfile(path):
-            tag_count = _read_play_count_tag(path)
-            new_count = max(tag_count, new_count - 1) + 1
-            db.set_play_count(track_id, new_count)
-            _write_play_count_tag(path, new_count)
-    else:
-        # Verify track exists
-        with db.db() as conn:
-            if not conn.execute("SELECT 1 FROM tracks WHERE id=?", (track_id,)).fetchone():
-                abort(404)
-        new_count = None
-
-    return jsonify({"ok": True, "play_count": new_count})
+    return jsonify({
+        "ok": True,
+        "play_count": new_count if contributes else None,
+        "contributed": contributes,
+    })
 
 
 @app.post("/api/track/<int:track_id>/disco-played")
@@ -730,8 +731,65 @@ def _write_play_count_tag(path: str, count: int):
             tags["----:com.apple.iTunes:play_count"] = [str(count).encode()]
             tags.save()
         # ogg/opus/wav: skip — no standard play count field
+        else:
+            return False
+        return True
     except Exception as e:
         logging.getLogger(__name__).warning("Could not write play count tag to %s: %s", path, e)
+        return False
+
+
+_play_count_tag_sync = {
+    "running": False, "written": 0, "failed": 0, "error": None, "finished_at": None
+}
+
+
+def _flush_play_count_tags():
+    if _play_count_tag_sync["running"]:
+        return
+    _play_count_tag_sync.update(running=True, written=0, failed=0, error=None)
+    try:
+        while True:
+            rows = db.get_dirty_play_count_tags(limit=500)
+            if not rows:
+                break
+            progressed = False
+            for row in rows:
+                path = _safe_path(row["path"])
+                if not path or not os.path.isfile(path):
+                    _play_count_tag_sync["failed"] += 1
+                    continue
+                count = max(int(row["play_count"]), _read_play_count_tag(path))
+                if _write_play_count_tag(path, count):
+                    db.merge_archive_play_count(row["id"], count)
+                    db.mark_play_count_tag_written(row["id"], count)
+                    _play_count_tag_sync["written"] += 1
+                    progressed = True
+                else:
+                    _play_count_tag_sync["failed"] += 1
+            if len(rows) < 500 or not progressed:
+                break
+    except Exception as exc:
+        logging.getLogger(__name__).exception("Play count tag sync failed")
+        _play_count_tag_sync["error"] = str(exc)
+    finally:
+        _play_count_tag_sync.update(running=False, finished_at=_time.time())
+
+
+@app.get("/api/playcount-tags/status")
+@_auth.admin_required
+def api_play_count_tags_status():
+    return jsonify({**db.get_play_count_tag_status(), **_play_count_tag_sync})
+
+
+@app.post("/api/playcount-tags/sync")
+@_auth.admin_required
+def api_play_count_tags_sync():
+    if _play_count_tag_sync["running"]:
+        return jsonify({"error": "already running"}), 409
+    import threading
+    threading.Thread(target=_flush_play_count_tags, daemon=True).start()
+    return jsonify({"ok": True})
 
 
 # ── Radio / Random ────────────────────────────────────────────────────────────
@@ -849,7 +907,7 @@ def api_lastfm_loved_sync():
     return jsonify(status)
 
 
-def _sync_lastfm_playcounts():
+def _sync_lastfm_playcounts(user_id: int):
     global _lastfm_pc_sync
     username = db.get_setting("lastfm_username")
     sk       = db.get_setting("lastfm_session_key")
@@ -870,22 +928,16 @@ def _sync_lastfm_playcounts():
             try:
                 pc = lastfm.get_user_track_playcount(username, row["artist"], row["title"])
                 if pc and pc > 0:
-                    # Update user_play_counts for admin (user_id=1), only if Last.fm count is higher
+                    # Last.fm may raise personal and archive counts, never lower either.
                     with db.db() as conn:
                         conn.execute("""
                             INSERT INTO user_play_counts (user_id, track_id, count, last_played_at)
-                            VALUES (1, ?, ?, NULL)
+                            VALUES (?, ?, ?, NULL)
                             ON CONFLICT(user_id, track_id) DO UPDATE SET
                                 count = MAX(count, excluded.count)
-                        """, (row["id"], pc))
-                    # Write PCNT tag to file
-                    path = _safe_path(row["path"])
-                    if path and os.path.isfile(path):
-                        try:
-                            _write_play_count_tag(path, pc)
-                        except Exception:
-                            log.debug("Could not write play count tag to %s", path)
-                    updated += 1
+                        """, (user_id, row["id"], pc))
+                    if db.merge_archive_play_count(row["id"], pc):
+                        updated += 1
             except Exception:
                 log.debug("Playcount sync failed for %s - %s", row["artist"], row["title"])
         _lastfm_pc_sync.update(running=False, error=None, done=total,
@@ -912,7 +964,9 @@ def api_lastfm_pc_sync():
         return jsonify({"error": "already running"}), 409
     _lastfm_pc_sync.update(running=True, error=None, done=0, total=0)
     import threading
-    threading.Thread(target=_sync_lastfm_playcounts, daemon=True).start()
+    threading.Thread(
+        target=_sync_lastfm_playcounts, args=(g.user["id"],), daemon=True
+    ).start()
     return jsonify({"ok": True, "message": "sync started"})
 
 
@@ -1053,6 +1107,22 @@ def api_scan_status():
 
 db.init_db()
 _auth.load_persisted_blocks()
+
+
+def _play_count_tag_scheduler():
+    """Flush pending archive counts once per local calendar day after 03:00."""
+    import datetime
+    while True:
+        now = datetime.datetime.now()
+        if now.hour >= 3:
+            job_key = f"play_count_tag_job:{now.date().isoformat()}"
+            if db.claim_once(job_key):
+                _flush_play_count_tags()
+        _time.sleep(300)
+
+
+import threading as _threading
+_threading.Thread(target=_play_count_tag_scheduler, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)

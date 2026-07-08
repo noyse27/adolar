@@ -103,7 +103,8 @@ def get_user_by_token(token: str) -> dict | None:
     now = time.time()
     with db.db() as conn:
         row = conn.execute(
-            """SELECT u.id, u.username, u.role, u.allow_download, u.must_change_password
+            """SELECT u.id, u.username, u.role, u.allow_download, u.contributes_playcount,
+                      u.must_change_password
                FROM sessions s JOIN users u ON u.id = s.user_id
                WHERE s.token=? AND s.expires_at > ?""",
             (token, now)
@@ -131,14 +132,16 @@ def purge_expired_sessions():
 def get_all_users() -> list[dict]:
     with db.db() as conn:
         rows = conn.execute(
-            "SELECT id, username, role, allow_download, must_change_password, created_at FROM users ORDER BY id"
+            """SELECT id, username, role, allow_download, contributes_playcount,
+                      must_change_password, created_at FROM users ORDER BY id"""
         ).fetchall()
     return [dict(r) for r in rows]
 
 def get_user_by_id(user_id: int) -> dict | None:
     with db.db() as conn:
         row = conn.execute(
-            "SELECT id, username, role, allow_download, must_change_password FROM users WHERE id=?",
+            """SELECT id, username, role, allow_download, contributes_playcount,
+                      must_change_password FROM users WHERE id=?""",
             (user_id,)
         ).fetchone()
     return dict(row) if row else None
@@ -146,7 +149,9 @@ def get_user_by_id(user_id: int) -> dict | None:
 def get_user_by_name(username: str) -> dict | None:
     with db.db() as conn:
         row = conn.execute(
-            "SELECT id, username, password_hash, role, allow_download, must_change_password FROM users WHERE LOWER(username)=LOWER(?)",
+            """SELECT id, username, password_hash, role, allow_download,
+                      contributes_playcount, must_change_password
+               FROM users WHERE LOWER(username)=LOWER(?)""",
             (username,)
         ).fetchone()
     return dict(row) if row else None
@@ -175,6 +180,14 @@ def set_password(user_id: int, password: str, must_change: bool = False):
 def set_allow_download(user_id: int, allow: bool):
     with db.db() as conn:
         conn.execute("UPDATE users SET allow_download=? WHERE id=?", (1 if allow else 0, user_id))
+
+
+def set_contributes_playcount(user_id: int, allow: bool):
+    with db.db() as conn:
+        conn.execute(
+            "UPDATE users SET contributes_playcount=? WHERE id=?",
+            (1 if allow else 0, user_id),
+        )
 
 def delete_user(user_id: int):
     with db.db() as conn:
@@ -212,9 +225,6 @@ def before_request():
     g.user = None
     if request.method == "HEAD":
         return
-    if _is_public(request.path):
-        return
-
     token = request.cookies.get(SESSION_COOKIE)
     if token:
         user = get_user_by_token(token)
@@ -226,6 +236,9 @@ def before_request():
                     return jsonify({"error": "must_change_password"}), 403
                 return redirect("/change-password")
             return
+
+    if _is_public(request.path):
+        return
 
     if request.path.startswith("/api/"):
         return jsonify({"error": "unauthorized"}), 401

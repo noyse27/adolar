@@ -45,6 +45,8 @@ def init_db():
                 bpm         REAL,
                 mtime       REAL,
                 play_count  INTEGER NOT NULL DEFAULT 0,
+                play_count_tag_dirty INTEGER NOT NULL DEFAULT 0,
+                loved       INTEGER NOT NULL DEFAULT 0,
                 indexed_at  REAL DEFAULT (unixepoch())
             );
 
@@ -107,6 +109,7 @@ def init_db():
                 password_hash        TEXT    NOT NULL,
                 role                 TEXT    NOT NULL DEFAULT 'user',
                 allow_download       INTEGER NOT NULL DEFAULT 0,
+                contributes_playcount INTEGER NOT NULL DEFAULT 0,
                 must_change_password INTEGER NOT NULL DEFAULT 1,
                 created_at           TEXT    DEFAULT (datetime('now'))
             );
@@ -157,11 +160,34 @@ def init_db():
         for migration in [
             "ALTER TABLE tracks ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tracks ADD COLUMN bpm REAL",
+            "ALTER TABLE tracks ADD COLUMN play_count_tag_dirty INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE tracks ADD COLUMN loved INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN contributes_playcount INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(migration)
             except Exception:
                 pass
+        # Play-count/BPM updates must not churn the full-text index.
+        conn.executescript("""
+            DROP TRIGGER IF EXISTS tracks_au;
+            CREATE TRIGGER tracks_au
+            AFTER UPDATE OF title, artist, album, genre ON tracks BEGIN
+                INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album, genre)
+                VALUES ('delete', old.id, old.title, old.artist, old.album, old.genre);
+                INSERT INTO tracks_fts(rowid, title, artist, album, genre)
+                VALUES (new.id, new.title, new.artist, new.album, new.genre);
+            END;
+        """)
+        queued = conn.execute("""
+            INSERT OR IGNORE INTO settings (key, value)
+            VALUES ('migration:queue_existing_play_counts', datetime('now'))
+        """)
+        if queued.rowcount:
+            conn.execute("""
+                UPDATE tracks SET play_count_tag_dirty=1
+                WHERE play_count > 0
+            """)
 
 
 _SYSTEM_PLAYLISTS = [
@@ -530,15 +556,6 @@ def upsert_track(data: dict):
                 bpm=CASE WHEN excluded.bpm IS NOT NULL THEN excluded.bpm ELSE bpm END,
                 loved=CASE WHEN excluded.loved=1 THEN 1 ELSE loved END
         """, data)
-        # Seed user_play_counts for admin (user_id=1) from file tag if not yet recorded
-        if data.get("play_count", 0) > 0:
-            conn.execute("""
-                INSERT INTO user_play_counts (user_id, track_id, count, last_played_at)
-                SELECT 1, id, ?, NULL FROM tracks WHERE path=?
-                ON CONFLICT(user_id, track_id) DO NOTHING
-            """, (data["play_count"], data["path"]))
-
-
 def save_cover(hash_: str, data: bytes, mime: str = "image/jpeg"):
     with db() as conn:
         conn.execute(
@@ -559,11 +576,75 @@ def increment_play_count(track_id: int):
     return (row["play_count"], row["path"]) if row else (0, None)
 
 
+def record_user_play(user_id: int, track_id: int, contributes: bool) -> tuple[int | None, str | None]:
+    """Record a personal play and optionally increment the durable archive count."""
+    now = __import__("time").time()
+    increment = 1 if contributes else 0
+    with db() as conn:
+        track = conn.execute("""
+            UPDATE tracks
+            SET play_count = play_count + ?,
+                play_count_tag_dirty =
+                    CASE WHEN ?=1 THEN 1 ELSE play_count_tag_dirty END
+            WHERE id=?
+            RETURNING play_count, path
+        """, (increment, increment, track_id)).fetchone()
+        if not track:
+            return None, None
+        conn.execute("""
+            INSERT INTO user_play_counts (user_id, track_id, count, last_played_at)
+            VALUES (?, ?, 1, ?)
+            ON CONFLICT(user_id, track_id) DO UPDATE SET
+                count = count + 1,
+                last_played_at = excluded.last_played_at
+        """, (user_id, track_id, now))
+    return track["play_count"], track["path"]
+
+
 def set_play_count(track_id: int, count: int):
     with db() as conn:
         conn.execute(
             "UPDATE tracks SET play_count = ? WHERE id = ?", (count, track_id)
         )
+
+
+def merge_archive_play_count(track_id: int, count: int) -> bool:
+    """Raise archive count to count, never lower it."""
+    with db() as conn:
+        cur = conn.execute("""
+            UPDATE tracks
+            SET play_count=?, play_count_tag_dirty=1
+            WHERE id=? AND play_count < ?
+        """, (count, track_id, count))
+        return cur.rowcount > 0
+
+
+def get_dirty_play_count_tags(limit: int = 500) -> list[dict]:
+    with db() as conn:
+        rows = conn.execute("""
+            SELECT id, path, play_count
+            FROM tracks
+            WHERE play_count_tag_dirty=1
+            ORDER BY id
+            LIMIT ?
+        """, (limit,)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_play_count_tag_written(track_id: int, written_count: int):
+    with db() as conn:
+        conn.execute("""
+            UPDATE tracks SET play_count_tag_dirty=0
+            WHERE id=? AND play_count <= ?
+        """, (track_id, written_count))
+
+
+def get_play_count_tag_status() -> dict:
+    with db() as conn:
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM tracks WHERE play_count_tag_dirty=1"
+        ).fetchone()[0]
+    return {"pending": pending}
 
 
 def get_setting(key: str, default=None):
@@ -580,6 +661,16 @@ def set_setting(key: str, value: str):
 def del_setting(key: str):
     with db() as conn:
         conn.execute("DELETE FROM settings WHERE key=?", (key,))
+
+
+def claim_once(key: str) -> bool:
+    """Atomically claim a one-off job key across multiple server workers."""
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?,?)",
+            (key, str(__import__("time").time())),
+        )
+        return cur.rowcount > 0
 
 
 def get_cover(hash_: str):

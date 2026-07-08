@@ -140,7 +140,10 @@ def _scan_file(path: str) -> dict | None:
                 raw = (tags.get("play_count")                # FLAC Vorbis
                        or tags.get("----:com.apple.iTunes:play_count"))  # M4A
                 if raw:
-                    play_count = int(str(raw[0]).strip())
+                    value = raw[0]
+                    if isinstance(value, bytes):
+                        value = value.decode("utf-8", errors="ignore")
+                    play_count = int(str(value).strip())
         except Exception:
             pass
 

@@ -1175,6 +1175,10 @@
           <i class="ti ti-chart-bar"></i>
           <span data-i18n="lfm_pc_sync">Plays laden</span>
         </button>
+        <button id="btn-pc-tags" title="Offene Archiv-Playcounts in Datei-Tags schreiben">
+          <i class="ti ti-device-floppy"></i>
+          <span>Playcount-Tags schreiben</span>
+        </button>
       </div>
     </div>
 
@@ -1647,6 +1651,8 @@ function makeCover(track, size = 42) {
 }
 
 // ── Fetch ─────────────────────────────────────────────────
+let _loadTracksRequest = 0;
+
 function _setSearching(on) {
   const wrap = document.querySelector('.search-input-wrap');
   const icon = wrap?.querySelector('i');
@@ -1662,6 +1668,7 @@ function _setSearching(on) {
 
 async function loadTracks(page = 1, forceCount = false) {
   if (radio.active) return;
+  const requestId = ++_loadTracksRequest;
   updateSavePlaylistBtn();
   _setSearching(true);
   // Skip COUNT if we already have the total and are just paging
@@ -1692,6 +1699,7 @@ async function loadTracks(page = 1, forceCount = false) {
   } catch {
     data = { results: DEMO_TRACKS, total: DEMO_TRACKS.length, pages: 1 };
   }
+  if (requestId !== _loadTracksRequest) return;
   if (!data.results?.length && page === 1 && !state.query && !Object.values(state.filters).some(Boolean)) {
     data = { results: DEMO_TRACKS, total: DEMO_TRACKS.length, pages: 1 };
   }
@@ -2056,6 +2064,7 @@ function startCrossfade() {
       radioNext().then(() => {
         if (!radio.queue.length) return;
         _scrobbled = false;
+        _playCounted = false;
         updatePlayerUI(radio.queue[0]);
         audio.src = nextSrc;
         audio.currentTime = nextTime;
@@ -2345,7 +2354,15 @@ async function startLovedSync() {
 
 $("btn-loved-filter").onclick = () => {
   if (!lfm.connected) return;
-  state.filters.loved = !state.filters.loved;
+  const activating = !state.filters.loved;
+  if (activating) {
+    clearPlaylist();
+    resetFilters();
+    resetFilterUI();
+    state.sort = "artist";
+    $("sort-select").value = "artist";
+  }
+  state.filters.loved = activating;
   updateLovedFilterButton();
   loadTracks(1, true);
 };
@@ -2389,6 +2406,26 @@ $("btn-pc-sync").onclick = async () => {
     updatePcSyncButton(true, 0, 0);
     _pcPollTimer = setTimeout(pollPcSync, 1000);
   } catch {}
+};
+
+$("btn-pc-tags").onclick = async () => {
+  const btn = $("btn-pc-tags");
+  btn.disabled = true;
+  btn.innerHTML = `<i class="ti ti-loader"></i><span>Tags werden geschrieben…</span>`;
+  try {
+    await fetch(`${API}/api/playcount-tags/sync`, { method: "POST" });
+    let status;
+    do {
+      await new Promise(resolve => setTimeout(resolve, 750));
+      const r = await fetch(`${API}/api/playcount-tags/status`);
+      status = await r.json();
+    } while (status.running);
+    btn.innerHTML = `<i class="ti ti-device-floppy"></i><span>${status.written} geschrieben, ${status.pending} offen</span>`;
+  } catch {
+    btn.innerHTML = `<i class="ti ti-alert-triangle"></i><span>Tag-Abgleich fehlgeschlagen</span>`;
+  } finally {
+    btn.disabled = false;
+  }
 };
 
 function applyLovedState(btn, loved) {
@@ -2837,6 +2874,7 @@ async function applyPlaylist(pl) {
     try {
       const r = await fetch(`/api/playlists/${pl.id}/tracks`);
       const tracks = await r.json();
+      if (_activePl !== pl.id) return;
       state.total = tracks.length;
       state.pages = 1;
       state.page  = 1;
@@ -2883,6 +2921,30 @@ function resetFilters() {
     artist_query: "", title_query: "", album_query: "",
     loved: false,
   };
+}
+
+function resetFilterUI() {
+  document.querySelectorAll(".chip-group").forEach(group => {
+    group.querySelectorAll(".chip").forEach(chip => {
+      chip.classList.toggle("active", chip.dataset.val === "");
+    });
+  });
+  for (const prefix of ["artist", "title", "album"]) {
+    $(`${prefix}-search`).value = "";
+    $(`${prefix}-search-panel`).style.display = "none";
+    $(`chip-${prefix}-alle`).classList.add("active");
+  }
+  const values = {
+    "sl-min-dur": 0, "sl-max-dur": 3600, "sl-bitrate": 0,
+    "sl-year-min": YEAR_MIN, "sl-year-max": YEAR_MAX,
+    "sl-bpm-min": 0, "sl-bpm-max": 0,
+  };
+  Object.entries(values).forEach(([id, value]) => { $(id).value = value; });
+  $("sl-min-dur-val").textContent = "0:00";
+  for (const id of ["sl-max-dur-val", "sl-bitrate-val", "sl-year-min-val",
+                    "sl-year-max-val", "sl-bpm-min-val", "sl-bpm-max-val"]) {
+    $(id).textContent = "–";
+  }
 }
 
 function _restoreFilterUI(filters) {
@@ -2988,6 +3050,10 @@ async function refreshUserList() {
         <input type="checkbox" data-uid="${u.id}" class="dl-toggle" ${u.allow_download?'checked':''}>
         <i class="ti ti-download" style="font-size:12px"></i>
       </label>
+      <label title="Plays dieses Nutzers erhöhen den Archiv-Playcount" style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-tertiary);cursor:pointer">
+        <input type="checkbox" data-uid="${u.id}" class="pc-toggle" ${u.contributes_playcount?'checked':''}>
+        <i class="ti ti-chart-bar" style="font-size:12px"></i>
+      </label>
       <button data-uid="${u.id}" class="pw-reset-btn" title="Passwort zurücksetzen"
               style="background:none;border:0.5px solid var(--border-subtle);border-radius:6px;color:var(--text-tertiary);cursor:pointer;padding:3px 7px;font-size:11px" ${isMe?'style="display:none"':''}>
         <i class="ti ti-lock-open"></i>
@@ -3008,6 +3074,17 @@ async function refreshUserList() {
         body: JSON.stringify({allow: cb.checked})
       });
       if (_me && cb.dataset.uid == _me.id) _me.allow_download = cb.checked;
+    };
+  });
+
+  list.querySelectorAll(".pc-toggle").forEach(cb => {
+    cb.onchange = async () => {
+      const r = await fetch(`/api/users/${cb.dataset.uid}/playcount`, {
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({allow: cb.checked})
+      });
+      if (!r.ok) cb.checked = !cb.checked;
+      if (_me && cb.dataset.uid == _me.id) _me.contributes_playcount = cb.checked;
     };
   });
 
