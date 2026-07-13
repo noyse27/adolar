@@ -433,6 +433,29 @@
       border-color: var(--accent);
       color: var(--accent);
     }
+    #btn-mobile-filter {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      border: 0.5px solid var(--border-subtle);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 18px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    #btn-mobile-filter.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, var(--bg-primary));
+    }
+    #mobile-filter-backdrop,
+    #mobile-filter-head {
+      display: none;
+    }
     /* Last.fm heart */
     .btn-love {
       background: none;
@@ -933,6 +956,321 @@
       font-size: var(--text-base);
     }
     .empty-state i { font-size: 40px; }
+
+    @media (max-width: 720px) {
+      :root {
+        --topbar-h: 48px;
+        --player-h: 88px;
+      }
+
+      body {
+        width: 100%;
+        align-items: stretch;
+      }
+
+      #topbar, #scan-banner, #body-row, #player-bar {
+        max-width: none;
+      }
+
+      #topbar {
+        padding: 0 10px;
+        gap: 8px;
+        justify-content: flex-start;
+      }
+      #topbar-logo {
+        gap: 8px;
+        min-width: 0;
+        flex: 1;
+      }
+      #topbar-logo img {
+        width: 24px;
+        height: 24px;
+      }
+      #topbar-logo span {
+        font-size: 15px;
+      }
+      #btn-about,
+      #topbar-meta,
+      #lastfm-status,
+      #lang-switch,
+      #btn-miniplayer,
+      #basket-label {
+        display: none !important;
+      }
+      #btn-basket {
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        justify-content: center;
+      }
+      #basket-panel {
+        position: fixed;
+        top: 54px;
+        left: 10px;
+        right: 10px;
+        width: auto;
+      }
+      #user-menu-name,
+      #btn-user-menu .ti-chevron-down {
+        display: none;
+      }
+      #btn-user-menu {
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        justify-content: center;
+      }
+      #user-dropdown {
+        right: 0;
+      }
+
+      #body-row {
+        position: relative;
+        min-height: 0;
+      }
+      #content {
+        width: 100%;
+        min-width: 0;
+      }
+      #search-bar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        padding: 8px 10px;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .search-input-wrap {
+        order: 1;
+        flex: 1 1 calc(100% - 46px);
+        min-width: 0;
+        height: 38px;
+        padding: 6px 10px;
+      }
+      #search {
+        font-size: 16px;
+      }
+      #btn-mobile-filter {
+        display: flex;
+        order: 2;
+      }
+      #sort-select {
+        order: 3;
+        flex: 1 1 calc(50% - 4px);
+        min-width: 0;
+        height: 36px;
+      }
+      #btn-radio {
+        order: 4;
+        flex: 1 1 calc(50% - 4px);
+        height: 36px;
+        justify-content: center;
+      }
+      #results-header {
+        padding: 8px 10px;
+      }
+      #result-count {
+        font-size: var(--text-sm);
+      }
+      #view-toggle {
+        display: none;
+      }
+
+      #mobile-filter-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 80;
+        background: rgba(0,0,0,.5);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .18s ease;
+      }
+      body.mobile-filter-open #mobile-filter-backdrop {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      #sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 90;
+        width: min(86vw, 360px);
+        flex: none;
+        transform: translateX(-102%);
+        transition: transform .22s ease;
+        border-right: 0.5px solid var(--border-medium);
+        box-shadow: 14px 0 34px rgba(0,0,0,.35);
+        padding: 0 14px 20px;
+        gap: 18px;
+      }
+      body.mobile-filter-open #sidebar {
+        transform: translateX(0);
+      }
+      #mobile-filter-head {
+        display: flex;
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 0 -14px 2px;
+        padding: 14px;
+        background: var(--bg-primary);
+        border-bottom: 0.5px solid var(--border-subtle);
+      }
+      #mobile-filter-head strong {
+        font-size: var(--text-lg);
+        font-weight: 600;
+      }
+      #btn-mobile-filter-close {
+        width: 34px;
+        height: 34px;
+        border: 0.5px solid var(--border-subtle);
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 18px;
+        cursor: pointer;
+      }
+
+      #track-list {
+        padding: 8px 10px 16px;
+        gap: 8px;
+      }
+      .track-row {
+        display: grid;
+        grid-template-columns: 58px minmax(0, 1fr) auto;
+        grid-template-rows: auto auto;
+        align-items: center;
+        min-height: 84px;
+        padding: 10px;
+        gap: 4px 10px;
+        border-radius: 8px;
+      }
+      .track-cover,
+      .track-cover-placeholder {
+        grid-row: 1 / 3;
+        width: 56px !important;
+        height: 56px !important;
+      }
+      .track-info {
+        grid-column: 2;
+        grid-row: 1;
+        min-width: 0;
+      }
+      .track-title {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .track-sub {
+        font-size: 12px;
+        margin-top: 4px;
+      }
+      .track-meta {
+        grid-column: 2;
+        grid-row: 2;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        color: var(--text-tertiary);
+      }
+      .format-badge {
+        display: none;
+      }
+      .track-bpm,
+      .track-playcount,
+      .track-dur {
+        font-size: 12px;
+        line-height: 1.2;
+      }
+      .track-play-btn {
+        grid-column: 3;
+        grid-row: 1 / 3;
+        width: 46px;
+        height: 46px;
+        font-size: 19px;
+      }
+      .track-row > .track-play-btn:not(:first-of-type),
+      .btn-love,
+      .btn-bookmark {
+        display: none !important;
+      }
+
+      #pagination {
+        padding: 5px 10px 7px;
+        gap: 6px;
+      }
+      #pagination:empty {
+        display: none;
+      }
+      .pg-btn {
+        flex: 1;
+        min-height: 32px;
+        padding: 6px 8px;
+        font-size: 12px;
+      }
+      #pg-info {
+        min-width: 84px;
+        text-align: center;
+        font-size: 12px;
+      }
+
+      #player-bar {
+        display: grid;
+        grid-template-columns: 50px 1fr auto;
+        grid-template-rows: auto auto;
+        gap: 5px 10px;
+        padding: 10px 10px calc(28px + env(safe-area-inset-bottom));
+        height: auto;
+        min-height: calc(112px + env(safe-area-inset-bottom));
+      }
+      #player-cover-wrap {
+        grid-row: 1 / 3;
+        width: 50px;
+        height: 50px;
+      }
+      #player-info {
+        width: auto;
+        min-width: 0;
+        align-self: end;
+      }
+      #player-title {
+        font-size: var(--text-md);
+        min-height: 18px;
+      }
+      #player-artist {
+        min-height: 15px;
+      }
+      #player-controls {
+        align-self: center;
+        gap: 10px;
+      }
+      .ctrl-btn {
+        min-width: 34px;
+        min-height: 34px;
+        justify-content: center;
+      }
+      #play-btn {
+        border: 0.5px solid var(--border-medium);
+        border-radius: 50%;
+      }
+      #progress-wrap {
+        grid-column: 2 / 4;
+        align-self: start;
+        gap: 6px;
+      }
+      #progress {
+        min-width: 0;
+      }
+      #volume-wrap,
+      #player-love {
+        display: none !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -1007,8 +1345,16 @@
 <!-- ── Body ── -->
 <div id="body-row">
 
+  <div id="mobile-filter-backdrop" onclick="closeMobileFilters()"></div>
+
   <!-- Sidebar -->
   <aside id="sidebar">
+    <div id="mobile-filter-head">
+      <strong id="mobile-filter-title">Filter</strong>
+      <button id="btn-mobile-filter-close" title="Filter schließen" onclick="closeMobileFilters()">
+        <i class="ti ti-x"></i>
+      </button>
+    </div>
 
     <div class="filter-section">
       <span class="filter-label" data-i18n="artist">Interpret</span>
@@ -1192,6 +1538,9 @@
         <i class="ti ti-search"></i>
         <input id="search" type="search" placeholder="Titel, Interpret, Album durchsuchen…" autocomplete="off">
       </div>
+      <button id="btn-mobile-filter" title="Filter">
+        <i class="ti ti-adjustments-horizontal"></i>
+      </button>
       <select id="sort-select">
         <option value="artist">Interpret A–Z</option>
         <option value="title">Titel A–Z</option>
@@ -1295,6 +1644,8 @@ const LANG = {
     artist_search_ph: "Interpret suchen…",
     title_search_ph:  "Titel suchen…",
     album_search_ph:  "Album suchen…",
+    mobile_filters:   "Filter",
+    close_filters:    "Filter schließen",
     sort_artist:      "Interpret A–Z",
     sort_title:       "Titel A–Z",
     sort_album:       "Album A–Z",
@@ -1358,6 +1709,8 @@ const LANG = {
     artist_search_ph: "Search artist…",
     title_search_ph:  "Search title…",
     album_search_ph:  "Search album…",
+    mobile_filters:   "Filters",
+    close_filters:    "Close filters",
     sort_artist:      "Artist A–Z",
     sort_title:       "Title A–Z",
     sort_album:       "Album A–Z",
@@ -1436,6 +1789,12 @@ function applyLang() {
   $("artist-search").placeholder = L.artist_search_ph;
   $("title-search").placeholder = L.title_search_ph;
   $("album-search").placeholder = L.album_search_ph;
+  const mobileFilterBtn = $("btn-mobile-filter");
+  if (mobileFilterBtn) mobileFilterBtn.title = L.mobile_filters;
+  const mobileFilterTitle = $("mobile-filter-title");
+  if (mobileFilterTitle) mobileFilterTitle.textContent = L.mobile_filters;
+  const mobileFilterClose = $("btn-mobile-filter-close");
+  if (mobileFilterClose) mobileFilterClose.title = L.close_filters;
   updateLovedFilterButton(false);
   // Sort options
   const sortMap = { artist: "sort_artist", title: "sort_title", album: "sort_album", year: "sort_year", duration: "sort_duration", top_played: "sort_top_played", loved_at: "sort_loved_at" };
@@ -1595,6 +1954,32 @@ const state = {
   },
 };
 
+function hasActiveFilters() {
+  return Object.values(state.filters).some(v => Boolean(v));
+}
+
+function updateMobileFilterButton() {
+  const btn = $("btn-mobile-filter");
+  if (!btn) return;
+  btn.classList.toggle("active", hasActiveFilters());
+}
+
+function openMobileFilters() {
+  document.body.classList.add("mobile-filter-open");
+}
+
+function closeMobileFilters() {
+  document.body.classList.remove("mobile-filter-open");
+}
+
+$("btn-mobile-filter").onclick = openMobileFilters;
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeMobileFilters();
+});
+window.addEventListener("resize", () => {
+  if (window.innerWidth > 720) closeMobileFilters();
+});
+
 // ── DOM ───────────────────────────────────────────────────
 const audio      = $("audio");
 const audioB     = $("audio-b");
@@ -1670,6 +2055,7 @@ async function loadTracks(page = 1, forceCount = false) {
   if (radio.active) return;
   const requestId = ++_loadTracksRequest;
   updateSavePlaylistBtn();
+  updateMobileFilterButton();
   _setSearching(true);
   // Skip COUNT if we already have the total and are just paging
   const needCount = page === 1 || forceCount || state.total === 0;
@@ -1726,6 +2112,7 @@ async function loadTracks(page = 1, forceCount = false) {
   $("result-count").textContent = q
     ? t().results_q(data.total, esc(q))
     : t().results(data.total);
+  updateMobileFilterButton();
 }
 
 // ── Render Tracks ─────────────────────────────────────────
@@ -3217,7 +3604,7 @@ setInterval(checkDiscoBadge, 30000);
     <button onclick="document.getElementById('about-modal').style.display='none'" style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer;line-height:1">✕</button>
     <img src="/static/logo.svg" width="48" height="48" alt="Adolar" style="margin-bottom:12px">
     <div style="font-family:'Orbitron',sans-serif;font-size:1.3rem;font-weight:700;color:var(--accent);margin-bottom:4px">Adolar</div>
-    <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:16px">Version v0.8</div>
+    <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:16px">Version v1.2.0</div>
     <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:8px">(c) PolzeSoft 2026</div>
     <a href="https://polze.net" target="_blank" style="color:var(--accent);font-size:var(--text-sm);display:block;margin-bottom:4px">https://polze.net</a>
     <a href="mailto:adolar@polze.net" style="color:var(--accent);font-size:var(--text-sm)">adolar@polze.net</a>

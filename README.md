@@ -1,6 +1,6 @@
 # Adolar
 
-Current version: **1.1.0**
+Current version: **1.2.0**
 
 A self-hosted music archive web app for Synology NAS (or any Docker host). Browse, search, and stream your local MP3/FLAC/M4A collection from any browser — no cloud required.
 
@@ -13,6 +13,7 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 
 - **Full-text search** — title, artist, album, genre (SQLite FTS5), spinning loader indicator, 500ms debounce
 - **Facet filters** — genre, decade, year range, duration, format, bitrate, BPM range, artist/title initial
+- **Mobile player mode** — phone-first layout with full-width track list, off-canvas filters, and compact bottom player
 - **Cover art** — 80×80 WebP thumbnails cached on filesystem, colored initials fallback; full-size for Radio
 - **Fast paging** — COUNT cached after first page, subsequent pages skip DB count entirely
 - **HTTP range streaming** — seekable audio in the browser
