@@ -9,25 +9,35 @@ Radio stations are a separate feature area from playlists.
 - `name`: user-visible station name
 - `description`: optional station description
 - `filter_json`: JSON filter tree
+- `scope`: `global` or `private`
+- `owner_id`: owner for private stations
+- `jingle_path`, `jingle_every_tracks`, `jingle_enabled`: optional station ID audio
 - `is_system`: protected system station flag
 - `created_by`, `created_at`, `updated_at`
 
 The default station is `Adolar Radio` and is seeded as a system station. System
-stations can be played by everyone, but cannot be edited or deleted.
+stations can be played by everyone, but cannot be renamed, edited, or deleted.
+Admins can still upload, configure, and remove a jingle for the default station.
 
 ## Permissions
 
-- Admin users can create, edit, and delete non-system stations.
-- Normal users can list and play stations.
+- Admin users can create, edit, and delete global stations and can inspect/delete
+  private stations.
+- Normal users can create and edit only their own private stations.
+- Anonymous companion users see only global stations.
 - The companion `/radio` page uses the same station list and track endpoint.
 
 ## API
 
 - `GET /api/radio-stations`
-- `POST /api/radio-stations` admin only
-- `PUT /api/radio-stations/<id>` admin only
-- `DELETE /api/radio-stations/<id>` admin only
+- `POST /api/radio-stations`
+- `PUT /api/radio-stations/<id>`
+- `DELETE /api/radio-stations/<id>`
 - `GET /api/radio-stations/<id>/tracks?count=25&exclude=...`
+- `POST /api/radio-stations/<id>/jingle`
+- `PATCH /api/radio-stations/<id>/jingle`
+- `DELETE /api/radio-stations/<id>/jingle`
+- `GET /api/radio-stations/<id>/jingle`
 
 ## Filter JSON
 
@@ -70,5 +80,6 @@ Station playback uses the same queue behavior as the original radio: load a
 small initial queue, play immediately, and refill in the background while
 excluding recently played track IDs.
 
-Jingles, if added later, should be represented as non-track queue items so they
-do not affect play counts, scrobbling, bookmarks, or recently played history.
+Jingles are represented as non-track queue items. They can be inserted every N
+tracks per station and do not affect play counts, scrobbling, bookmarks, or
+recently played history.

@@ -529,6 +529,17 @@
       gap: 6px;
       align-items: center;
     }
+    .station-jingle-indicator {
+      width: 34px;
+      height: 34px;
+      border: 0.5px solid rgba(132, 114, 228, .45);
+      border-radius: 8px;
+      color: var(--accent);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(132, 114, 228, .12);
+    }
     .icon-btn {
       width: 34px;
       height: 34px;
@@ -3003,14 +3014,18 @@ function renderRadioStationRow(st) {
   const row = document.createElement("div");
   row.className = "radio-station-row";
   const isOwner = _me && st.owner_id === _me.id;
-  const canEdit = _me && !st.is_system && (st.scope === "private" ? (isOwner || _me.role === "admin") : _me.role === "admin");
-  const canDelete = canEdit;
+  const canEdit = _me && (
+    (_me.role === "admin" && st.is_system) ||
+    (!st.is_system && (st.scope === "private" ? (isOwner || _me.role === "admin") : _me.role === "admin"))
+  );
+  const canDelete = canEdit && !st.is_system;
   row.innerHTML = `
     <div>
       <div class="radio-station-name">${esc(st.name)}</div>
       <div class="radio-station-desc">${esc(st.description || (st.is_system ? "Default" : st.scope === "private" ? "Privat" : "Global"))}</div>
     </div>
     <div class="radio-row-actions">
+      ${st.has_jingle ? `<span class="station-jingle-indicator" title="Jingle vorhanden"><i class="ti ti-volume"></i></span>` : ""}
       <button class="icon-btn station-play" title="${t().radio_start}"><i class="ti ti-player-play"></i></button>
       ${canEdit ? `<button class="icon-btn station-edit" title="${t().radio_edit}"><i class="ti ti-settings"></i></button>` : ""}
       ${canDelete ? `<button class="icon-btn danger station-delete" title="${t().radio_delete}"><i class="ti ti-trash"></i></button>` : ""}
@@ -3034,6 +3049,9 @@ function openRadioEditor(station = null) {
   $("radio-desc").value = station?.description || "";
   $("radio-scope-wrap").style.display = _me?.role === "admin" ? "block" : "none";
   $("radio-scope").value = station?.scope || (_me?.role === "admin" ? "global" : "private");
+  $("radio-name").disabled = Boolean(station?.is_system);
+  $("radio-desc").disabled = Boolean(station?.is_system);
+  $("radio-scope").disabled = Boolean(station?.is_system);
   $("radio-jingle-enabled").checked = Boolean(station?.jingle_enabled);
   $("radio-jingle-every").value = station?.jingle_every_tracks || 5;
   $("radio-jingle-file").value = "";
@@ -3061,6 +3079,9 @@ function restoreRadioEditorDraft(draft) {
   $("radio-desc").value = draft.description || "";
   $("radio-scope-wrap").style.display = _me?.role === "admin" ? "block" : "none";
   $("radio-scope").value = draft.scope || (_me?.role === "admin" ? "global" : "private");
+  $("radio-name").disabled = Boolean(_editingRadioStation?.is_system);
+  $("radio-desc").disabled = Boolean(_editingRadioStation?.is_system);
+  $("radio-scope").disabled = Boolean(_editingRadioStation?.is_system);
   $("radio-jingle-enabled").checked = Boolean(draft.jingle_enabled);
   $("radio-jingle-every").value = draft.jingle_every_tracks || 5;
   $("radio-jingle-file").value = "";
@@ -3176,6 +3197,18 @@ async function deleteRadioJingle() {
 async function saveRadioStation() {
   const err = $("radio-error");
   err.style.display = "none";
+  if (_editingRadioStation?.is_system) {
+    try {
+      await saveRadioJingle(_editingRadioStation);
+    } catch (e) {
+      err.textContent = e.message || "Jingle speichern fehlgeschlagen";
+      err.style.display = "block";
+      return;
+    }
+    closeRadioEditor();
+    await loadRadioStations();
+    return;
+  }
   const name = $("radio-name").value.trim();
   if (!name) {
     err.textContent = t().radio_name;
@@ -4417,7 +4450,7 @@ setInterval(checkDiscoBadge, 30000);
     <button onclick="document.getElementById('about-modal').style.display='none'" style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer;line-height:1">✕</button>
     <img src="/static/logo.svg" width="48" height="48" alt="Adolar" style="margin-bottom:12px">
     <div style="font-family:'Orbitron',sans-serif;font-size:1.3rem;font-weight:700;color:var(--accent);margin-bottom:4px">Adolar</div>
-    <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:16px">Version v1.2.0</div>
+    <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:16px">Version v1.2.1</div>
     <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:8px">(c) PolzeSoft 2026</div>
     <a href="https://polze.net" target="_blank" style="color:var(--accent);font-size:var(--text-sm);display:block;margin-bottom:4px">https://polze.net</a>
     <a href="mailto:adolar@polze.net" style="color:var(--accent);font-size:var(--text-sm)">adolar@polze.net</a>

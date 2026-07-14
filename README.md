@@ -1,6 +1,6 @@
 # Adolar
 
-Current version: **1.2.0**
+Current version: **1.2.1**
 
 A self-hosted music archive web app for Synology NAS (or any Docker host). Browse, search, and stream your local MP3/FLAC/M4A collection from any browser — no cloud required.
 
@@ -17,7 +17,8 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Cover art** — 80×80 WebP thumbnails cached on filesystem, colored initials fallback; full-size for Radio
 - **Fast paging** — COUNT cached after first page, subsequent pages skip DB count entirely
 - **HTTP range streaming** — seekable audio in the browser
-- **Radio / Shuffle mode** — equal-power crossfade (12s out / 8s in), next track pre-buffered; crossfade skipped for short tracks
+- **Configurable radio stations** — global and private smart radio stations with admin/user ownership, filter builder, test mode, and optional station jingles
+- **Radio / Shuffle mode** — equal-power crossfade (12s out / 8s in), next track pre-buffered; crossfade skipped for short tracks and station jingles
 - **AdolarRadio** — Windows companion app: native window, auto-starts radio, About dialog, buildable to `.exe`
 - **Adolar Radio Android** — Android companion project with phone WebView and Android Auto media playback for local developer installs
 - **Mini-player** — popup window with cover art, controls, progress bar, Last.fm love button
@@ -107,6 +108,9 @@ On first start, navigate to `/setup` to create the admin account. All subsequent
 |---|---|---|
 | GET | `/api/search` | Search with filters + pagination (`count=0` skips COUNT) |
 | GET | `/api/random?count=N` | N random tracks |
+| GET | `/api/radio-stations` | List playable radio stations |
+| GET | `/api/radio-stations/<id>/tracks` | Get tracks for a smart radio station |
+| POST | `/api/radio-stations/<id>/jingle` | Upload a station jingle (station owner/admin) |
 | GET | `/api/stream/<id>` | Stream audio (range requests supported) |
 | GET | `/api/cover/<hash>` | Cover thumbnail (80×80 WebP); `?full=1` for original |
 | POST | `/api/scan/start` | Start library scan (admin only) |

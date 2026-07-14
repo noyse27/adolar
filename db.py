@@ -819,8 +819,10 @@ def delete_radio_station(station_id: int, user_id: int, is_admin: bool) -> bool:
 
 def can_manage_radio_station(station_id: int, user_id: int, is_admin: bool) -> bool:
     station = get_radio_station(station_id)
-    if not station or station["is_system"]:
+    if not station:
         return False
+    if station["is_system"]:
+        return bool(is_admin)
     return bool(is_admin or station.get("owner_id") == user_id)
 
 
@@ -831,7 +833,7 @@ def set_radio_station_jingle(station_id: int, path: str | None,
         cur = conn.execute("""
             UPDATE radio_stations
             SET jingle_path=?, jingle_every_tracks=?, jingle_enabled=?, updated_at=datetime('now')
-            WHERE id=? AND is_system=0
+            WHERE id=?
         """, (path, every_tracks, 1 if enabled and path and every_tracks > 0 else 0, station_id))
         return cur.rowcount > 0
 
@@ -844,7 +846,7 @@ def update_radio_station_jingle_settings(station_id: int, every_tracks: int, ena
             SET jingle_every_tracks=?,
                 jingle_enabled=CASE WHEN jingle_path IS NOT NULL AND ?>0 THEN ? ELSE 0 END,
                 updated_at=datetime('now')
-            WHERE id=? AND is_system=0
+            WHERE id=?
         """, (every_tracks, every_tracks, 1 if enabled else 0, station_id))
         return cur.rowcount > 0
 

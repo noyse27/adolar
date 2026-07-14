@@ -99,7 +99,7 @@ SETTINGS_HTML = """<!DOCTYPE html>
     <button class="modal-close" onclick="document.getElementById('about-modal').classList.remove('open')">✕</button>
     <img src="data:image/svg+xml;base64,{LOGO_B64}" width="48" height="48" alt="Adolar" style="margin-bottom:12px">
     <div class="modal-name">AdolarRadio</div>
-    <div class="modal-sub">Version v0.8</div>
+    <div class="modal-sub">Version v1.2.1</div>
     <div class="modal-sub">(c) PolzeSoft 2026</div>
     <a class="modal-link" href="https://polze.net">https://polze.net</a>
     <a class="modal-link" href="mailto:adolar@polze.net">adolar@polze.net</a>
