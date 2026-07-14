@@ -370,17 +370,19 @@ async function startRadio() {
   });
 }
 
-async function loadStations() {
+async function loadStations(preserveCurrent = false) {
   const select = document.getElementById("station-select");
   try {
+    const previousId = preserveCurrent ? String(radio.stationId || "") : "";
     const r = await fetch(`${API}/api/radio-stations`);
     const stations = await r.json();
     select.innerHTML = stations.map(st => `<option value="${st.id}">${escHtml(st.name)}</option>`).join("");
     const first = stations[0] || { id: 1, name: "Adolar Radio" };
-    radio.stationId = first.id;
-    radio.stationName = first.name;
-    radio.station = first;
-    select.value = String(first.id);
+    const selected = stations.find(s => String(s.id) === previousId) || first;
+    radio.stationId = selected.id;
+    radio.stationName = selected.name;
+    radio.station = selected;
+    select.value = String(selected.id);
     select.onchange = () => {
       const st = stations.find(s => String(s.id) === select.value);
       radio.stationId = st?.id || Number(select.value) || 1;
@@ -721,6 +723,8 @@ function updateBookmarkBtn(track) {
 // ── Last.fm ───────────────────────────────────────────────
 async function lfmInit() {
   // Last.fm only shown to admin
+  lfm.connected = false;
+  document.getElementById("btn-love").style.display = "none";
   if (!_radioUser || _radioUser.role !== "admin") return;
   try {
     const res  = await fetch(`${API}/api/lastfm/status`);

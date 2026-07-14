@@ -108,7 +108,7 @@ SETTINGS_HTML = """<!DOCTYPE html>
 <div style="width:100%;max-width:280px">
   <label>Adolar Server URL</label>
   <input type="text" id="url" placeholder="http://192.168.1.X:15002" value="{CURRENT_URL}">
-  <button onclick="save()">Speichern &amp; Starten</button>
+  <button onclick="save()">Verbinden</button>
   <div class="error" id="err">Ungültige URL – bitte http://host:port eingeben.</div>
   <p class="hint">Beispiel: http://192.168.1.100:15002<br>oder http://localhost:15002</p>
 </div>
@@ -162,19 +162,65 @@ def logo_b64() -> str:
 class Api:
     def __init__(self, win_ref):
         self._win = win_ref   # list so we can replace the window reference
+        self._settings_windows = []
 
     def save_and_launch(self, url: str):
+        url = url.rstrip("/")
         save_config({"url": url})
-        self._win[0].load_url(url.rstrip("/") + "/radio")
+        self._win[0].load_url(url + "/radio")
         self._win[0].set_title("AdolarRadio")
         self._win[0].resize(320, 520)
+        self.open_settings()
 
-    def open_settings(self):
-        cfg = load_config()
-        html = _build_settings_html(cfg.get("url", ""))
+    def disconnect(self):
+        save_config({})
+        self._close_settings_windows()
+        html = _build_settings_html("")
         self._win[0].load_html(html)
         self._win[0].set_title("AdolarRadio – Einstellungen")
         self._win[0].resize(320, 340)
+        return {"ok": True}
+
+    def open_settings(self):
+        cfg = load_config()
+        url = (cfg.get("url") or "").rstrip("/")
+        if not url:
+            html = _build_settings_html("")
+            self._win[0].load_html(html)
+            self._win[0].set_title("AdolarRadio – Einstellungen")
+            self._win[0].resize(320, 340)
+            return
+        settings = webview.create_window(
+            title="AdolarRadio – Einstellungen",
+            url=url + "/radio/settings",
+            width=340,
+            height=430,
+            resizable=False,
+            on_top=True,
+            js_api=self,
+        )
+        self._settings_windows.append(settings)
+
+    def refresh_radio_user(self):
+        script = """
+          initUser()
+            .then(() => lfmInit())
+            .then(() => loadStations(true))
+            .catch(() => {});
+        """
+        try:
+            self._win[0].evaluate_js(script)
+        except Exception:
+            pass
+        return {"ok": True}
+
+    def _close_settings_windows(self):
+        for win in list(self._settings_windows):
+            try:
+                win.destroy()
+            except Exception:
+                pass
+        self._settings_windows.clear()
 
 
 def _build_settings_html(current_url: str) -> str:

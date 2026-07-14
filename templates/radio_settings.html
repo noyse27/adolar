@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>AdolarRadio Einstellungen</title>
+  <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --accent: #7F77DD;
+      --bg-primary: #30302E;
+      --bg-secondary: #3A3A38;
+      --bg-tertiary: #1E1E1C;
+      --text-primary: #ECECEC;
+      --text-secondary: #9A9A96;
+      --text-tertiary: #5C5C58;
+      --border: #505050;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      padding: 22px;
+      user-select: none;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 22px;
+    }
+    .logo img { width: 32px; height: 32px; }
+    .logo span {
+      font-family: "Orbitron", monospace;
+      font-size: 18px;
+      letter-spacing: .08em;
+      background: linear-gradient(135deg, var(--accent), #b8b4f0);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .section {
+      border-top: 0.5px solid var(--border);
+      padding-top: 16px;
+      margin-top: 16px;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .status-main {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+    }
+    .label {
+      color: var(--text-tertiary);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      font-weight: 700;
+    }
+    .value {
+      color: var(--text-primary);
+      font-size: 14px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sub {
+      color: var(--text-secondary);
+      font-size: 12px;
+      line-height: 1.4;
+      margin-top: 8px;
+    }
+    input {
+      width: 100%;
+      padding: 9px 11px;
+      margin-top: 8px;
+      background: var(--bg-secondary);
+      border: 0.5px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+    }
+    input:focus { border-color: var(--accent); }
+    button {
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      padding: 9px 12px;
+      font-weight: 650;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--text-secondary);
+      border: 0.5px solid var(--border);
+    }
+    button:hover { filter: brightness(1.08); }
+    .login-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .login-actions button { flex: 1; }
+    .error {
+      display: none;
+      color: #ff7777;
+      font-size: 12px;
+      margin-top: 8px;
+      line-height: 1.35;
+    }
+    .version {
+      color: var(--text-tertiary);
+      font-size: 11px;
+      margin-top: 18px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    <img src="/static/logo.svg" alt="Adolar">
+    <span>Adolar Radio</span>
+  </div>
+
+  <div class="status-row">
+    <div class="status-main">
+      <div class="label">Adolar</div>
+      <div class="value"><i class="ti ti-plug-connected"></i> verbunden</div>
+    </div>
+    <button class="secondary" onclick="disconnect()">Trennen</button>
+  </div>
+
+  <div class="section" id="login-section">
+    <div class="label">Optional anmelden</div>
+    <div class="sub">Angemeldet kannst du private Sender sehen und Radio-Favoriten speichern.</div>
+    <input id="username" autocomplete="username" placeholder="Benutzer">
+    <input id="password" type="password" autocomplete="current-password" placeholder="Passwort">
+    <div class="login-actions">
+      <button onclick="login()">Senden</button>
+    </div>
+    <div class="error" id="login-error"></div>
+  </div>
+
+  <div class="section" id="user-section" style="display:none">
+    <div class="status-row">
+      <div class="status-main">
+        <div class="label">Angemeldet</div>
+        <div class="value" id="username-current"></div>
+      </div>
+      <button class="secondary" onclick="logout()">Abmelden</button>
+    </div>
+  </div>
+
+  <div class="version">Version v{{ app_version }}</div>
+
+  <script>
+    async function refresh() {
+      let user = null;
+      try {
+        const res = await fetch("/api/me-optional", { credentials: "same-origin" });
+        user = await res.json();
+      } catch {}
+      document.getElementById("login-section").style.display = user ? "none" : "";
+      document.getElementById("user-section").style.display = user ? "" : "none";
+      if (user) document.getElementById("username-current").textContent = user.username;
+      if (window.pywebview) window.pywebview.api.refresh_radio_user();
+    }
+
+    function showError(text) {
+      const el = document.getElementById("login-error");
+      el.textContent = text;
+      el.style.display = "block";
+    }
+
+    async function login() {
+      document.getElementById("login-error").style.display = "none";
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+      const res = await fetch("/api/radio/login", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, remember: true }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.error === "must_change_password") showError("Bitte zuerst im Webinterface das Passwort ändern.");
+        else if (data.error === "blocked") showError(`Zu viele Versuche. Bitte ${data.seconds || ""} Sekunden warten.`);
+        else showError("Benutzer oder Passwort stimmt nicht.");
+        return;
+      }
+      document.getElementById("password").value = "";
+      await refresh();
+    }
+
+    async function logout() {
+      await fetch("/api/radio/logout", { method: "POST", credentials: "same-origin" });
+      await refresh();
+    }
+
+    function disconnect() {
+      if (window.pywebview) window.pywebview.api.disconnect();
+    }
+
+    document.getElementById("password").addEventListener("keydown", e => {
+      if (e.key === "Enter") login();
+    });
+    refresh();
+  </script>
+</body>
+</html>

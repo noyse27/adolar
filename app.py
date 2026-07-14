@@ -163,6 +163,53 @@ def logout():
     return resp
 
 
+@app.post("/api/radio/login")
+def api_radio_login():
+    if _auth.user_count() == 0:
+        return jsonify({"error": "setup_required"}), 409
+    ip = _auth._get_client_ip()
+    blocked, secs = _auth._bf_check(ip)
+    if blocked:
+        return jsonify({"error": "blocked", "seconds": secs}), 429
+
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    remember = bool(data.get("remember", True))
+    user = _auth.get_user_by_name(username)
+    if not user or not _auth.verify_password(user, password):
+        _auth._bf_record_failure(ip)
+        blocked2, secs2 = _auth._bf_check(ip)
+        return jsonify({
+            "error": "invalid_credentials",
+            "blocked": blocked2,
+            "seconds": secs2,
+        }), 401
+    if user["must_change_password"]:
+        return jsonify({"error": "must_change_password"}), 403
+
+    _auth._bf_clear(ip)
+    token = _auth.create_session(user["id"], remember)
+    max_age = _auth.SESSION_TTL_LONG if remember else _auth.SESSION_TTL
+    resp = jsonify({
+        "id": user["id"],
+        "username": user["username"],
+        "role": user["role"],
+    })
+    resp.set_cookie(_auth.SESSION_COOKIE, token, httponly=True, samesite="Lax", max_age=max_age)
+    return resp
+
+
+@app.post("/api/radio/logout")
+def api_radio_logout():
+    token = request.cookies.get(_auth.SESSION_COOKIE)
+    if token:
+        _auth.delete_session(token)
+    resp = jsonify({"ok": True})
+    resp.delete_cookie(_auth.SESSION_COOKIE)
+    return resp
+
+
 @app.get("/change-password")
 def change_password_get():
     token = request.cookies.get(_auth.SESSION_COOKIE)
@@ -403,6 +450,11 @@ def miniplayer():
 @app.get("/radio")
 def radio_companion():
     return render_template("radio.html")
+
+
+@app.get("/radio/settings")
+def radio_companion_settings():
+    return render_template("radio_settings.html", app_version=APP_VERSION)
 
 
 # ── Tracks ────────────────────────────────────────────────────────────────────
