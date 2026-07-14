@@ -3,6 +3,7 @@ import html
 import logging
 from flask import Flask, jsonify, request, send_file, abort, render_template, redirect, make_response, g
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
 import db
 import scanner
 import lastfm
@@ -24,6 +25,10 @@ app.before_request(_auth.before_request)
 
 MUSIC_ROOT = os.environ.get("MUSIC_ROOT", "/music")
 MAX_DOWNLOAD_IDS = int(os.environ.get("MAX_DOWNLOAD_IDS", 500))
+DATA_ROOT = os.path.dirname(os.path.abspath(os.path.expanduser(
+    os.environ.get("DB_PATH", "") or "~/.cache/adolar.db"
+)))
+JINGLE_ROOT = os.path.join(DATA_ROOT, "radio_jingles")
 
 # ── Adolar Disco connection tracking ─────────────────────────────────────────
 import time as _time
@@ -45,6 +50,14 @@ def _safe_path(path: str) -> str | None:
     real   = os.path.realpath(path)
     root   = os.path.realpath(MUSIC_ROOT)
     if not real.startswith(root + os.sep) and real != root:
+        return None
+    return real
+
+
+def _safe_data_path(path: str, root: str) -> str | None:
+    real = os.path.realpath(path)
+    root_real = os.path.realpath(root)
+    if not real.startswith(root_real + os.sep) and real != root_real:
         return None
     return real
 
@@ -800,6 +813,191 @@ def api_random():
     count   = min(int(request.args.get("count", 25)), 100)
     exclude = [int(x) for x in request.args.getlist("exclude") if x.isdigit()]
     return jsonify(db.get_random_tracks(count, exclude))
+
+
+@app.get("/api/radio-stations")
+def api_radio_stations_list():
+    user = g.get("user")
+    include_all_private = bool(
+        user and user.get("role") == "admin" and request.args.get("admin") == "1"
+    )
+    user_id = user["id"] if user else None
+    return jsonify(db.list_radio_stations(user_id=user_id, include_all_private=include_all_private))
+
+
+@app.post("/api/radio-stations")
+def api_radio_stations_create():
+    if not g.user:
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    requested_scope = data.get("scope") or "private"
+    if g.user["role"] != "admin":
+        requested_scope = "private"
+    elif requested_scope not in ("global", "private"):
+        requested_scope = "global"
+    try:
+        station_id = db.create_radio_station(
+            name=name,
+            description=data.get("description") or "",
+            filter_def=data.get("filter") or {"mode": "all", "rules": []},
+            user_id=g.user["id"],
+            scope=requested_scope,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        if "UNIQUE" in str(e).upper():
+            return jsonify({"error": "name already exists"}), 409
+        raise
+    return jsonify(db.get_radio_station(station_id)), 201
+
+
+@app.put("/api/radio-stations/<int:station_id>")
+def api_radio_stations_update(station_id):
+    if not g.user:
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    try:
+        ok = db.update_radio_station(
+            station_id,
+            name=name,
+            description=data.get("description") or "",
+            filter_def=data.get("filter") or {"mode": "all", "rules": []},
+            user_id=g.user["id"],
+            is_admin=g.user["role"] == "admin",
+            scope=data.get("scope"),
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        if "UNIQUE" in str(e).upper():
+            return jsonify({"error": "name already exists"}), 409
+        raise
+    if not ok:
+        return jsonify({"error": "not found or system station"}), 404
+    return jsonify(db.get_radio_station(station_id))
+
+
+@app.delete("/api/radio-stations/<int:station_id>")
+def api_radio_stations_delete(station_id):
+    if not g.user:
+        return jsonify({"error": "unauthorized"}), 401
+    if not db.delete_radio_station(station_id, g.user["id"], g.user["role"] == "admin"):
+        return jsonify({"error": "not found or system station"}), 404
+    return jsonify({"ok": True})
+
+
+@app.post("/api/radio-stations/test")
+@_auth.admin_required
+def api_radio_stations_test():
+    data = request.get_json(silent=True) or {}
+    count = max(1, min(int(data.get("count") or 50), 100))
+    try:
+        tracks = db.get_radio_filter_tracks(
+            data.get("filter") or {"mode": "all", "rules": []},
+            count=count,
+            exclude_ids=[],
+            user_id=g.user["id"],
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"results": tracks, "total": len(tracks)})
+
+
+def _can_manage_station_or_404(station_id: int):
+    if not g.user:
+        return jsonify({"error": "unauthorized"}), 401
+    if not db.can_manage_radio_station(station_id, g.user["id"], g.user["role"] == "admin"):
+        return jsonify({"error": "not found or forbidden"}), 404
+    return None
+
+
+@app.post("/api/radio-stations/<int:station_id>/jingle")
+def api_radio_station_jingle_upload(station_id):
+    err = _can_manage_station_or_404(station_id)
+    if err: return err
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "file required"}), 400
+    ext = os.path.splitext(secure_filename(file.filename))[1].lower()
+    if ext not in {".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aac"}:
+        return jsonify({"error": "unsupported audio format"}), 400
+    try:
+        every = max(1, min(int(request.form.get("every") or 5), 100))
+    except ValueError:
+        every = 5
+    enabled = request.form.get("enabled", "1") != "0"
+    os.makedirs(JINGLE_ROOT, exist_ok=True)
+    target = os.path.join(JINGLE_ROOT, f"station_{station_id}{ext}")
+    safe_target = _safe_data_path(target, JINGLE_ROOT)
+    if safe_target is None:
+        abort(400)
+    for old_ext in (".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aac"):
+        old = os.path.join(JINGLE_ROOT, f"station_{station_id}{old_ext}")
+        if old != safe_target and os.path.exists(old):
+            try: os.remove(old)
+            except OSError: pass
+    file.save(safe_target)
+    db.set_radio_station_jingle(station_id, safe_target, every, enabled)
+    return jsonify(db.get_radio_station(station_id))
+
+
+@app.patch("/api/radio-stations/<int:station_id>/jingle")
+def api_radio_station_jingle_settings(station_id):
+    err = _can_manage_station_or_404(station_id)
+    if err: return err
+    data = request.get_json(silent=True) or {}
+    try:
+        every = int(data.get("every") or 0)
+    except (TypeError, ValueError):
+        every = 0
+    enabled = bool(data.get("enabled"))
+    if not db.update_radio_station_jingle_settings(station_id, every, enabled):
+        return jsonify({"error": "not found"}), 404
+    return jsonify(db.get_radio_station(station_id))
+
+
+@app.delete("/api/radio-stations/<int:station_id>/jingle")
+def api_radio_station_jingle_delete(station_id):
+    err = _can_manage_station_or_404(station_id)
+    if err: return err
+    path = db.get_radio_station_jingle_path(station_id, enabled_only=False)
+    db.set_radio_station_jingle(station_id, None, 0, False)
+    if path:
+        safe = _safe_data_path(path, JINGLE_ROOT)
+        if safe and os.path.exists(safe):
+            try: os.remove(safe)
+            except OSError: pass
+    return jsonify(db.get_radio_station(station_id))
+
+
+@app.get("/api/radio-stations/<int:station_id>/jingle")
+def api_radio_station_jingle_stream(station_id):
+    path = db.get_radio_station_jingle_path(station_id)
+    if not path:
+        abort(404)
+    safe = _safe_data_path(path, JINGLE_ROOT)
+    if safe is None or not os.path.isfile(safe):
+        abort(404)
+    return send_file(safe, mimetype=_guess_mime(safe), conditional=True)
+
+
+@app.get("/api/radio-stations/<int:station_id>/tracks")
+def api_radio_station_tracks(station_id):
+    _touch_disco()
+    count = min(_int_arg("count", 25, min_val=1, max_val=100), 100)
+    exclude = [int(x) for x in request.args.getlist("exclude") if x.isdigit()]
+    user_id = g.user["id"] if g.user else None
+    tracks = db.get_radio_station_tracks(station_id, count, exclude, user_id=user_id)
+    if tracks is None:
+        return jsonify({"error": "station not found"}), 404
+    return jsonify(tracks)
 
 
 # ── Last.fm ───────────────────────────────────────────────────────────────────

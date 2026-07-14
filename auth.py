@@ -25,7 +25,7 @@ PUBLIC_PREFIXES = (
     "/login", "/setup",
     "/api/stream/", "/api/random", "/api/cover/",
     "/api/stats", "/api/disco-status", "/api/me-optional",
-    "/api/radio/",
+    "/api/radio/", "/api/radio-stations",
     "/api/search",   # read-only; called by Disco server without user session
     "/radio", "/static/",
 )

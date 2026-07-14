@@ -104,8 +104,24 @@
       font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
       padding: 2px 8px; border-radius: 99px;
       display: none;
+      -webkit-app-region: no-drag;
     }
     #radio-badge.visible { display: block; }
+    #station-select {
+      border: none;
+      background: transparent;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      outline: none;
+      cursor: pointer;
+      max-width: 180px;
+    }
+    #station-select option {
+      color: #ECECEC;
+      background: #30302E;
+    }
 
     /* ── Progress ── */
     #progress-wrap {
@@ -208,7 +224,7 @@
 <div id="cover-wrap">
   <div id="cover-inner"></div>
   <div id="cover-overlay"></div>
-  <div id="radio-badge" class="visible">● RADIO</div>
+  <div id="radio-badge" class="visible">● <select id="station-select"></select></div>
   <div id="track-info" style="display:none">
     <div id="track-title">—</div>
     <div id="track-artist"></div>
@@ -260,6 +276,12 @@ function artistColor(name) {
   return `hsl(${h % 360}, 55%, 40%)`;
 }
 
+function escHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 // ── Audio ─────────────────────────────────────────────────
 const audioA = document.getElementById("audio");
 const audioB = document.getElementById("audio-b");
@@ -270,29 +292,74 @@ const CF_PRELOAD = 25;
 const CF_OUT     = 12;
 const CF_IN      =  8;
 
-const radio = { queue: [], playedIds: [], cfTimer: null, cfActive: false, session: 0 };
+const radio = { queue: [], playedIds: [], cfTimer: null, cfActive: false, session: 0, stationId: 1, stationName: "Adolar Radio", station: null, tracksSinceJingle: 0 };
 
 let currentTrack  = null;
 let _scrobbled    = false;
 let _playCounted  = false;
 const lfm = { connected: false, lovedCache: new Map() };
 
+function isJingle(track) {
+  return Boolean(track && (track.type === "jingle" || track.is_jingle));
+}
+
+function stationJingleEvery() {
+  return Number(radio.station?.jingle_every_tracks || 0);
+}
+
+function stationHasJingle() {
+  return Boolean(
+    radio.station &&
+    radio.station.has_jingle &&
+    radio.station.jingle_enabled &&
+    stationJingleEvery() > 0
+  );
+}
+
+function jingleDueAfterCurrent() {
+  return stationHasJingle() && !isJingle(currentTrack) &&
+    radio.tracksSinceJingle + 1 >= stationJingleEvery();
+}
+
+function makeJingleItem() {
+  return {
+    id: `jingle-${radio.stationId}`,
+    type: "jingle",
+    is_jingle: true,
+    title: radio.stationName || "Adolar Radio",
+    artist: "Station-ID",
+    has_cover: false,
+    duration: 0,
+  };
+}
+
+function markCurrentPlayed() {
+  if (!currentTrack || isJingle(currentTrack)) return;
+  radio.playedIds.push(currentTrack.id);
+  radio.tracksSinceJingle++;
+  if (radio.playedIds.length > 100) radio.playedIds = radio.playedIds.slice(-100);
+}
+
 // ── Radio queue ───────────────────────────────────────────
 async function loadQueue(count, exclude = []) {
   const p = new URLSearchParams({ count });
   exclude.forEach(id => p.append("exclude", id));
   try {
-    const res = await fetch(`${API}/api/random?${p}`);
+    const res = await fetch(`${API}/api/radio-stations/${radio.stationId || 1}/tracks?${p}`);
     return await res.json();
   } catch { return []; }
 }
 
 async function startRadio() {
+  radio.queue = [];
+  radio.playedIds = [];
+  radio.tracksSinceJingle = 0;
+  currentTrack = null;
+  radio.session = (radio.session || 0) + 1;
   const initial = await loadQueue(5);
   if (!initial.length) return;
 
   radio.queue = initial;
-  radio.session = (radio.session || 0) + 1;
   const mySession = radio.session;
 
   playTrack(radio.queue.shift());
@@ -303,7 +370,37 @@ async function startRadio() {
   });
 }
 
+async function loadStations() {
+  const select = document.getElementById("station-select");
+  try {
+    const r = await fetch(`${API}/api/radio-stations`);
+    const stations = await r.json();
+    select.innerHTML = stations.map(st => `<option value="${st.id}">${escHtml(st.name)}</option>`).join("");
+    const first = stations[0] || { id: 1, name: "Adolar Radio" };
+    radio.stationId = first.id;
+    radio.stationName = first.name;
+    radio.station = first;
+    select.value = String(first.id);
+    select.onchange = () => {
+      const st = stations.find(s => String(s.id) === select.value);
+      radio.stationId = st?.id || Number(select.value) || 1;
+      radio.stationName = st?.name || "Adolar Radio";
+      radio.station = st || null;
+      startRadio();
+    };
+  } catch {
+    select.innerHTML = `<option value="1">Adolar Radio</option>`;
+  }
+}
+
 async function radioNext(fromCrossfade = false) {
+  if (!fromCrossfade && jingleDueAfterCurrent()) {
+    markCurrentPlayed();
+    radio.tracksSinceJingle = 0;
+    playJingle();
+    return;
+  }
+
   if (!radio.queue.length) {
     const more = await loadQueue(20, radio.playedIds.slice(-100));
     radio.queue.push(...more);
@@ -321,7 +418,7 @@ async function radioNext(fromCrossfade = false) {
   const track = radio.queue.shift();
   if (fromCrossfade) {
     // audio is already playing the new track — just update metadata
-    if (currentTrack) radio.playedIds.push(currentTrack.id);
+    markCurrentPlayed();
     currentTrack = track;
     _scrobbled   = false;
     _playCounted = false;
@@ -342,7 +439,7 @@ async function radioNext(fromCrossfade = false) {
 // ── Playback ──────────────────────────────────────────────
 function playTrack(track) {
   if (!track) return;
-  if (currentTrack) radio.playedIds.push(currentTrack.id);
+  markCurrentPlayed();
   currentTrack  = track;
   _scrobbled    = false;
   _playCounted  = false;
@@ -366,6 +463,19 @@ function playTrack(track) {
   }
 }
 
+function playJingle() {
+  currentTrack = makeJingleItem();
+  _scrobbled = true;
+  _playCounted = true;
+  radio.cfActive = false;
+  cancelAnimationFrame(radio.cfTimer);
+  const inactiveEl = getInactive();
+  inactiveEl.pause(); inactiveEl.removeAttribute("src"); inactiveEl.load();
+  updateUI(currentTrack);
+  audio.src = `${API}/api/radio-stations/${radio.stationId}/jingle`;
+  audio.play().catch(() => {});
+}
+
 function updateUI(track) {
   document.getElementById("not-playing").style.display = "none";
   document.getElementById("track-info").style.display  = "";
@@ -377,6 +487,7 @@ function updateUI(track) {
   document.title = track.title ? `${track.title} – ${track.artist || ""}` : "Adolar Radio";
 
   updateBookmarkBtn(track);
+  if (isJingle(track)) setLoved(false);
 
   const inner = document.getElementById("cover-inner");
   inner.innerHTML = "";
@@ -410,6 +521,7 @@ function getInactive() { return audio === audioA ? audioB : audioA; }
 function preloadNext() {
   const inactive = getInactive();
   if (!radio.queue.length || inactive.src) return;
+  if (jingleDueAfterCurrent()) return;
   const next = radio.queue[0];
   inactive.src = `${API}/api/stream/${next.id}`;
   inactive.preload = "auto";
@@ -418,6 +530,7 @@ function preloadNext() {
 
 function startCrossfade() {
   if (radio.cfActive || !radio.queue.length) return;
+  if (jingleDueAfterCurrent()) return;
   const inactive = getInactive();
 
   const doFade = () => {
@@ -491,6 +604,8 @@ function onTimeUpdate(e) {
   const inactive = audio === audioA ? audioB : audioA;
   if (left <= CF_PRELOAD && !inactive.src) preloadNext();
   if (left <= CF_OUT)    startCrossfade();
+
+  if (isJingle(currentTrack)) return;
 
   if (!_scrobbled && cur / dur >= 0.5) {
     _scrobbled = true;
@@ -575,7 +690,7 @@ async function initUser() {
 let _bookmarkedIds = new Set();
 
 document.getElementById("btn-bookmark").onclick = async () => {
-  if (!currentTrack || !_radioUser) return;
+  if (!currentTrack || isJingle(currentTrack) || !_radioUser) return;
   const btn = document.getElementById("btn-bookmark");
   try {
     await fetch(`${API}/api/radio/bookmark/${currentTrack.id}`, { method: "POST" });
@@ -589,6 +704,12 @@ document.getElementById("btn-bookmark").onclick = async () => {
 function updateBookmarkBtn(track) {
   const btn = document.getElementById("btn-bookmark");
   if (!_radioUser || !track) return;
+  if (isJingle(track)) {
+    btn.classList.remove("bookmarked");
+    btn.innerHTML = `<i class="ti ti-bookmark"></i>`;
+    btn.title = "Jingles können nicht gespeichert werden";
+    return;
+  }
   const already = _bookmarkedIds.has(track.id);
   btn.classList.toggle("bookmarked", already);
   btn.innerHTML = already
@@ -610,7 +731,7 @@ async function lfmInit() {
 }
 
 async function lfmCheckLoved(track) {
-  if (!lfm.connected || !track) return false;
+  if (!lfm.connected || !track || isJingle(track)) return false;
   const key = `${track.artist}||${track.title}`;
   if (lfm.lovedCache.has(key)) return lfm.lovedCache.get(key);
   try {
@@ -633,7 +754,7 @@ function setLoved(loved) {
 }
 
 document.getElementById("btn-love").onclick = async () => {
-  if (!lfm.connected || !currentTrack) return;
+  if (!lfm.connected || !currentTrack || isJingle(currentTrack)) return;
   const key = `${currentTrack.artist}||${currentTrack.title}`;
   const isLoved = lfm.lovedCache.get(key) || false;
   try {
@@ -659,7 +780,7 @@ function openSettings() {
 }
 
 // ── Init ──────────────────────────────────────────────────
-initUser().then(() => lfmInit()).then(() => startRadio());
+initUser().then(() => lfmInit()).then(() => loadStations()).then(() => startRadio());
 </script>
 </body>
 </html>

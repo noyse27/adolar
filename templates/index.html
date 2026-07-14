@@ -456,6 +456,206 @@
     #mobile-filter-head {
       display: none;
     }
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9998;
+      background: rgba(0,0,0,.62);
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal-box {
+      width: min(760px, 96vw);
+      max-height: 88vh;
+      overflow-y: auto;
+      background: var(--bg-primary);
+      border: 0.5px solid var(--border-medium);
+      border-radius: 12px;
+      padding: 22px;
+      box-shadow: 0 18px 52px rgba(0,0,0,.45);
+    }
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    #radio-modal-head {
+      cursor: move;
+      user-select: none;
+    }
+    .modal-title {
+      font-size: 16px;
+      font-weight: 650;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .modal-close {
+      width: 34px;
+      height: 34px;
+      border: 0.5px solid var(--border-subtle);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 18px;
+    }
+    .radio-station-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 0.5px solid var(--border-subtle);
+    }
+    .radio-station-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .radio-station-desc {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      margin-top: 2px;
+    }
+    .radio-row-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .icon-btn {
+      width: 34px;
+      height: 34px;
+      border: 0.5px solid var(--border-subtle);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px;
+    }
+    .icon-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
+    .icon-btn.danger:hover { color: #e03e3e; }
+    .radio-primary-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      padding: 9px 13px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .radio-secondary-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border: 0.5px solid var(--border-subtle);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+    .radio-form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .radio-input, .radio-select {
+      width: 100%;
+      border: 0.5px solid var(--border-subtle);
+      border-radius: 8px;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      padding: 8px 10px;
+      font-size: 13px;
+      outline: none;
+    }
+    .radio-builder-group {
+      border-top: 0.5px solid var(--border-subtle);
+      padding-top: 12px;
+      margin-top: 12px;
+    }
+    .radio-builder-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .radio-builder-title {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      font-weight: 650;
+    }
+    .radio-rule-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1.2fr auto;
+      gap: 8px;
+      margin-bottom: 8px;
+      align-items: center;
+    }
+    .radio-error {
+      display: none;
+      margin-top: 10px;
+      color: #f28b8b;
+      font-size: 12px;
+    }
+    .radio-jingle-box {
+      border-top: 0.5px solid var(--border-subtle);
+      margin-top: 12px;
+      padding-top: 12px;
+      display: grid;
+      grid-template-columns: 1fr 130px auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .radio-station-group {
+      margin-top: 14px;
+    }
+    .radio-station-group:first-child {
+      margin-top: 0;
+    }
+    .radio-group-title {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    #radio-test-banner {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 16px;
+      background: color-mix(in srgb, var(--accent) 18%, var(--bg-primary));
+      border-bottom: 0.5px solid var(--accent-border);
+      color: var(--text-primary);
+      font-size: 13px;
+    }
+    #radio-test-banner.visible {
+      display: flex;
+    }
     /* Last.fm heart */
     .btn-love {
       background: none;
@@ -1069,6 +1269,10 @@
       #results-header {
         padding: 8px 10px;
       }
+      #radio-test-banner {
+        padding: 8px 10px;
+        flex-wrap: wrap;
+      }
       #result-count {
         font-size: var(--text-sm);
       }
@@ -1269,6 +1473,26 @@
       #volume-wrap,
       #player-love {
         display: none !important;
+      }
+      .modal-backdrop {
+        padding: 8px;
+        align-items: stretch;
+      }
+      .modal-box {
+        width: 100%;
+        max-height: calc(100vh - 16px);
+        padding: 16px;
+      }
+      .radio-form-grid,
+      .radio-rule-row,
+      .radio-jingle-box {
+        grid-template-columns: 1fr;
+      }
+      .radio-station-row {
+        grid-template-columns: 1fr;
+      }
+      .radio-row-actions {
+        justify-content: flex-start;
       }
     }
   </style>
@@ -1567,6 +1791,13 @@
       </div>
     </div>
 
+    <div id="radio-test-banner">
+      <span id="radio-test-label">Testansicht aktiv</span>
+      <button class="radio-secondary-btn" onclick="returnToRadioDraft()">
+        <i class="ti ti-edit"></i><span>Zurück zur Senderbearbeitung</span>
+      </button>
+    </div>
+
     <div id="track-list"></div>
     <div id="pagination"></div>
 
@@ -1654,6 +1885,22 @@ const LANG = {
     sort_top_played:  "Meistgespielt",
     sort_loved_at:    "Zuletzt geliked",
     radio:            "Radio",
+    radio_manage:     "Radiosender",
+    radio_new:        "Neuer Sender",
+    radio_save:       "Speichern unter",
+    radio_test:       "Testen",
+    radio_name:       "Sendername",
+    radio_desc:       "Beschreibung",
+    radio_delete_confirm: (name) => `Radiosender „${name}" löschen?`,
+    radio_all_rules:  "Alles der folgenden",
+    radio_any_rules:  "Eines der folgenden",
+    radio_add_rule:   "Regel hinzufügen",
+    radio_start:      "Sender starten",
+    radio_edit:       "Sender bearbeiten",
+    radio_delete:     "Sender löschen",
+    radio_no_stations:"Keine Sender gefunden.",
+    radio_jingle:     "Jingle / Station-ID",
+    radio_jingle_every:"alle N Tracks",
     basket:           "Korb",
     basket_empty:     "Korb ist leer",
     basket_download:  "Als ZIP herunterladen",
@@ -1719,6 +1966,22 @@ const LANG = {
     sort_top_played:  "Most played",
     sort_loved_at:    "Last liked",
     radio:            "Radio",
+    radio_manage:     "Radio stations",
+    radio_new:        "New station",
+    radio_save:       "Save as",
+    radio_test:       "Test",
+    radio_name:       "Station name",
+    radio_desc:       "Description",
+    radio_delete_confirm: (name) => `Delete radio station "${name}"?`,
+    radio_all_rules:  "All of the following",
+    radio_any_rules:  "Any of the following",
+    radio_add_rule:   "Add rule",
+    radio_start:      "Start station",
+    radio_edit:       "Edit station",
+    radio_delete:     "Delete station",
+    radio_no_stations:"No stations found.",
+    radio_jingle:     "Jingle / station ID",
+    radio_jingle_every:"every N tracks",
     basket:           "Cart",
     basket_empty:     "Cart is empty",
     basket_download:  "Download as ZIP",
@@ -1988,6 +2251,10 @@ const progress   = $("progress");
 
 // ── Radio state ───────────────────────────────────────────
 const radio = { active: false, queue: [], playedIds: [], cfTimer: null, cfActive: false };
+radio.stationId = 1;
+radio.stationName = "Adolar Radio";
+radio.station = null;
+radio.tracksSinceJingle = 0;
 const CF_PRELOAD = 25; // seconds before end: start buffering next track
 const CF_OUT     = 12; // seconds before end: start fade-out
 const CF_IN      =  8; // fade-in duration
@@ -2035,6 +2302,41 @@ function makeCover(track, size = 42) {
   return img;
 }
 
+function isJingle(item) {
+  return Boolean(item && (item.type === "jingle" || item.is_jingle));
+}
+
+function stationJingleEvery() {
+  return Number(radio.station?.jingle_every_tracks || 0);
+}
+
+function stationHasJingle() {
+  return Boolean(
+    radio.station &&
+    radio.station.has_jingle &&
+    radio.station.jingle_enabled &&
+    stationJingleEvery() > 0
+  );
+}
+
+function jingleDueAfterCurrent() {
+  return stationHasJingle() && !isJingle(state.currentTrack) &&
+    radio.tracksSinceJingle + 1 >= stationJingleEvery();
+}
+
+function makeJingleItem() {
+  return {
+    id: `jingle-${radio.stationId}`,
+    type: "jingle",
+    is_jingle: true,
+    title: radio.stationName || t().radio,
+    artist: "Station-ID",
+    album: "",
+    duration: 0,
+    has_cover: false,
+  };
+}
+
 // ── Fetch ─────────────────────────────────────────────────
 let _loadTracksRequest = 0;
 
@@ -2053,6 +2355,7 @@ function _setSearching(on) {
 
 async function loadTracks(page = 1, forceCount = false) {
   if (radio.active) return;
+  $("radio-test-banner")?.classList.remove("visible");
   const requestId = ++_loadTracksRequest;
   updateSavePlaylistBtn();
   updateMobileFilterButton();
@@ -2310,6 +2613,10 @@ function updatePlayerUI(t) {
     ph.textContent = initials(t.artist);
     wrap.appendChild(ph);
   }
+  if (isJingle(t)) {
+    applyLovedState($("player-love"), false);
+    return;
+  }
   if (lfm.connected) {
     const key = `${t.artist}||${t.title}`;
     const loved = Boolean(t.loved || lfm.lovedCache.get(key));
@@ -2337,21 +2644,47 @@ function playTrack(idx) {
   renderTracks();
 }
 
+function playJingle() {
+  const item = makeJingleItem();
+  state.currentIdx = -1;
+  state.currentTrack = item;
+  _scrobbled = true;
+  _playCounted = true;
+  radio.cfActive = false;
+  clearTimeout(radio.cfTimer);
+  audioB.pause(); audioB.removeAttribute("src"); audioB.load();
+  updatePlayerUI(item);
+  audio.src = `${API}/api/radio-stations/${radio.stationId}/jingle`;
+  audio.play().catch(() => {});
+  renderTracks();
+}
+
 // ── Radio functions ───────────────────────────────────────
 async function loadRadioQueue(count, excludeIds = []) {
   const p = new URLSearchParams({ count });
   excludeIds.forEach(id => p.append("exclude", id));
+  const stationId = radio.stationId || 1;
   try {
-    const res = await fetch(`${API}/api/random?${p}`);
+    const res = await fetch(`${API}/api/radio-stations/${stationId}/tracks?${p}`);
+    if (!res.ok) throw new Error("station failed");
     return await res.json();
   } catch { return []; }
 }
 
-async function startRadio() {
+async function startRadio(station = null) {
+  $("radio-test-banner")?.classList.remove("visible");
   radio.active = true;
   radio.queue  = [];
   radio.playedIds = [];
+  radio.tracksSinceJingle = 0;
+  if (station) {
+    radio.stationId = station.id;
+    radio.stationName = station.name;
+    radio.station = station;
+  }
   $("btn-radio").classList.add("active");
+  $("btn-radio").innerHTML = `<i class="ti ti-radio"></i> ${esc(radio.stationName || t().radio)}`;
+  closeRadioPanel();
 
   // Fetch 5 tracks first → play immediately, then fetch remaining in background
   const initial = await loadRadioQueue(5);
@@ -2360,7 +2693,7 @@ async function startRadio() {
   radio.queue   = initial;
   radio.session = (radio.session || 0) + 1; // session token prevents stale fills
   state.tracks  = [...radio.queue];
-  $("result-count").textContent = t().radio_loading;
+  $("result-count").textContent = `${radio.stationName || t().radio} – ...`;
   playTrack(0);
 
   // Background fill to 25 — guarded by session token
@@ -2369,7 +2702,7 @@ async function startRadio() {
     if (!radio.active || radio.session !== mySession) return;
     radio.queue.push(...more);
     state.tracks = [...radio.queue];
-    $("result-count").textContent = t().radio_tracks(radio.queue.length);
+    $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
     renderTracks();
   });
 }
@@ -2380,14 +2713,34 @@ function stopRadio() {
   clearTimeout(radio.cfTimer);
   audioB.pause(); audioB.removeAttribute("src"); audioB.load();
   $("btn-radio").classList.remove("active");
+  $("btn-radio").innerHTML = `<i class="ti ti-radio"></i> ${t().radio}`;
 }
 
 async function radioNext() {
-  if (!radio.active || !radio.queue.length) return;
+  if (!radio.active) return;
+
+  if (isJingle(state.currentTrack)) {
+    if (!radio.queue.length) {
+      const fresh = await loadRadioQueue(20, radio.playedIds.slice(-100));
+      radio.queue.push(...fresh);
+    }
+    if (!radio.queue.length) { stopRadio(); return; }
+    state.tracks = [...radio.queue];
+    state.currentIdx = 0;
+    state.currentTrack = radio.queue[0];
+    renderTracks();
+    $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
+    return;
+  }
+
+  if (!radio.queue.length) return;
 
   // shift played track out
   const done = radio.queue.shift();
-  radio.playedIds.push(done.id);
+  if (done) {
+    radio.playedIds.push(done.id);
+    radio.tracksSinceJingle++;
+  }
 
   // refill: when queue drops to 5, load 20 more
   if (radio.queue.length <= 5) {
@@ -2399,11 +2752,20 @@ async function radioNext() {
 
   if (!radio.queue.length) { stopRadio(); return; }
 
+  if (stationHasJingle() && radio.tracksSinceJingle >= stationJingleEvery()) {
+    radio.tracksSinceJingle = 0;
+    state.tracks = [...radio.queue];
+    renderTracks();
+    $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
+    playJingle();
+    return;
+  }
+
   state.tracks = [...radio.queue];
   state.currentIdx = 0;
   state.currentTrack = radio.queue[0];
   renderTracks();
-  $("result-count").textContent = `Radio – ${radio.queue.length} Tracks`;
+  $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
 }
 
 function preloadNext(nextTrackId) {
@@ -2429,7 +2791,7 @@ function startCrossfade() {
   audioB.play().catch(() => {
     // Autoplay blocked or src invalid — fall back to direct next
     radio.cfActive = false;
-    radioNext().then(() => { if (radio.queue.length) playTrack(0); });
+    radioNext().then(() => { if (radio.queue.length && !isJingle(state.currentTrack)) playTrack(0); });
   });
 
   const startTime = performance.now();
@@ -2479,7 +2841,7 @@ audio.onended = async () => {
   if (radio.active) {
     if (radio.cfActive) return; // crossfade already handles the transition
     await radioNext();
-    if (radio.queue.length) playTrack(0);
+    if (radio.queue.length && !isJingle(state.currentTrack)) playTrack(0);
   } else {
     const next = state.currentIdx + 1;
     if (next < state.tracks.length) playTrack(next);
@@ -2493,6 +2855,8 @@ audio.ontimeupdate = () => {
   progress.value = (audio.currentTime / audio.duration) * 100;
   $("time-cur").textContent = fmt(audio.currentTime);
   $("time-dur").textContent = fmt(audio.duration);
+
+  if (isJingle(state.currentTrack)) return;
 
   // Scrobble after 50% playback (and at least 30s played)
   if (!_scrobbled && audio.currentTime >= 30 && audio.currentTime / audio.duration >= 0.5) {
@@ -2512,7 +2876,7 @@ audio.ontimeupdate = () => {
   if (radio.active) {
     const remaining = audio.duration - audio.currentTime;
     const next = radio.queue[1];
-    if (next) {
+    if (next && !jingleDueAfterCurrent()) {
       // Only crossfade if track is long enough (skip CF for short tracks)
       const trackDur = audio.duration || 0;
       const cfEnabled = trackDur > CF_OUT + 2; // need at least CF_OUT+2s
@@ -2542,7 +2906,7 @@ $("btn-next").onclick = () => {
     audioB.pause(); audioB.removeAttribute("src"); audioB.load();
     audio.volume = parseFloat($("volume").value) || 0.8;
     radioNext().then(() => {
-      if (radio.queue.length) playTrack(0);
+      if (radio.queue.length && !isJingle(state.currentTrack)) playTrack(0);
     });
     return;
   }
@@ -2550,14 +2914,383 @@ $("btn-next").onclick = () => {
   if (next < state.tracks.length) playTrack(next);
 };
 
-$("btn-radio").onclick = () => {
-  if (radio.active) {
-    stopRadio();
-    loadTracks(1);
-  } else {
-    startRadio();
-  }
+$("btn-radio").onclick = () => openRadioPanel();
+
+// ── Radio station management ──────────────────────────────
+let _radioStations = [];
+let _editingRadioStation = null;
+let _radioDraftAfterTest = null;
+
+const RADIO_FIELDS = {
+  title: "Titel",
+  artist: "Interpret",
+  album: "Album",
+  genre: "Genre",
+  year: "Jahr",
+  decade: "Jahrzehnt",
+  playcount: "Playcount",
 };
+const RADIO_TEXT_OPS = {
+  contains: "enthält",
+  not_contains: "enthält nicht",
+};
+const RADIO_NUM_OPS = {
+  eq: "ist",
+  ne: "ist nicht",
+  gt: "ist größer",
+  lt: "ist kleiner",
+};
+
+function _opsForField(field) {
+  return ["title", "artist", "album", "genre"].includes(field) ? RADIO_TEXT_OPS : RADIO_NUM_OPS;
+}
+
+async function loadRadioStations() {
+  try {
+    const adminParam = _me?.role === "admin" ? "?admin=1" : "";
+    const r = await fetch(`${API}/api/radio-stations${adminParam}`);
+    _radioStations = await r.json();
+  } catch {
+    _radioStations = [{ id: 1, name: "Adolar Radio", description: "", scope: "global", is_system: true, filter: {mode:"all", rules:[]} }];
+  }
+  renderRadioStations();
+}
+
+function openRadioPanel() {
+  $("radio-modal").classList.add("open");
+  loadRadioStations();
+}
+
+function closeRadioPanel() {
+  $("radio-modal")?.classList.remove("open");
+}
+
+function renderRadioStations() {
+  const list = $("radio-station-list");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!_radioStations.length) {
+    list.innerHTML = `<div class="empty-state" style="padding:24px">${t().radio_no_stations}</div>`;
+    return;
+  }
+  const groups = [];
+  groups.push(["Global", _radioStations.filter(st => st.scope !== "private")]);
+  if (_me) {
+    groups.push(["Meine privaten Sender", _radioStations.filter(st => st.scope === "private" && st.owner_id === _me.id)]);
+  }
+  if (_me?.role === "admin") {
+    const byOwner = new Map();
+    _radioStations
+      .filter(st => st.scope === "private" && st.owner_id !== _me.id)
+      .forEach(st => {
+        const owner = st.owner_name || "Unbekannt";
+        if (!byOwner.has(owner)) byOwner.set(owner, []);
+        byOwner.get(owner).push(st);
+      });
+    [...byOwner.entries()].forEach(([owner, items]) => groups.push([`Private Sender von ${owner}`, items]));
+  }
+  groups.filter(([, items]) => items.length).forEach(([title, items]) => {
+    const group = document.createElement("div");
+    group.className = "radio-station-group";
+    group.innerHTML = `<div class="radio-group-title">${esc(title)}</div>`;
+    items.forEach(st => group.appendChild(renderRadioStationRow(st)));
+    list.appendChild(group);
+  });
+  $("btn-radio-new").style.display = _me ? "inline-flex" : "none";
+}
+
+function renderRadioStationRow(st) {
+  const row = document.createElement("div");
+  row.className = "radio-station-row";
+  const isOwner = _me && st.owner_id === _me.id;
+  const canEdit = _me && !st.is_system && (st.scope === "private" ? (isOwner || _me.role === "admin") : _me.role === "admin");
+  const canDelete = canEdit;
+  row.innerHTML = `
+    <div>
+      <div class="radio-station-name">${esc(st.name)}</div>
+      <div class="radio-station-desc">${esc(st.description || (st.is_system ? "Default" : st.scope === "private" ? "Privat" : "Global"))}</div>
+    </div>
+    <div class="radio-row-actions">
+      <button class="icon-btn station-play" title="${t().radio_start}"><i class="ti ti-player-play"></i></button>
+      ${canEdit ? `<button class="icon-btn station-edit" title="${t().radio_edit}"><i class="ti ti-settings"></i></button>` : ""}
+      ${canDelete ? `<button class="icon-btn danger station-delete" title="${t().radio_delete}"><i class="ti ti-trash"></i></button>` : ""}
+    </div>`;
+  row.querySelector(".station-play").onclick = () => startRadio(st);
+  const edit = row.querySelector(".station-edit");
+  if (edit) edit.onclick = () => openRadioEditor(st);
+  const del = row.querySelector(".station-delete");
+  if (del) del.onclick = async () => {
+    if (!confirm(t().radio_delete_confirm(st.name))) return;
+    await fetch(`${API}/api/radio-stations/${st.id}`, { method: "DELETE" });
+    await loadRadioStations();
+  };
+  return row;
+}
+
+function openRadioEditor(station = null) {
+  _editingRadioStation = station;
+  $("radio-editor-title").textContent = station ? t().radio_edit : t().radio_new;
+  $("radio-name").value = station?.name || "";
+  $("radio-desc").value = station?.description || "";
+  $("radio-scope-wrap").style.display = _me?.role === "admin" ? "block" : "none";
+  $("radio-scope").value = station?.scope || (_me?.role === "admin" ? "global" : "private");
+  $("radio-jingle-enabled").checked = Boolean(station?.jingle_enabled);
+  $("radio-jingle-every").value = station?.jingle_every_tracks || 5;
+  $("radio-jingle-file").value = "";
+  $("radio-jingle-delete").style.display = station?.has_jingle ? "inline-flex" : "none";
+  $("radio-jingle-status").textContent = station?.has_jingle ? "Jingle vorhanden" : "";
+  $("radio-error").style.display = "none";
+  const filter = station?.filter || { mode: "all", rules: [] };
+  const allRules = [];
+  const anyRules = [];
+  (filter.rules || []).forEach(rule => {
+    if (rule.rules && rule.mode === "any") anyRules.push(...rule.rules);
+    else if (!rule.rules) allRules.push(rule);
+  });
+  $("radio-rules-all").innerHTML = "";
+  $("radio-rules-any").innerHTML = "";
+  (allRules.length ? allRules : [{field:"artist", op:"contains", value:""}]).forEach(r => addRadioRule("all", r));
+  anyRules.forEach(r => addRadioRule("any", r));
+  $("radio-editor").style.display = "block";
+}
+
+function restoreRadioEditorDraft(draft) {
+  _editingRadioStation = draft.editingStation;
+  $("radio-editor-title").textContent = _editingRadioStation ? t().radio_edit : t().radio_new;
+  $("radio-name").value = draft.name || "";
+  $("radio-desc").value = draft.description || "";
+  $("radio-scope-wrap").style.display = _me?.role === "admin" ? "block" : "none";
+  $("radio-scope").value = draft.scope || (_me?.role === "admin" ? "global" : "private");
+  $("radio-jingle-enabled").checked = Boolean(draft.jingle_enabled);
+  $("radio-jingle-every").value = draft.jingle_every_tracks || 5;
+  $("radio-jingle-file").value = "";
+  $("radio-jingle-delete").style.display = draft.has_jingle ? "inline-flex" : "none";
+  $("radio-jingle-status").textContent = draft.has_jingle ? "Jingle vorhanden" : "";
+  $("radio-error").style.display = "none";
+  $("radio-rules-all").innerHTML = "";
+  $("radio-rules-any").innerHTML = "";
+  const allRules = [];
+  const anyRules = [];
+  (draft.filter?.rules || []).forEach(rule => {
+    if (rule.rules && rule.mode === "any") anyRules.push(...rule.rules);
+    else if (!rule.rules) allRules.push(rule);
+  });
+  (allRules.length ? allRules : [{field:"artist", op:"contains", value:""}]).forEach(r => addRadioRule("all", r));
+  anyRules.forEach(r => addRadioRule("any", r));
+  $("radio-editor").style.display = "block";
+}
+
+function closeRadioEditor() {
+  $("radio-editor").style.display = "none";
+  _editingRadioStation = null;
+}
+
+function addRadioRule(group, rule = {}) {
+  const wrap = group === "any" ? $("radio-rules-any") : $("radio-rules-all");
+  const row = document.createElement("div");
+  row.className = "radio-rule-row";
+  const field = rule.field || "title";
+  const ops = _opsForField(field);
+  const op = rule.op && ops[rule.op] ? rule.op : Object.keys(ops)[0];
+  const val = esc(rule.value ?? "").replace(/"/g, "&quot;");
+  row.innerHTML = `
+    <select class="radio-select radio-field">${Object.entries(RADIO_FIELDS).map(([v,l]) => `<option value="${v}" ${v===field?"selected":""}>${l}</option>`).join("")}</select>
+    <select class="radio-select radio-op">${Object.entries(ops).map(([v,l]) => `<option value="${v}" ${v===op?"selected":""}>${l}</option>`).join("")}</select>
+    <input class="radio-input radio-value" type="text" value="${val}">
+    <button class="icon-btn danger radio-rule-remove" title="Entfernen"><i class="ti ti-minus"></i></button>`;
+  const fieldEl = row.querySelector(".radio-field");
+  const opEl = row.querySelector(".radio-op");
+  fieldEl.onchange = () => {
+    const nextOps = _opsForField(fieldEl.value);
+    opEl.innerHTML = Object.entries(nextOps).map(([v,l]) => `<option value="${v}">${l}</option>`).join("");
+  };
+  row.querySelector(".radio-rule-remove").onclick = () => row.remove();
+  wrap.appendChild(row);
+}
+
+function readRadioRuleRows(group) {
+  const wrap = group === "any" ? $("radio-rules-any") : $("radio-rules-all");
+  return [...wrap.querySelectorAll(".radio-rule-row")].map(row => ({
+    field: row.querySelector(".radio-field").value,
+    op: row.querySelector(".radio-op").value,
+    value: row.querySelector(".radio-value").value.trim(),
+  })).filter(r => r.value !== "");
+}
+
+function buildRadioFilterFromEditor() {
+  const allRules = readRadioRuleRows("all");
+  const anyRules = readRadioRuleRows("any");
+  const rules = [...allRules];
+  if (anyRules.length) rules.push({ mode: "any", rules: anyRules });
+  return { mode: "all", rules };
+}
+
+async function saveRadioJingle(station) {
+  const fileEl = $("radio-jingle-file");
+  const every = Math.max(1, Math.min(Number($("radio-jingle-every").value || 5), 100));
+  const enabled = $("radio-jingle-enabled").checked;
+  if (fileEl.files && fileEl.files[0]) {
+    const fd = new FormData();
+    fd.append("file", fileEl.files[0]);
+    fd.append("every", String(every));
+    fd.append("enabled", enabled ? "1" : "0");
+    const r = await fetch(`${API}/api/radio-stations/${station.id}/jingle`, {
+      method: "POST",
+      body: fd,
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Jingle-Upload fehlgeschlagen");
+    return await r.json();
+  }
+  if (station.has_jingle || _editingRadioStation?.has_jingle) {
+    const r = await fetch(`${API}/api/radio-stations/${station.id}/jingle`, {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ every, enabled }),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Jingle-Einstellungen fehlgeschlagen");
+    return await r.json();
+  }
+  return station;
+}
+
+async function deleteRadioJingle() {
+  if (!_editingRadioStation) return;
+  const err = $("radio-error");
+  err.style.display = "none";
+  const r = await fetch(`${API}/api/radio-stations/${_editingRadioStation.id}/jingle`, { method: "DELETE" });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    err.textContent = d.error || "Jingle löschen fehlgeschlagen";
+    err.style.display = "block";
+    return;
+  }
+  _editingRadioStation = await r.json();
+  $("radio-jingle-enabled").checked = false;
+  $("radio-jingle-every").value = _editingRadioStation.jingle_every_tracks || 5;
+  $("radio-jingle-file").value = "";
+  $("radio-jingle-delete").style.display = "none";
+  $("radio-jingle-status").textContent = "";
+  await loadRadioStations();
+}
+
+async function saveRadioStation() {
+  const err = $("radio-error");
+  err.style.display = "none";
+  const name = $("radio-name").value.trim();
+  if (!name) {
+    err.textContent = t().radio_name;
+    err.style.display = "block";
+    return;
+  }
+  const payload = {
+    name,
+    description: $("radio-desc").value.trim(),
+    scope: $("radio-scope").value,
+    filter: buildRadioFilterFromEditor(),
+  };
+  const url = _editingRadioStation
+    ? `${API}/api/radio-stations/${_editingRadioStation.id}`
+    : `${API}/api/radio-stations`;
+  const r = await fetch(url, {
+    method: _editingRadioStation ? "PUT" : "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    err.textContent = d.error || "Speichern fehlgeschlagen";
+    err.style.display = "block";
+    return;
+  }
+  try {
+    const station = await r.json();
+    await saveRadioJingle(station);
+  } catch (e) {
+    err.textContent = e.message || "Jingle speichern fehlgeschlagen";
+    err.style.display = "block";
+    return;
+  }
+  closeRadioEditor();
+  await loadRadioStations();
+}
+
+async function testRadioStationFilter() {
+  const err = $("radio-error");
+  err.style.display = "none";
+  const filter = buildRadioFilterFromEditor();
+  _radioDraftAfterTest = {
+    editingStation: _editingRadioStation,
+    name: $("radio-name").value.trim(),
+    description: $("radio-desc").value.trim(),
+    scope: $("radio-scope").value,
+    filter,
+    jingle_enabled: $("radio-jingle-enabled").checked,
+    jingle_every_tracks: Number($("radio-jingle-every").value || 5),
+    has_jingle: _editingRadioStation?.has_jingle || false,
+  };
+  const payload = { filter, count: 50 };
+  const r = await fetch(`${API}/api/radio-stations/test`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    err.textContent = d.error || "Test fehlgeschlagen";
+    err.style.display = "block";
+    return;
+  }
+  const data = await r.json();
+  stopRadio();
+  state.tracks = data.results || [];
+  state.total = data.total || state.tracks.length;
+  state.page = 1;
+  state.pages = 1;
+  renderTracks();
+  renderPagination();
+  $("result-count").textContent = `Test – ${state.tracks.length} Tracks`;
+  $("radio-test-label").textContent = `Testansicht: ${_radioDraftAfterTest.name || "Neuer Sender"} – ${state.tracks.length} Tracks`;
+  $("radio-test-banner").classList.add("visible");
+  closeRadioPanel();
+  document.getElementById('track-list')?.scrollTo({ top: 0, behavior: 'instant' });
+}
+
+function returnToRadioDraft() {
+  if (!_radioDraftAfterTest) return;
+  openRadioPanel();
+  restoreRadioEditorDraft(_radioDraftAfterTest);
+}
+
+function setupRadioModalDrag() {
+  const box = $("radio-modal-box");
+  const head = $("radio-modal-head");
+  if (!box || !head) return;
+  let drag = null;
+  head.addEventListener("pointerdown", e => {
+    if (e.target.closest("button")) return;
+    const r = box.getBoundingClientRect();
+    box.style.position = "fixed";
+    box.style.left = `${r.left}px`;
+    box.style.top = `${r.top}px`;
+    box.style.width = `${r.width}px`;
+    box.style.margin = "0";
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    head.setPointerCapture(e.pointerId);
+  });
+  head.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const maxLeft = Math.max(0, window.innerWidth - box.offsetWidth);
+    const maxTop = Math.max(0, window.innerHeight - Math.min(box.offsetHeight, window.innerHeight));
+    const left = Math.min(Math.max(0, e.clientX - drag.dx), maxLeft);
+    const top = Math.min(Math.max(0, e.clientY - drag.dy), maxTop);
+    box.style.left = `${left}px`;
+    box.style.top = `${top}px`;
+  });
+  head.addEventListener("pointerup", e => {
+    drag = null;
+    try { head.releasePointerCapture(e.pointerId); } catch {}
+  });
+}
 
 // ── Mini-Player Popup ─────────────────────────────────────
 const miniCh = new BroadcastChannel("adolar-player");
@@ -2569,7 +3302,7 @@ function miniIsOpen() {
 
 function broadcastTrack(t) {
   if (!miniIsOpen()) return;
-  const key = t ? `${t.artist}||${t.title}` : null;
+  const key = t && !isJingle(t) ? `${t.artist}||${t.title}` : null;
   const loved = key ? (lfm.lovedCache.get(key) || false) : false;
   miniCh.postMessage({ type: "track", track: t, playing: !audio.paused, loved, lfmConnected: lfm.connected });
 }
@@ -2683,7 +3416,7 @@ async function lfmDisconnect() {
 }
 
 async function lfmScrobble(track) {
-  if (!lfm.connected || !track) return;
+  if (!lfm.connected || !track || isJingle(track)) return;
   fetch(`${API}/api/lastfm/scrobble`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2692,7 +3425,7 @@ async function lfmScrobble(track) {
 }
 
 async function lfmToggleLove(track, btn) {
-  if (!lfm.connected || !track) return;
+  if (!lfm.connected || !track || isJingle(track)) return;
   const key    = `${track.artist}||${track.title}`;
   const isLoved = lfm.lovedCache.get(key) || false;
   const action  = isLoved ? "unlove" : "love";
@@ -3392,7 +4125,10 @@ async function loadMe() {
     if (scanWrap) scanWrap.style.display = "none";
   }
 }
-loadMe().then(() => loadPlaylists());
+loadMe().then(() => {
+  loadPlaylists();
+  loadRadioStations();
+});
 
 // ── User dropdown toggle ──────────────────────────────────────────────────────
 $("btn-user-menu").onclick = (e) => {
@@ -3556,6 +4292,7 @@ setInterval(checkDiscoBadge, 30000);
 // ── Init ───────────────────────────────────────────────────
 (async () => {
   applyLang();
+  setupRadioModalDrag();
   await Promise.all([loadStats(), loadGenres(), loadTracks(1), lfmInit()]);
 
   const res  = await fetch(`${API}/api/scan/status`);
@@ -3566,6 +4303,82 @@ setInterval(checkDiscoBadge, 30000);
   }
 })();
 </script>
+
+<!-- ── Radio Stations Modal ── -->
+<div id="radio-modal" class="modal-backdrop" onclick="if(event.target===this)closeRadioPanel()">
+  <div class="modal-box" id="radio-modal-box">
+    <div class="modal-head" id="radio-modal-head">
+      <div class="modal-title"><i class="ti ti-radio"></i><span>Radiosender</span></div>
+      <button class="modal-close" onclick="closeRadioPanel()"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div id="radio-station-list"></div>
+
+    <div style="display:flex;justify-content:space-between;gap:10px;margin-top:16px;flex-wrap:wrap">
+      <button id="btn-radio-new" class="radio-primary-btn" onclick="openRadioEditor()">
+        <i class="ti ti-plus"></i><span>Neuer Sender</span>
+      </button>
+      <button class="radio-secondary-btn" onclick="closeRadioPanel()">Schließen</button>
+    </div>
+
+    <div id="radio-editor" style="display:none;margin-top:18px;border-top:0.5px solid var(--border-subtle);padding-top:18px">
+      <div class="modal-title" id="radio-editor-title" style="margin-bottom:12px">Neuer Sender</div>
+      <div class="radio-form-grid">
+        <input id="radio-name" class="radio-input" type="text" placeholder="Sendername">
+        <input id="radio-desc" class="radio-input" type="text" placeholder="Beschreibung">
+      </div>
+      <div id="radio-scope-wrap" style="display:none;margin-bottom:14px">
+        <select id="radio-scope" class="radio-select" style="max-width:220px">
+          <option value="global">Global</option>
+          <option value="private">Privat</option>
+        </select>
+      </div>
+      <div class="radio-jingle-box">
+        <label style="display:flex;align-items:center;gap:8px;color:var(--text-primary);font-size:13px;font-weight:600">
+          <input id="radio-jingle-enabled" type="checkbox">
+          <span data-i18n="radio_jingle">Jingle / Station-ID</span>
+        </label>
+        <input id="radio-jingle-every" class="radio-input" type="number" min="1" max="100" value="5" title="alle N Tracks">
+        <input id="radio-jingle-file" class="radio-input" type="file" accept=".mp3,.m4a,.ogg,.opus,.wav,.aac,audio/*">
+        <button id="radio-jingle-delete" class="radio-secondary-btn" type="button" onclick="deleteRadioJingle()" style="display:none">
+          <i class="ti ti-trash"></i><span>Jingle löschen</span>
+        </button>
+        <div id="radio-jingle-status" style="grid-column:1/-1;color:var(--text-tertiary);font-size:12px"></div>
+      </div>
+
+      <div class="radio-builder-group">
+        <div class="radio-builder-head">
+          <div class="radio-builder-title">Alles der folgenden</div>
+          <button class="radio-secondary-btn" onclick="addRadioRule('all')">
+            <i class="ti ti-plus"></i><span>Regel hinzufügen</span>
+          </button>
+        </div>
+        <div id="radio-rules-all"></div>
+      </div>
+
+      <div class="radio-builder-group">
+        <div class="radio-builder-head">
+          <div class="radio-builder-title">Eines der folgenden</div>
+          <button class="radio-secondary-btn" onclick="addRadioRule('any')">
+            <i class="ti ti-plus"></i><span>Regel hinzufügen</span>
+          </button>
+        </div>
+        <div id="radio-rules-any"></div>
+      </div>
+
+      <div id="radio-error" class="radio-error"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap">
+        <button class="radio-secondary-btn" onclick="closeRadioEditor()">Abbrechen</button>
+        <button class="radio-secondary-btn" onclick="testRadioStationFilter()">
+          <i class="ti ti-list-search"></i><span>Testen</span>
+        </button>
+        <button class="radio-primary-btn" onclick="saveRadioStation()">
+          <i class="ti ti-device-floppy"></i><span>Speichern unter</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ── User Management Modal ── -->
 <div id="usermgmt-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);align-items:center;justify-content:center" onclick="if(event.target===this)closeUserMgmt()">

@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import json
 from contextlib import contextmanager
 
 DB_PATH = os.environ.get("DB_PATH", "/data/adolar.db")
@@ -153,6 +154,23 @@ def init_db():
                 PRIMARY KEY (playlist_id, track_id)
             );
             CREATE INDEX IF NOT EXISTS idx_plt_playlist ON playlist_tracks(playlist_id, added_at);
+
+            CREATE TABLE IF NOT EXISTS radio_stations (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT    NOT NULL,
+                description TEXT    NOT NULL DEFAULT '',
+                filter_json TEXT    NOT NULL DEFAULT '{"mode":"all","rules":[]}',
+                scope       TEXT    NOT NULL DEFAULT 'global',
+                owner_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                jingle_path TEXT,
+                jingle_every_tracks INTEGER NOT NULL DEFAULT 0,
+                jingle_enabled INTEGER NOT NULL DEFAULT 0,
+                is_system   INTEGER NOT NULL DEFAULT 0,
+                created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at  TEXT    DEFAULT (datetime('now')),
+                updated_at  TEXT    DEFAULT (datetime('now')),
+                UNIQUE(scope, owner_id, name)
+            );
         """)
         # Seed system playlists (idempotent)
         _seed_system_playlists(conn)
@@ -163,11 +181,20 @@ def init_db():
             "ALTER TABLE tracks ADD COLUMN play_count_tag_dirty INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tracks ADD COLUMN loved INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN contributes_playcount INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE radio_stations ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE radio_stations ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'",
+            "ALTER TABLE radio_stations ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE",
+            "ALTER TABLE radio_stations ADD COLUMN jingle_path TEXT",
+            "ALTER TABLE radio_stations ADD COLUMN jingle_every_tracks INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE radio_stations ADD COLUMN jingle_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE radio_stations ADD COLUMN created_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+            "ALTER TABLE radio_stations ADD COLUMN updated_at TEXT",
         ]:
             try:
                 conn.execute(migration)
             except Exception:
                 pass
+        _seed_radio_stations(conn)
         # Play-count/BPM updates must not churn the full-text index.
         conn.executescript("""
             DROP TRIGGER IF EXISTS tracks_au;
@@ -207,6 +234,17 @@ def _seed_system_playlists(conn):
                 "INSERT INTO playlists (owner_id, name, filters, sort, is_system) VALUES (NULL,?,?,?,1)",
                 (name, filters, sort)
             )
+
+
+def _seed_radio_stations(conn):
+    conn.execute("""
+        INSERT OR IGNORE INTO radio_stations
+            (id, name, description, filter_json, scope, owner_id, jingle_every_tracks,
+             jingle_enabled, is_system, created_by)
+        VALUES
+            (1, 'Adolar Radio', 'Alle Tracks in zufälliger Reihenfolge',
+             '{"mode":"all","rules":[]}', 'global', NULL, 0, 0, 1, NULL)
+    """)
 
 
 def _norm_text(value: str | None) -> str:
@@ -518,6 +556,340 @@ def get_random_tracks(count=25, exclude_ids=None):
         d["has_cover"] = bool(d["cover_hash"])
         tracks.append(d)
     return tracks
+
+
+# ── Radio stations ───────────────────────────────────────────────────────────
+
+_RADIO_TEXT_FIELDS = {
+    "title": "t.title",
+    "artist": "t.artist",
+    "album": "t.album",
+    "genre": "t.genre",
+}
+_RADIO_NUM_FIELDS = {
+    "year": "t.year",
+    "decade": "t.year",
+    "playcount": "COALESCE(upc.count, 0)",
+}
+
+
+def _track_rows_to_dicts(rows) -> list[dict]:
+    import os
+
+    def _fmt(s):
+        if not s: return "0:00"
+        m, sec = divmod(int(s), 60)
+        return f"{m}:{sec:02d}"
+
+    def _file_format(path):
+        return os.path.splitext(path)[1].lstrip(".").upper() if path else "MP3"
+
+    tracks = []
+    for r in rows:
+        d = dict(r)
+        d["duration_fmt"] = _fmt(d["duration"])
+        d["format"] = _file_format(d["path"])
+        d["has_cover"] = bool(d["cover_hash"])
+        d["user_play_count"] = d.get("user_play_count", 0)
+        tracks.append(d)
+    return tracks
+
+
+def _normalize_radio_filter(filter_def) -> dict:
+    if not isinstance(filter_def, dict):
+        return {"mode": "all", "rules": []}
+    mode = filter_def.get("mode")
+    if mode not in ("all", "any"):
+        mode = "all"
+    rules = filter_def.get("rules")
+    if not isinstance(rules, list):
+        rules = []
+    return {"mode": mode, "rules": rules[:50]}
+
+
+def validate_radio_filter(filter_def) -> dict:
+    """Return a normalized filter tree or raise ValueError."""
+    def walk(node, depth=0):
+        if depth > 4:
+            raise ValueError("filter too deeply nested")
+        node = _normalize_radio_filter(node)
+        out = {"mode": node["mode"], "rules": []}
+        for rule in node["rules"]:
+            if not isinstance(rule, dict):
+                continue
+            if "rules" in rule:
+                child = walk(rule, depth + 1)
+                if child["rules"]:
+                    out["rules"].append(child)
+                continue
+            field = rule.get("field")
+            op = rule.get("op")
+            value = rule.get("value")
+            if field in _RADIO_TEXT_FIELDS:
+                if op not in ("contains", "not_contains"):
+                    raise ValueError(f"invalid operator for {field}")
+                value = str(value or "").strip()
+                if value:
+                    out["rules"].append({"field": field, "op": op, "value": value[:120]})
+            elif field in _RADIO_NUM_FIELDS:
+                if op not in ("eq", "ne", "gt", "lt"):
+                    raise ValueError(f"invalid operator for {field}")
+                try:
+                    num = int(value)
+                except (TypeError, ValueError):
+                    raise ValueError(f"invalid numeric value for {field}")
+                if field == "decade":
+                    num = (num // 10) * 10
+                out["rules"].append({"field": field, "op": op, "value": num})
+            else:
+                raise ValueError("invalid filter field")
+        return out
+    return walk(filter_def)
+
+
+def _radio_filter_sql(filter_def) -> tuple[str, list]:
+    filter_def = validate_radio_filter(filter_def)
+
+    def walk(node) -> tuple[str, list]:
+        parts = []
+        params = []
+        for rule in node["rules"]:
+            if "rules" in rule:
+                sql, child_params = walk(rule)
+                if sql:
+                    parts.append(f"({sql})")
+                    params.extend(child_params)
+                continue
+            field, op, value = rule["field"], rule["op"], rule["value"]
+            if field in _RADIO_TEXT_FIELDS:
+                col = _RADIO_TEXT_FIELDS[field]
+                expr = f"LOWER(COALESCE({col}, '')) LIKE ? ESCAPE '\\'"
+                if op == "not_contains":
+                    expr = f"NOT ({expr})"
+                parts.append(expr)
+                params.append(_like_pattern(str(value).casefold()))
+            elif field == "decade":
+                start, end = int(value), int(value) + 9
+                if op == "eq":
+                    parts.append("(t.year >= ? AND t.year <= ?)")
+                    params.extend([start, end])
+                elif op == "ne":
+                    parts.append("(t.year IS NULL OR t.year < ? OR t.year > ?)")
+                    params.extend([start, end])
+                elif op == "gt":
+                    parts.append("t.year > ?")
+                    params.append(end)
+                elif op == "lt":
+                    parts.append("t.year < ?")
+                    params.append(start)
+            else:
+                col = _RADIO_NUM_FIELDS[field]
+                sql_op = {"eq": "=", "ne": "!=", "gt": ">", "lt": "<"}[op]
+                if op == "ne":
+                    parts.append(f"({col} IS NULL OR {col} {sql_op} ?)")
+                else:
+                    parts.append(f"{col} {sql_op} ?")
+                params.append(int(value))
+        joiner = " AND " if node["mode"] == "all" else " OR "
+        return joiner.join(parts), params
+
+    return walk(filter_def)
+
+
+def _radio_station_from_row(row) -> dict:
+    d = dict(row)
+    d["is_system"] = bool(d["is_system"])
+    d["jingle_enabled"] = bool(d.get("jingle_enabled"))
+    d["has_jingle"] = bool(d.pop("jingle_path", None))
+    d["scope"] = d.get("scope") or "global"
+    try:
+        d["filter"] = json.loads(d.pop("filter_json") or "{}")
+    except Exception:
+        d["filter"] = {"mode": "all", "rules": []}
+    return d
+
+
+def list_radio_stations(user_id: int | None = None, include_all_private: bool = False) -> list[dict]:
+    with db() as conn:
+        _seed_radio_stations(conn)
+        params = []
+        where = ["rs.scope='global'"]
+        if user_id:
+            where.append("(rs.scope='private' AND rs.owner_id=?)")
+            params.append(user_id)
+        if include_all_private:
+            where.append("rs.scope='private'")
+        rows = conn.execute("""
+            SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
+                   rs.owner_id, u.username AS owner_name, rs.jingle_path,
+                   rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
+                   rs.created_at, rs.updated_at
+            FROM radio_stations rs
+            LEFT JOIN users u ON u.id=rs.owner_id
+            WHERE """ + " OR ".join(where) + """
+            GROUP BY rs.id
+            ORDER BY rs.is_system DESC,
+                     CASE rs.scope WHEN 'global' THEN 0 ELSE 1 END,
+                     u.username COLLATE NOCASE,
+                     rs.name COLLATE NOCASE
+        """, params).fetchall()
+    return [_radio_station_from_row(r) for r in rows]
+
+
+def get_radio_station(station_id: int) -> dict | None:
+    with db() as conn:
+        row = conn.execute("""
+            SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
+                   rs.owner_id, u.username AS owner_name, rs.jingle_path,
+                   rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
+                   rs.created_at, rs.updated_at
+            FROM radio_stations rs
+            LEFT JOIN users u ON u.id=rs.owner_id
+            WHERE rs.id=?
+        """, (station_id,)).fetchone()
+    if not row:
+        return None
+    return _radio_station_from_row(row)
+
+
+def create_radio_station(name: str, description: str, filter_def: dict,
+                         user_id: int, scope: str = "private") -> int:
+    clean = validate_radio_filter(filter_def)
+    scope = scope if scope in ("global", "private") else "private"
+    owner_id = None if scope == "global" else int(user_id)
+    with db() as conn:
+        existing = conn.execute("""
+            SELECT 1 FROM radio_stations
+            WHERE scope=? AND COALESCE(owner_id, 0)=COALESCE(?, 0)
+              AND LOWER(name)=LOWER(?)
+        """, (scope, owner_id, name.strip())).fetchone()
+        if existing:
+            raise sqlite3.IntegrityError("UNIQUE radio station name")
+        cur = conn.execute("""
+            INSERT INTO radio_stations
+                (name, description, filter_json, scope, owner_id, is_system, created_by, updated_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?, datetime('now'))
+        """, (name.strip(), (description or "").strip(), json.dumps(clean, ensure_ascii=False),
+              scope, owner_id, user_id))
+        return cur.lastrowid
+
+
+def update_radio_station(station_id: int, name: str, description: str, filter_def: dict,
+                         user_id: int, is_admin: bool, scope: str | None = None) -> bool:
+    clean = validate_radio_filter(filter_def)
+    station = get_radio_station(station_id)
+    if not station or station["is_system"]:
+        return False
+    if not is_admin and station.get("owner_id") != user_id:
+        return False
+    if not is_admin and station.get("scope") != "private":
+        return False
+    new_scope = station["scope"]
+    owner_id = station.get("owner_id")
+    if is_admin and scope in ("global", "private"):
+        new_scope = scope
+        owner_id = None if new_scope == "global" else (owner_id or user_id)
+    with db() as conn:
+        existing = conn.execute("""
+            SELECT 1 FROM radio_stations
+            WHERE id<>? AND scope=? AND COALESCE(owner_id, 0)=COALESCE(?, 0)
+              AND LOWER(name)=LOWER(?)
+        """, (station_id, new_scope, owner_id, name.strip())).fetchone()
+        if existing:
+            raise sqlite3.IntegrityError("UNIQUE radio station name")
+        cur = conn.execute("""
+            UPDATE radio_stations
+            SET name=?, description=?, filter_json=?, scope=?, owner_id=?, updated_at=datetime('now')
+            WHERE id=? AND is_system=0
+        """, (name.strip(), (description or "").strip(), json.dumps(clean, ensure_ascii=False),
+              new_scope, owner_id, station_id))
+        return cur.rowcount > 0
+
+
+def delete_radio_station(station_id: int, user_id: int, is_admin: bool) -> bool:
+    station = get_radio_station(station_id)
+    if not station or station["is_system"]:
+        return False
+    if not is_admin and station.get("owner_id") != user_id:
+        return False
+    with db() as conn:
+        cur = conn.execute("DELETE FROM radio_stations WHERE id=? AND is_system=0", (station_id,))
+        return cur.rowcount > 0
+
+
+def can_manage_radio_station(station_id: int, user_id: int, is_admin: bool) -> bool:
+    station = get_radio_station(station_id)
+    if not station or station["is_system"]:
+        return False
+    return bool(is_admin or station.get("owner_id") == user_id)
+
+
+def set_radio_station_jingle(station_id: int, path: str | None,
+                             every_tracks: int, enabled: bool) -> bool:
+    every_tracks = max(0, int(every_tracks or 0))
+    with db() as conn:
+        cur = conn.execute("""
+            UPDATE radio_stations
+            SET jingle_path=?, jingle_every_tracks=?, jingle_enabled=?, updated_at=datetime('now')
+            WHERE id=? AND is_system=0
+        """, (path, every_tracks, 1 if enabled and path and every_tracks > 0 else 0, station_id))
+        return cur.rowcount > 0
+
+
+def update_radio_station_jingle_settings(station_id: int, every_tracks: int, enabled: bool) -> bool:
+    every_tracks = max(0, int(every_tracks or 0))
+    with db() as conn:
+        cur = conn.execute("""
+            UPDATE radio_stations
+            SET jingle_every_tracks=?,
+                jingle_enabled=CASE WHEN jingle_path IS NOT NULL AND ?>0 THEN ? ELSE 0 END,
+                updated_at=datetime('now')
+            WHERE id=? AND is_system=0
+        """, (every_tracks, every_tracks, 1 if enabled else 0, station_id))
+        return cur.rowcount > 0
+
+
+def get_radio_station_jingle_path(station_id: int, enabled_only: bool = True) -> str | None:
+    where = "id=? AND jingle_enabled=1" if enabled_only else "id=?"
+    with db() as conn:
+        row = conn.execute(
+            f"SELECT jingle_path FROM radio_stations WHERE {where}",
+            (station_id,),
+        ).fetchone()
+    return row["jingle_path"] if row and row["jingle_path"] else None
+
+
+def get_radio_station_tracks(station_id: int, count=25, exclude_ids=None, user_id=None) -> list[dict] | None:
+    station = get_radio_station(station_id)
+    if not station:
+        return None
+    return get_radio_filter_tracks(station.get("filter") or {}, count, exclude_ids, user_id=user_id)
+
+
+def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_id=None) -> list[dict]:
+    count = max(1, min(int(count), 100))
+    excl = [int(x) for x in (exclude_ids or []) if str(x).isdigit()]
+    where_sql, params = _radio_filter_sql(filter_def or {})
+    conditions = []
+    if where_sql:
+        conditions.append(f"({where_sql})")
+    if excl:
+        conditions.append("t.id NOT IN (" + ",".join("?" * len(excl)) + ")")
+        params.extend(excl)
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    uid = int(user_id or 0)
+    with db() as conn:
+        rows = conn.execute(f"""
+            SELECT t.id, t.path, t.title, t.artist, t.album, t.genre, t.year, t.track_no,
+                   t.duration, t.bitrate, t.size, t.cover_hash, t.bpm,
+                   COALESCE(upc.count, 0) AS user_play_count, upc.last_played_at
+            FROM tracks t
+            LEFT JOIN user_play_counts upc ON upc.track_id=t.id AND upc.user_id=?
+            {where}
+            ORDER BY RANDOM()
+            LIMIT ?
+        """, [uid] + params + [count]).fetchall()
+    return _track_rows_to_dicts(rows)
 
 
 def update_bpm(track_id: int, bpm: float) -> bool:
