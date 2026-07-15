@@ -35,6 +35,18 @@ class SmartShuffleTests(unittest.TestCase):
         )
         self.assertFalse({row["id"] for row in first} & {row["id"] for row in second})
 
+    def test_track_history_restarts_after_complete_cycle(self):
+        rows = [track(1, "Artist", "Album")]
+        state = smart_shuffle.ShuffleState(context="test")
+        first = smart_shuffle.select_tracks(
+            rows, 1, state, 1, 1, 1, rng=random.Random(10)
+        )
+        second = smart_shuffle.select_tracks(
+            rows, 1, state, 1, 1, 1, rng=random.Random(11)
+        )
+        self.assertEqual([row["id"] for row in first], [1])
+        self.assertEqual([row["id"] for row in second], [1])
+
     def test_artist_penalty_prevents_immediate_clustering(self):
         rows = [
             track(1, "A", "A1"), track(2, "A", "A2"),

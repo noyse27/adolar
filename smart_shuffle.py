@@ -167,8 +167,15 @@ def select_tracks(
         state.album_last_seen.clear()
 
     blocked = set(state.track_history)
-    blocked.update(int(value) for value in (exclude_ids or []))
+    explicit_excludes = {int(value) for value in (exclude_ids or [])}
+    blocked.update(explicit_excludes)
     remaining = [row for row in candidates if int(row["id"]) not in blocked]
+    if not remaining and candidates:
+        state.track_history.clear()
+        remaining = [
+            row for row in candidates
+            if int(row["id"]) not in explicit_excludes
+        ]
 
     selected = []
     while remaining and len(selected) < count:

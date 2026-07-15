@@ -1,6 +1,6 @@
 # Adolar
 
-Current version: **1.2.1**
+Current version: **1.3.0**
 
 A self-hosted music archive web app for Synology NAS (or any Docker host). Browse, search, and stream your local MP3/FLAC/M4A collection from any browser — no cloud required.
 
@@ -12,16 +12,18 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 ## Features
 
 - **Full-text search** — title, artist, album, genre (SQLite FTS5), spinning loader indicator, 500ms debounce
-- **Facet filters** — genre, decade, year range, duration, format, bitrate, BPM range, artist/title initial
+- **Facet filters** — dedicated artist/title/album fields plus genre, decade, year range, duration, format, bitrate, and BPM range; active filters combine with AND logic
 - **Mobile player mode** — phone-first layout with full-width track list, off-canvas filters, and compact bottom player
+- **Now Playing view** — focused full-screen playback view with large cover, synchronized controls, queue, radio context, and live date/time
 - **Cover art** — 80×80 WebP thumbnails cached on filesystem, colored initials fallback; full-size for Radio
 - **Fast paging** — COUNT cached after first page, subsequent pages skip DB count entirely
 - **HTTP range streaming** — seekable audio in the browser
 - **Configurable radio stations** — global and private smart radio stations with admin/user ownership, filter builder, test mode, and optional station jingles
-- **Smart Shuffle** — session-wide track cooldown, dynamic artist/album spacing, and BPM-smoothed transitions with controlled randomness
+- **Smart Shuffle** — shuffle the complete current search, filter result, or static playlist with session-wide track cooldown, dynamic artist/album spacing, BPM-smoothed transitions, and an automatically refilled 100-track queue
 - **Radio playback** — equal-power crossfade (12s out / 8s in), next track pre-buffered; crossfade skipped for short tracks and station jingles
+- **Optional library crossfade** — persistent crossfade switch for normal playback, playlists, and shuffled queues; kept separate from Radio playback
+- **Clear Radio exit** — stop the active station and return directly to the library from the Radio button or Now Playing view
 - **AdolarRadio** — Windows companion app: native window, auto-starts radio, About dialog, buildable to `.exe`
-- **Adolar Radio Android** — Android companion project with phone WebView and Android Auto media playback for local developer installs
 - **Mini-player** — popup window with cover art, controls, progress bar, Last.fm love button
 - **Download basket** — select tracks, export as ZIP
 - **BPM support** — reads TBPM tag (Mixmeister-compatible), background librosa analysis for untagged tracks, writes result back to file tag; BPM shown in search results and filter
@@ -82,11 +84,7 @@ Cover images failing with `--verbose` are corrupt embedded tags — normal, they
 ## AdolarRadio (Windows Companion)
 
 Download the latest `.exe` from [Releases](https://github.com/noyse27/adolar/releases).
-Enter your Adolar server URL in the settings dialog, click Save & Start — radio begins immediately.
-
-## Adolar Radio Android
-
-Open [`adolar-android`](adolar-android) in Android Studio to install the app directly to your phone via USB debugging. It stores your Adolar server URL, opens `/radio` in a WebView on the phone, and exposes a simple Android Auto media service for random radio playback.
+Connect it to your Adolar server in the settings dialog. An optional Adolar login unlocks personal stations and radio bookmarks; connection and login state are restored on the next start.
 
 ## First Run
 
@@ -108,6 +106,7 @@ On first start, navigate to `/setup` to create the admin account. All subsequent
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/search` | Search with filters + pagination (`count=0` skips COUNT) |
+| GET | `/api/shuffle?count=N` | Smart-shuffle the current search/filter or static playlist; continue via `shuffle_session` response header |
 | GET | `/api/random?count=N` | N smart-shuffled tracks; continue via `shuffle_session` from the response header |
 | GET | `/api/radio-stations` | List playable radio stations |
 | GET | `/api/radio-stations/<id>/tracks` | Get smart-shuffled tracks for a radio station |

@@ -1,5 +1,7 @@
 import os
 import html
+import hashlib
+import json
 import logging
 from flask import Flask, jsonify, request, send_file, abort, render_template, redirect, make_response, g
 from flask_cors import CORS
@@ -15,7 +17,7 @@ logging.basicConfig(level=logging.INFO,
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", os.urandom(32))
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.3.0"
 
 # Restrict CORS to origins defined via env var (space-separated).
 # Default: deny all cross-origin requests (safe for local NAS use).
@@ -872,6 +874,107 @@ def api_random():
         tracks = db.get_random_tracks(count, exclude, shuffle_state=shuffle_state)
     response = jsonify(tracks)
     response.headers["X-Shuffle-Session"] = token
+    return response
+
+
+@app.get("/api/shuffle")
+def api_shuffle():
+    """Smart-shuffle the complete current search, filter, or static playlist."""
+    count = _int_arg("count", 25, min_val=1, max_val=100)
+    playlist_id = request.args.get("playlist_id")
+    user_id = g.user["id"] if g.user else 0
+
+    raw = {
+        "q": request.args.get("q", "").strip(),
+        "artist": request.args.get("artist", "").strip(),
+        "title": request.args.get("title", "").strip(),
+        "album": request.args.get("album", "").strip(),
+        "genre": request.args.get("genre", "").strip(),
+        "decade": request.args.get("decade", "").strip(),
+        "format": request.args.get("format", "").strip(),
+        "min_dur": request.args.get("min_dur", "").strip(),
+        "max_dur": request.args.get("max_dur", "").strip(),
+        "min_bitrate": request.args.get("min_bitrate", "").strip(),
+        "year_min": request.args.get("year_min", "").strip(),
+        "year_max": request.args.get("year_max", "").strip(),
+        "bpm_min": request.args.get("bpm_min", "").strip(),
+        "bpm_max": request.args.get("bpm_max", "").strip(),
+        "loved": request.args.get("loved") == "1",
+        "sort": request.args.get("sort", "artist"),
+    }
+    numeric = ("min_dur", "max_dur", "min_bitrate", "year_min", "year_max")
+    decimal = ("bpm_min", "bpm_max")
+    try:
+        parsed = {
+            key: (int(raw[key]) if raw[key] else None)
+            for key in numeric
+        }
+        parsed.update({
+            key: (float(raw[key]) if raw[key] else None)
+            for key in decimal
+        })
+    except ValueError:
+        return jsonify({"error": "invalid numeric parameter"}), 400
+
+    context_data = {**raw, "playlist_id": playlist_id or None, "user_id": user_id}
+    context_hash = hashlib.sha256(
+        json.dumps(context_data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    token, shuffle_state = smart_shuffle.get_session(
+        request.args.get("shuffle_session"), f"search:{context_hash}"
+    )
+
+    with shuffle_state.lock:
+        if playlist_id:
+            try:
+                playlist_id = int(playlist_id)
+            except ValueError:
+                return jsonify({"error": "invalid playlist_id"}), 400
+            candidates = db.get_playlist_tracks(playlist_id, user_id)
+            if candidates is None:
+                abort(404)
+            total = len(candidates)
+        else:
+            need_stats = shuffle_state.total_tracks is None
+            total, candidates = db.search_tracks(
+                query=raw["q"], artist_query=raw["artist"],
+                title_query=raw["title"], album_query=raw["album"],
+                genre=raw["genre"] or None, decade=raw["decade"] or None,
+                fmt=raw["format"] or None,
+                min_dur=parsed["min_dur"], max_dur=parsed["max_dur"],
+                min_bitrate=parsed["min_bitrate"],
+                year_min=parsed["year_min"], year_max=parsed["year_max"],
+                bpm_min=parsed["bpm_min"], bpm_max=parsed["bpm_max"],
+                page=1, per_page=2500, sort=raw["sort"], count=need_stats,
+                loved_only=raw["loved"],
+                include_loved=bool(db.get_setting("lastfm_session_key")),
+                user_id=user_id, random_order=True,
+            )
+            if not need_stats:
+                total = shuffle_state.total_tracks or 0
+
+        if shuffle_state.total_tracks is None:
+            shuffle_state.total_tracks = total
+            shuffle_state.unique_artists = len({
+                (track.get("artist") or "").strip().casefold()
+                for track in candidates if (track.get("artist") or "").strip()
+            })
+            shuffle_state.unique_albums = len({
+                ((track.get("artist") or "").strip().casefold(),
+                 (track.get("album") or "").strip().casefold())
+                for track in candidates if (track.get("album") or "").strip()
+            })
+
+        selected = smart_shuffle.select_tracks(
+            candidates, count, shuffle_state,
+            shuffle_state.total_tracks or 0,
+            shuffle_state.unique_artists or 0,
+            shuffle_state.unique_albums or 0,
+        )
+
+    response = jsonify(selected)
+    response.headers["X-Shuffle-Session"] = token
+    response.headers["X-Shuffle-Total"] = str(shuffle_state.total_tracks or 0)
     return response
 
 

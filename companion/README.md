@@ -30,3 +30,7 @@ AdolarRadio.exe --host 192.168.1.X --port 15002
 ```
 
 Standardwert: `localhost:15002`
+
+Alternativ kann die Server-URL direkt im Zahnrad-Menü eingetragen werden. Nach der
+Verbindung ist dort optional eine Anmeldung mit dem Adolar-Benutzerkonto möglich;
+Verbindungs- und Anmeldestatus werden für den nächsten Start gespeichert.

@@ -263,7 +263,7 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
                   bpm_min=None, bpm_max=None,
                   page=1, per_page=50, sort="artist",
                   count=True, loved_only=False, include_loved=False,
-                  user_id=None):
+                  user_id=None, random_order=False):
     params = []
     conditions = []
 
@@ -370,6 +370,9 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
             "duration": "t.duration DESC",
         }
         order = sort_map.get(sort, sort_map["artist"])
+
+    if random_order:
+        order = "RANDOM()"
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     offset = (page - 1) * per_page
