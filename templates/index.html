@@ -2261,7 +2261,7 @@ const playBtn    = $("play-btn");
 const progress   = $("progress");
 
 // ── Radio state ───────────────────────────────────────────
-const radio = { active: false, queue: [], playedIds: [], cfTimer: null, cfActive: false };
+const radio = { active: false, queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false };
 radio.stationId = 1;
 radio.stationName = "Adolar Radio";
 radio.station = null;
@@ -2674,10 +2674,12 @@ function playJingle() {
 async function loadRadioQueue(count, excludeIds = []) {
   const p = new URLSearchParams({ count });
   excludeIds.forEach(id => p.append("exclude", id));
+  if (radio.shuffleSession) p.set("shuffle_session", radio.shuffleSession);
   const stationId = radio.stationId || 1;
   try {
     const res = await fetch(`${API}/api/radio-stations/${stationId}/tracks?${p}`);
     if (!res.ok) throw new Error("station failed");
+    radio.shuffleSession = res.headers.get("X-Shuffle-Session") || radio.shuffleSession;
     return await res.json();
   } catch { return []; }
 }
@@ -2687,6 +2689,7 @@ async function startRadio(station = null) {
   radio.active = true;
   radio.queue  = [];
   radio.playedIds = [];
+  radio.shuffleSession = null;
   radio.tracksSinceJingle = 0;
   if (station) {
     radio.stationId = station.id;

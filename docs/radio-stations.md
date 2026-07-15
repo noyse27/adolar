@@ -33,7 +33,7 @@ Admins can still upload, configure, and remove a jingle for the default station.
 - `POST /api/radio-stations`
 - `PUT /api/radio-stations/<id>`
 - `DELETE /api/radio-stations/<id>`
-- `GET /api/radio-stations/<id>/tracks?count=25&exclude=...`
+- `GET /api/radio-stations/<id>/tracks?count=25&shuffle_session=...`
 - `POST /api/radio-stations/<id>/jingle`
 - `PATCH /api/radio-stations/<id>/jingle`
 - `DELETE /api/radio-stations/<id>/jingle`
@@ -76,9 +76,15 @@ Allowed numeric operators: `eq`, `ne`, `gt`, `lt`.
 
 ## Playback
 
-Station playback uses the same queue behavior as the original radio: load a
-small initial queue, play immediately, and refill in the background while
-excluding recently played track IDs.
+Station playback loads a small initial queue, plays immediately, and refills in
+the background. The server returns an `X-Shuffle-Session` header; passing that
+value back as `shuffle_session` preserves the planned track, artist, album, and
+BPM history across queue refills.
+
+Smart Shuffle blocks an exact track for 80 percent of the available station
+pool. Artist and album cooldowns adapt to the number of tracks and distinct
+values. Eligible candidates are scored by recent artist/album occurrence, BPM
+distance from the previous planned track, and a small random tie-breaker.
 
 Jingles are represented as non-track queue items. They can be inserted every N
 tracks per station and do not affect play counts, scrobbling, bookmarks, or

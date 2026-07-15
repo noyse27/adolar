@@ -292,7 +292,7 @@ const CF_PRELOAD = 25;
 const CF_OUT     = 12;
 const CF_IN      =  8;
 
-const radio = { queue: [], playedIds: [], cfTimer: null, cfActive: false, session: 0, stationId: 1, stationName: "Adolar Radio", station: null, tracksSinceJingle: 0 };
+const radio = { queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false, session: 0, stationId: 1, stationName: "Adolar Radio", station: null, tracksSinceJingle: 0 };
 
 let currentTrack  = null;
 let _scrobbled    = false;
@@ -344,8 +344,10 @@ function markCurrentPlayed() {
 async function loadQueue(count, exclude = []) {
   const p = new URLSearchParams({ count });
   exclude.forEach(id => p.append("exclude", id));
+  if (radio.shuffleSession) p.set("shuffle_session", radio.shuffleSession);
   try {
     const res = await fetch(`${API}/api/radio-stations/${radio.stationId || 1}/tracks?${p}`);
+    radio.shuffleSession = res.headers.get("X-Shuffle-Session") || radio.shuffleSession;
     return await res.json();
   } catch { return []; }
 }
@@ -353,6 +355,7 @@ async function loadQueue(count, exclude = []) {
 async function startRadio() {
   radio.queue = [];
   radio.playedIds = [];
+  radio.shuffleSession = null;
   radio.tracksSinceJingle = 0;
   currentTrack = null;
   radio.session = (radio.session || 0) + 1;

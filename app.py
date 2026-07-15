@@ -8,6 +8,7 @@ import db
 import scanner
 import lastfm
 import auth as _auth
+import smart_shuffle
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -864,7 +865,14 @@ def api_random():
     _touch_disco()
     count   = min(int(request.args.get("count", 25)), 100)
     exclude = [int(x) for x in request.args.getlist("exclude") if x.isdigit()]
-    return jsonify(db.get_random_tracks(count, exclude))
+    token, shuffle_state = smart_shuffle.get_session(
+        request.args.get("shuffle_session"), "random"
+    )
+    with shuffle_state.lock:
+        tracks = db.get_random_tracks(count, exclude, shuffle_state=shuffle_state)
+    response = jsonify(tracks)
+    response.headers["X-Shuffle-Session"] = token
+    return response
 
 
 @app.get("/api/radio-stations")
@@ -1046,10 +1054,19 @@ def api_radio_station_tracks(station_id):
     count = min(_int_arg("count", 25, min_val=1, max_val=100), 100)
     exclude = [int(x) for x in request.args.getlist("exclude") if x.isdigit()]
     user_id = g.user["id"] if g.user else None
-    tracks = db.get_radio_station_tracks(station_id, count, exclude, user_id=user_id)
+    token, shuffle_state = smart_shuffle.get_session(
+        request.args.get("shuffle_session"),
+        f"radio:{station_id}:user:{user_id or 0}",
+    )
+    with shuffle_state.lock:
+        tracks = db.get_radio_station_tracks(
+            station_id, count, exclude, user_id=user_id, shuffle_state=shuffle_state
+        )
     if tracks is None:
         return jsonify({"error": "station not found"}), 404
-    return jsonify(tracks)
+    response = jsonify(tracks)
+    response.headers["X-Shuffle-Session"] = token
+    return response
 
 
 # ── Last.fm ───────────────────────────────────────────────────────────────────

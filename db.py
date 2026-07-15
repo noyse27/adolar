@@ -2,6 +2,7 @@ import sqlite3
 import os
 import json
 from contextlib import contextmanager
+import smart_shuffle
 
 DB_PATH = os.environ.get("DB_PATH", "/data/adolar.db")
 
@@ -527,35 +528,43 @@ def get_stats():
     return {"total_tracks": total, "total_size_gb": size_gb}
 
 
-def get_random_tracks(count=25, exclude_ids=None):
-    excl = exclude_ids or []
+def get_random_tracks(count=25, exclude_ids=None, shuffle_state=None):
+    count = max(1, min(int(count), 100))
+    excl = [int(x) for x in (exclude_ids or [])]
     with db() as conn:
+        if shuffle_state is None:
+            shuffle_state = smart_shuffle.ShuffleState(context="random")
+        if shuffle_state.total_tracks is None:
+            stats = conn.execute("""
+                SELECT COUNT(*) AS total,
+                       COUNT(DISTINCT LOWER(TRIM(artist))) AS artists,
+                       COUNT(DISTINCT CASE WHEN TRIM(album) != '' THEN
+                           COALESCE(LOWER(TRIM(artist)), '') || CHAR(31) ||
+                           LOWER(TRIM(album)) END) AS albums
+                FROM tracks
+            """).fetchone()
+            shuffle_state.total_tracks = stats["total"]
+            shuffle_state.unique_artists = stats["artists"]
+            shuffle_state.unique_albums = stats["albums"]
+        pool_size = min(
+            shuffle_state.total_tracks,
+            max(2500, count * 100),
+        )
         rows = conn.execute(
-            f"""SELECT id, path, title, artist, album, genre, year, track_no,
+            """SELECT id, path, title, artist, album, genre, year, track_no,
                        duration, bitrate, size, cover_hash, bpm
                 FROM tracks
-                {"WHERE id NOT IN (" + ",".join("?"*len(excl)) + ")" if excl else ""}
                 ORDER BY RANDOM() LIMIT ?""",
-            excl + [count],
+            (pool_size,),
         ).fetchall()
-    import os
-
-    def _fmt(s):
-        if not s: return "0:00"
-        m, sec = divmod(int(s), 60)
-        return f"{m}:{sec:02d}"
-
-    def _file_format(path):
-        return os.path.splitext(path)[1].lstrip(".").upper() if path else "MP3"
-
-    tracks = []
-    for r in rows:
-        d = dict(r)
-        d["duration_fmt"] = _fmt(d["duration"])
-        d["format"] = _file_format(d["path"])
-        d["has_cover"] = bool(d["cover_hash"])
-        tracks.append(d)
-    return tracks
+    selected = smart_shuffle.select_tracks(
+        rows, count, shuffle_state,
+        shuffle_state.total_tracks,
+        shuffle_state.unique_artists,
+        shuffle_state.unique_albums,
+        exclude_ids=excl,
+    )
+    return _track_rows_to_dicts(selected)
 
 
 # ── Radio stations ───────────────────────────────────────────────────────────
@@ -861,26 +870,48 @@ def get_radio_station_jingle_path(station_id: int, enabled_only: bool = True) ->
     return row["jingle_path"] if row and row["jingle_path"] else None
 
 
-def get_radio_station_tracks(station_id: int, count=25, exclude_ids=None, user_id=None) -> list[dict] | None:
+def get_radio_station_tracks(station_id: int, count=25, exclude_ids=None, user_id=None,
+                             shuffle_state=None) -> list[dict] | None:
     station = get_radio_station(station_id)
     if not station:
         return None
-    return get_radio_filter_tracks(station.get("filter") or {}, count, exclude_ids, user_id=user_id)
+    return get_radio_filter_tracks(
+        station.get("filter") or {}, count, exclude_ids,
+        user_id=user_id, shuffle_state=shuffle_state,
+    )
 
 
-def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_id=None) -> list[dict]:
+def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_id=None,
+                            shuffle_state=None) -> list[dict]:
     count = max(1, min(int(count), 100))
     excl = [int(x) for x in (exclude_ids or []) if str(x).isdigit()]
     where_sql, params = _radio_filter_sql(filter_def or {})
     conditions = []
     if where_sql:
         conditions.append(f"({where_sql})")
-    if excl:
-        conditions.append("t.id NOT IN (" + ",".join("?" * len(excl)) + ")")
-        params.extend(excl)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     uid = int(user_id or 0)
     with db() as conn:
+        if shuffle_state is None:
+            shuffle_state = smart_shuffle.ShuffleState(context="radio-filter")
+        if shuffle_state.total_tracks is None:
+            stats = conn.execute(f"""
+                SELECT COUNT(*) AS total,
+                       COUNT(DISTINCT LOWER(TRIM(t.artist))) AS artists,
+                       COUNT(DISTINCT CASE WHEN TRIM(t.album) != '' THEN
+                           COALESCE(LOWER(TRIM(t.artist)), '') || CHAR(31) ||
+                           LOWER(TRIM(t.album)) END) AS albums
+                FROM tracks t
+                LEFT JOIN user_play_counts upc ON upc.track_id=t.id AND upc.user_id=?
+                {where}
+            """, [uid] + params).fetchone()
+            shuffle_state.total_tracks = stats["total"]
+            shuffle_state.unique_artists = stats["artists"]
+            shuffle_state.unique_albums = stats["albums"]
+        pool_size = min(
+            shuffle_state.total_tracks,
+            max(2500, count * 100),
+        )
         rows = conn.execute(f"""
             SELECT t.id, t.path, t.title, t.artist, t.album, t.genre, t.year, t.track_no,
                    t.duration, t.bitrate, t.size, t.cover_hash, t.bpm,
@@ -890,8 +921,15 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
             {where}
             ORDER BY RANDOM()
             LIMIT ?
-        """, [uid] + params + [count]).fetchall()
-    return _track_rows_to_dicts(rows)
+        """, [uid] + params + [pool_size]).fetchall()
+    selected = smart_shuffle.select_tracks(
+        rows, count, shuffle_state,
+        shuffle_state.total_tracks,
+        shuffle_state.unique_artists,
+        shuffle_state.unique_albums,
+        exclude_ids=excl,
+    )
+    return _track_rows_to_dicts(selected)
 
 
 def update_bpm(track_id: int, bpm: float) -> bool:
