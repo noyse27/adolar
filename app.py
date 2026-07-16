@@ -1055,12 +1055,18 @@ def api_shuffle():
                  (track.get("album") or "").strip().casefold())
                 for track in candidates if (track.get("album") or "").strip()
             })
+            shuffle_state.unique_genres = len({
+                (track.get("genre") or "").strip().casefold()
+                for track in candidates if (track.get("genre") or "").strip()
+            })
 
         selected = smart_shuffle.select_tracks(
             candidates, count, shuffle_state,
             shuffle_state.total_tracks or 0,
             shuffle_state.unique_artists or 0,
             shuffle_state.unique_albums or 0,
+            unique_genres=shuffle_state.unique_genres or 0,
+            use_genre_spacing=not bool(raw["genre"]),
         )
 
     response = jsonify(selected)

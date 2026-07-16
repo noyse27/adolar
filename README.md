@@ -19,7 +19,7 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Fast paging** — COUNT cached after first page, subsequent pages skip DB count entirely
 - **HTTP range streaming** — seekable audio in the browser
 - **Configurable radio stations** — global and private smart radio stations with admin/user ownership, filter builder, test mode, and optional station jingles
-- **Smart Shuffle** — shuffle the complete current search, filter result, or static playlist with session-wide track cooldown, dynamic artist/album spacing, BPM-smoothed transitions, and an automatically refilled 100-track queue
+- **Smart Shuffle** — shuffle the complete current search, filter result, or static playlist with session-wide track cooldown, dynamic artist/album spacing, proportional genre distribution, BPM-smoothed transitions, and an automatically refilled 100-track queue; explicit genre filters remain untouched
 - **Radio playback** — equal-power crossfade (12s out / 8s in), next track pre-buffered; crossfade skipped for short tracks and station jingles
 - **Optional library crossfade** — persistent crossfade switch for normal playback, playlists, and shuffled queues; kept separate from Radio playback
 - **Clear Radio exit** — stop the active station and return directly to the library from the Radio button or Now Playing view
@@ -51,6 +51,7 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - Server-enforced admin protection for scans, BPM maintenance, and other administrative operations
 - Faster cold starts through a per-user stale-while-revalidate track cache and prioritized first-page loading
 - Preloaded and atomically swapped Now Playing artwork for smoother crossfade transitions
+- Genre-aware Smart Shuffle that proportionally distributes genres in library and radio playback, while respecting explicit genre filters
 
 ## Quick Start (Docker)
 

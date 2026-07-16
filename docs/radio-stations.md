@@ -78,13 +78,17 @@ Allowed numeric operators: `eq`, `ne`, `gt`, `lt`.
 
 Station playback loads a small initial queue, plays immediately, and refills in
 the background. The server returns an `X-Shuffle-Session` header; passing that
-value back as `shuffle_session` preserves the planned track, artist, album, and
-BPM history across queue refills.
+value back as `shuffle_session` preserves the planned track, artist, album,
+genre-run, and BPM history across queue refills.
 
 Smart Shuffle blocks an exact track for 80 percent of the available station
 pool. Artist and album cooldowns adapt to the number of tracks and distinct
-values. Eligible candidates are scored by recent artist/album occurrence, BPM
-distance from the previous planned track, and a small random tie-breaker.
+values. Genres are distributed proportionally to their occurrence in the
+candidate pool, so a dominant genre can still occur more often without forming
+avoidable long runs. This genre distribution is disabled when the station has
+an explicit genre rule, including a nested rule. Eligible candidates are scored
+by recent artist/album occurrence, BPM distance from the previous planned
+track, and a small random tie-breaker.
 
 Jingles are represented as non-track queue items. They can be inserted every N
 tracks per station and do not affect play counts, scrobbling, bookmarks, or

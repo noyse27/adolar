@@ -562,12 +562,15 @@ def get_random_tracks(count=25, exclude_ids=None, shuffle_state=None):
                        COUNT(DISTINCT LOWER(TRIM(artist))) AS artists,
                        COUNT(DISTINCT CASE WHEN TRIM(album) != '' THEN
                            COALESCE(LOWER(TRIM(artist)), '') || CHAR(31) ||
-                           LOWER(TRIM(album)) END) AS albums
+                           LOWER(TRIM(album)) END) AS albums,
+                       COUNT(DISTINCT CASE WHEN TRIM(genre) != '' THEN
+                           LOWER(TRIM(genre)) END) AS genres
                 FROM tracks
             """).fetchone()
             shuffle_state.total_tracks = stats["total"]
             shuffle_state.unique_artists = stats["artists"]
             shuffle_state.unique_albums = stats["albums"]
+            shuffle_state.unique_genres = stats["genres"]
         pool_size = min(
             shuffle_state.total_tracks,
             max(2500, count * 100),
@@ -585,6 +588,7 @@ def get_random_tracks(count=25, exclude_ids=None, shuffle_state=None):
         shuffle_state.unique_artists,
         shuffle_state.unique_albums,
         exclude_ids=excl,
+        unique_genres=shuffle_state.unique_genres or 0,
     )
     return _track_rows_to_dicts(selected)
 
@@ -676,6 +680,18 @@ def validate_radio_filter(filter_def) -> dict:
                 raise ValueError("invalid filter field")
         return out
     return walk(filter_def)
+
+
+def _radio_filter_uses_genre(filter_def) -> bool:
+    """Return whether any nested radio rule explicitly targets genre."""
+    if not isinstance(filter_def, dict):
+        return False
+    for rule in filter_def.get("rules") or []:
+        if not isinstance(rule, dict):
+            continue
+        if rule.get("field") == "genre" or _radio_filter_uses_genre(rule):
+            return True
+    return False
 
 
 def _radio_filter_sql(filter_def) -> tuple[str, list]:
@@ -922,7 +938,9 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
                        COUNT(DISTINCT LOWER(TRIM(t.artist))) AS artists,
                        COUNT(DISTINCT CASE WHEN TRIM(t.album) != '' THEN
                            COALESCE(LOWER(TRIM(t.artist)), '') || CHAR(31) ||
-                           LOWER(TRIM(t.album)) END) AS albums
+                           LOWER(TRIM(t.album)) END) AS albums,
+                       COUNT(DISTINCT CASE WHEN TRIM(t.genre) != '' THEN
+                           LOWER(TRIM(t.genre)) END) AS genres
                 FROM tracks t
                 LEFT JOIN user_play_counts upc ON upc.track_id=t.id AND upc.user_id=?
                 {where}
@@ -930,6 +948,7 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
             shuffle_state.total_tracks = stats["total"]
             shuffle_state.unique_artists = stats["artists"]
             shuffle_state.unique_albums = stats["albums"]
+            shuffle_state.unique_genres = stats["genres"]
         pool_size = min(
             shuffle_state.total_tracks,
             max(2500, count * 100),
@@ -950,6 +969,8 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
         shuffle_state.unique_artists,
         shuffle_state.unique_albums,
         exclude_ids=excl,
+        unique_genres=shuffle_state.unique_genres or 0,
+        use_genre_spacing=not _radio_filter_uses_genre(filter_def),
     )
     return _track_rows_to_dicts(selected)
 
