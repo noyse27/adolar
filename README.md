@@ -103,6 +103,10 @@ Connect it to your Adolar server in the settings dialog. An optional Adolar logi
 
 On first start, navigate to `/setup` to create the admin account. All subsequent users are added by the admin via the user management panel (topbar → admin menu).
 
+## User manual
+
+The responsive German user manual for Adolar Web and Adolar Radio Companion is available at [`/hilfe/manual.html`](hilfe/manual.html). It includes quick starts, playback, filters, playlists, radio stations, Companion login, permissions, maintenance, troubleshooting, full-text chapter search, and a print layout.
+
 ## Access control and permission matrix
 
 Adolar uses three visible access levels (`Admin`, `User`, and `Anonymous`) plus individual user capabilities. Permissions are checked by the server; hiding a control in the interface is not used as an authorization mechanism.

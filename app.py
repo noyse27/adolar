@@ -528,6 +528,11 @@ def miniplayer():
     return render_template("miniplayer.html")
 
 
+@app.get("/hilfe/manual.html")
+def manual():
+    return send_file(os.path.join(app.root_path, "hilfe", "manual.html"))
+
+
 @app.get("/radio")
 def radio_companion():
     access = db.get_setting("companion_access", "public")

@@ -27,7 +27,7 @@ PUBLIC_PREFIXES = (
     "/api/stats", "/api/disco-status", "/api/me-optional",
     "/api/radio/", "/api/radio-stations",
     "/api/search",   # read-only; called by Disco server without user session
-    "/static/",
+    "/static/", "/hilfe/",
 )
 # Disco-specific endpoints (no session needed, called by Disco server)
 PUBLIC_SUFFIXES = ("/disco-played",)

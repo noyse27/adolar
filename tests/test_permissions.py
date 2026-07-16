@@ -38,6 +38,12 @@ class PermissionTests(unittest.TestCase):
              mock.patch.object(app_module.db, "get_setting", return_value="1"):
             self.assertEqual(self.client.get("/").status_code, 200)
 
+    def test_manual_is_public_even_when_anonymous_web_is_disabled(self):
+        with mock.patch.object(app_module.db, "get_setting", return_value="0"):
+            response = self.client.get("/hilfe/manual.html")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Adolar Handbuch", response.get_data(as_text=True))
+
     def test_user_playlist_capability_is_enforced_server_side(self):
         self.user["allow_playlists"] = 0
         with self._login(), mock.patch.object(

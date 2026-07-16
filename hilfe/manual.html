@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#15113D">
+  <title>Adolar Handbuch · Web & Radio Companion</title>
+  <link rel="icon" href="../static/logo.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --violet-dark:#4f2ec8; --violet:#6e44ff; --lavender:#a98bff;
+      --lavender-light:#d9ccff; --cyan:#31d5ff; --navy:#15113d;
+      --orange:#ff9500; --yellow:#ffd35a; --ink:#201d35; --muted:#68647b;
+      --paper:#fbfaff; --line:#e8e3f5; --card:#fff; --sidebar:290px;
+      --shadow:0 18px 60px rgba(38,25,93,.12);
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--ink); background:var(--paper); font:15px/1.65 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    a { color:var(--violet-dark); text-decoration-thickness:1px; text-underline-offset:3px; }
+    button,input { font:inherit; }
+    .shell { min-height:100vh; }
+    .sidebar { position:fixed; inset:0 auto 0 0; width:var(--sidebar); padding:25px 20px; color:#fff; background:
+      radial-gradient(circle at 20% 5%,rgba(49,213,255,.22),transparent 26%),
+      linear-gradient(165deg,#21175b 0%,var(--navy) 58%,#100d30 100%); overflow:auto; z-index:10; }
+    .brand { display:flex; align-items:center; gap:12px; margin-bottom:24px; }
+    .brand img { width:46px; height:46px; filter:drop-shadow(0 8px 15px rgba(49,213,255,.18)); }
+    .brand-name { font:700 17px/1 "Orbitron","Segoe UI",sans-serif; letter-spacing:.08em; }
+    .brand-sub { margin-top:5px; color:var(--lavender-light); font-size:11px; letter-spacing:.12em; text-transform:uppercase; }
+    .search { position:relative; margin:0 0 22px; }
+    .search input { width:100%; border:1px solid rgba(255,255,255,.14); border-radius:12px; padding:10px 12px 10px 36px; color:#fff; background:rgba(255,255,255,.08); outline:none; }
+    .search input:focus { border-color:var(--cyan); box-shadow:0 0 0 3px rgba(49,213,255,.12); }
+    .search::before { content:"⌕"; position:absolute; left:13px; top:7px; font-size:20px; color:var(--cyan); }
+    .nav-label { margin:20px 10px 7px; color:#9189b9; font-size:10px; font-weight:700; letter-spacing:.15em; text-transform:uppercase; }
+    nav a { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:9px; color:#dcd7f5; text-decoration:none; font-size:13px; }
+    nav a:hover,nav a.active { color:#fff; background:rgba(169,139,255,.16); }
+    nav a::before { content:""; width:6px; height:6px; border-radius:50%; background:#6b638e; }
+    nav a.active::before { background:var(--cyan); box-shadow:0 0 10px var(--cyan); }
+    .side-foot { margin-top:26px; padding:14px; border:1px solid rgba(255,255,255,.1); border-radius:12px; color:#aaa3cf; font-size:11px; }
+    .main { margin-left:var(--sidebar); }
+    .hero { min-height:510px; padding:76px clamp(28px,7vw,110px); color:#fff; background:
+      radial-gradient(circle at 78% 30%,rgba(49,213,255,.22),transparent 25%),
+      radial-gradient(circle at 90% 80%,rgba(110,68,255,.42),transparent 30%),var(--navy); overflow:hidden; }
+    .hero-grid { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(300px,.8fr); align-items:center; gap:55px; max-width:1180px; margin:auto; }
+    .eyebrow { display:inline-flex; align-items:center; gap:9px; color:var(--cyan); font:600 12px/1 "Orbitron",sans-serif; letter-spacing:.15em; text-transform:uppercase; }
+    .eyebrow::before { content:""; width:30px; height:2px; background:var(--cyan); }
+    h1,h2,h3 { line-height:1.18; }
+    h1 { max-width:720px; margin:24px 0 19px; font:700 clamp(38px,6vw,72px)/1.04 "Orbitron",sans-serif; letter-spacing:.015em; }
+    h1 span { color:var(--lavender); }
+    .lead { max-width:670px; margin:0 0 30px; color:#d7d2ec; font-size:18px; }
+    .hero-actions { display:flex; gap:12px; flex-wrap:wrap; }
+    .btn { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 17px; border:1px solid transparent; border-radius:11px; font-weight:700; text-decoration:none; }
+    .btn.primary { color:var(--navy); background:var(--cyan); }
+    .btn.ghost { color:#fff; border-color:rgba(255,255,255,.24); background:rgba(255,255,255,.06); }
+    .rocket-card { position:relative; min-height:340px; display:grid; place-items:center; }
+    .orbit { position:absolute; width:330px; height:330px; border:1px solid rgba(169,139,255,.28); border-radius:50%; }
+    .orbit::after { content:""; position:absolute; top:38px; right:36px; width:11px; height:11px; border-radius:50%; background:var(--cyan); box-shadow:0 0 18px var(--cyan); }
+    .rocket-card svg { position:relative; width:min(100%,340px); filter:drop-shadow(0 28px 38px rgba(0,0,0,.3)); transform:rotate(3deg); }
+    .content { max-width:1040px; margin:auto; padding:68px clamp(24px,6vw,80px) 100px; }
+    section { scroll-margin-top:26px; margin-bottom:82px; }
+    h2 { margin:0 0 18px; color:var(--navy); font:700 clamp(27px,4vw,39px)/1.15 "Orbitron",sans-serif; letter-spacing:.015em; }
+    h3 { margin:30px 0 12px; color:var(--violet-dark); font-size:19px; }
+    .kicker { margin-bottom:10px; color:var(--violet); font-size:11px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
+    .intro { max-width:800px; color:var(--muted); font-size:17px; }
+    .cards { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin:28px 0; }
+    .card { padding:22px; border:1px solid var(--line); border-radius:16px; background:var(--card); box-shadow:0 7px 25px rgba(49,37,95,.05); }
+    .card .num { display:grid; place-items:center; width:34px; height:34px; margin-bottom:15px; border-radius:10px; color:#fff; background:var(--violet); font:700 13px "Orbitron",sans-serif; }
+    .card h3 { margin:0 0 7px; color:var(--ink); font-size:16px; }
+    .card p { margin:0; color:var(--muted); font-size:13px; }
+    .callout { margin:25px 0; padding:18px 20px; border-left:4px solid var(--cyan); border-radius:0 13px 13px 0; background:#eefcff; }
+    .callout.warning { border-color:var(--orange); background:#fff7e9; }
+    .callout strong { display:block; margin-bottom:3px; color:var(--navy); }
+    .steps { counter-reset:step; padding:0; list-style:none; }
+    .steps li { position:relative; min-height:52px; padding:0 0 25px 58px; }
+    .steps li::before { counter-increment:step; content:counter(step); position:absolute; left:0; top:0; display:grid; place-items:center; width:36px; height:36px; border:2px solid var(--lavender); border-radius:50%; color:var(--violet-dark); font:700 12px "Orbitron",sans-serif; background:#fff; }
+    .steps li:not(:last-child)::after { content:""; position:absolute; left:17px; top:38px; bottom:2px; width:2px; background:var(--line); }
+    .steps strong { color:var(--navy); }
+    .ui-map { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:15px; }
+    .ui-item { padding:18px; border-radius:14px; background:#f4f1fb; }
+    .ui-item b { display:block; margin-bottom:5px; color:var(--violet-dark); }
+    table { width:100%; border-collapse:separate; border-spacing:0; margin:22px 0; overflow:hidden; border:1px solid var(--line); border-radius:14px; font-size:13px; }
+    th,td { padding:11px 13px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { color:var(--navy); background:#f3f0fb; }
+    tr:last-child td { border-bottom:0; }
+    .yes { color:#18734a; font-weight:700; } .no { color:#a14444; }
+    details { margin:10px 0; border:1px solid var(--line); border-radius:12px; background:#fff; }
+    summary { cursor:pointer; padding:15px 18px; color:var(--navy); font-weight:700; }
+    details p { padding:0 18px 17px; margin:0; color:var(--muted); }
+    .companion { padding:35px; border-radius:22px; color:#fff; background:linear-gradient(135deg,#26194e,var(--navy)); box-shadow:var(--shadow); }
+    .companion h2,.companion h3 { color:#fff; } .companion .intro { color:#d8d1e8; }
+    .companion .card { border-color:rgba(255,255,255,.1); background:rgba(255,255,255,.07); box-shadow:none; }
+    .companion .card h3 { color:#fff; } .companion .card p { color:#c7c0db; }
+    .companion .card .num { color:var(--navy); background:var(--orange); }
+    .search-hidden { display:none !important; }
+    .no-results { display:none; padding:30px; border:1px dashed var(--lavender); border-radius:14px; text-align:center; color:var(--muted); }
+    footer { padding:35px; color:#8f89a8; background:var(--navy); text-align:center; font-size:12px; }
+    @media (max-width:900px) {
+      :root { --sidebar:0px; }
+      .sidebar { position:sticky; top:0; width:100%; height:auto; padding:12px 16px; overflow:visible; display:flex; align-items:center; gap:14px; }
+      .brand { margin:0; min-width:max-content; } .brand img { width:34px; height:34px; } .brand-sub,.nav-label,.side-foot { display:none; }
+      .search { flex:1; margin:0; } nav { display:none; }
+      .main { margin:0; } .hero { padding-top:55px; } .hero-grid { grid-template-columns:1fr; } .rocket-card { display:none; }
+      .cards { grid-template-columns:1fr; } .ui-map { grid-template-columns:1fr; }
+    }
+    @media (max-width:580px) { .brand-name { font-size:13px; } .content { padding-inline:18px; } .hero { padding-inline:22px; } .companion { padding:24px 18px; } table { display:block; overflow-x:auto; } }
+    @media print { .sidebar,.hero-actions { display:none; } .main { margin:0; } .hero { min-height:auto; padding:35px; background:#fff; color:var(--navy); } .hero-grid { display:block; } .rocket-card { display:none; } .lead { color:var(--muted); } .content { max-width:none; padding:35px; } section { break-inside:avoid; margin-bottom:45px; } .companion { color:var(--ink); background:#fff; border:1px solid var(--line); box-shadow:none; } .companion h2,.companion h3 { color:var(--navy); } }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><img src="../static/logo.svg" alt=""><div><div class="brand-name">ADOLAR</div><div class="brand-sub">Manual 1.4</div></div></div>
+    <div class="search"><input id="help-search" type="search" placeholder="Hilfe durchsuchen …" aria-label="Handbuch durchsuchen"></div>
+    <nav aria-label="Kapitel">
+      <div class="nav-label">Start</div>
+      <a href="#start">Schnellstart</a><a href="#oberflaeche">Oberfläche</a><a href="#wiedergabe">Wiedergabe</a>
+      <div class="nav-label">Bibliothek</div>
+      <a href="#suchen">Suchen & filtern</a><a href="#playlists">Playlists</a><a href="#radio">Radiosender</a><a href="#downloads">Downloads</a>
+      <div class="nav-label">Adolar Radio</div>
+      <a href="#companion">Companion</a><a href="#anmeldung">Anmeldung</a>
+      <div class="nav-label">Verwaltung</div>
+      <a href="#benutzer">Benutzer & Rechte</a><a href="#wartung">Wartung</a><a href="#probleme">Problemlösung</a>
+    </nav>
+    <div class="side-foot">Adolar v1.4.0<br>Same rocket. Different mission.</div>
+  </aside>
+
+  <main class="main">
+    <header class="hero">
+      <div class="hero-grid">
+        <div><div class="eyebrow">Bedienungsanleitung</div><h1>Deine Musik.<br><span>Deine Mission.</span></h1>
+          <p class="lead">Das vollständige Handbuch für Adolar Web und Adolar Radio Companion – vom ersten Titel bis zur persönlichen Radiostation.</p>
+          <div class="hero-actions"><a class="btn primary" href="#start">In 3 Schritten starten</a><a class="btn ghost" href="#companion">Zum Companion</a></div>
+        </div>
+        <div class="rocket-card" aria-hidden="true"><div class="orbit"></div>
+          <svg viewBox="0 0 280 390" xmlns="http://www.w3.org/2000/svg">
+            <g transform="translate(0 0) rotate(-24 140 190)">
+              <path fill="#ff9500" d="M126 278 C100 312 105 350 136 372 C167 350 172 312 146 278 Z"/><path fill="#ffd35a" d="M132 287 C118 308 121 331 138 345 C154 331 157 308 143 287 Z"/>
+              <rect x="95" y="243" width="90" height="34" rx="17" fill="#6e44ff"/><path fill="#6e44ff" d="M62 190 C30 200 14 232 20 260 C47 253 73 239 94 216 Z M188 216 C210 239 235 253 262 260 C268 232 252 200 220 190 Z"/>
+              <path fill="#a98bff" d="M140 8 C91 55 58 127 58 197 C58 247 94 285 140 285 C186 285 222 247 222 197 C222 127 189 55 140 8 Z"/><path fill="#6e44ff" d="M140 8 C116 31 96 61 82 93 C119 116 161 116 198 93 C184 61 164 31 140 8 Z"/><path fill="#d9ccff" opacity=".48" d="M92 93 C78 126 70 162 70 197 C70 230 87 256 113 269 C103 223 107 155 136 46 C119 58 104 74 92 93 Z"/>
+              <circle cx="140" cy="145" r="45" fill="#fff"/><circle cx="140" cy="145" r="35" fill="#15113d"/><path d="M119 143 C119 129 131 117 145 117" fill="none" stroke="#31d5ff" stroke-width="9" stroke-linecap="round"/><circle cx="157" cy="163" r="7" fill="#31d5ff"/>
+            </g>
+          </svg>
+        </div>
+      </div>
+    </header>
+
+    <div class="content" id="manual-content">
+      <div id="no-results" class="no-results">Kein Kapitel passt zu deiner Suche. Probiere einen kürzeren Begriff.</div>
+
+      <section id="start" data-search="start schnellstart anmelden admin scan musik">
+        <div class="kicker">01 · Loslegen</div><h2>Schnellstart</h2><p class="intro">Beim ersten Öffnen führt Adolar durch die Einrichtung. Danach ist die Musiksammlung in wenigen Schritten spielbereit.</p>
+        <div class="cards"><article class="card"><div class="num">01</div><h3>Admin anlegen</h3><p>Beim ersten Start Benutzernamen und ein Passwort mit mindestens acht Zeichen festlegen.</p></article><article class="card"><div class="num">02</div><h3>Bibliothek scannen</h3><p>Als Admin in der Seitenleiste „Bibliothek scannen“ wählen. Bereits bekannte, unveränderte Dateien werden übersprungen.</p></article><article class="card"><div class="num">03</div><h3>Titel starten</h3><p>Einen Titel anklicken oder die Play-Taste verwenden. Adolar öffnet beim ersten Start automatisch die Now-Playing-Ansicht.</p></article></div>
+        <div class="callout"><strong>Gut zu wissen</strong>Beim nächsten Besuch zeigt Adolar die zuletzt geladene erste Trackseite sofort und aktualisiert sie im Hintergrund.</div>
+      </section>
+
+      <section id="oberflaeche" data-search="oberfläche navigation topbar seitenleiste trackliste player korb">
+        <div class="kicker">02 · Orientierung</div><h2>Die Oberfläche</h2>
+        <div class="ui-map"><div class="ui-item"><b>Kopfzeile</b>Bibliotheksstatus, Sprachwahl, Mini-Player, Downloadkorb und Benutzerkonto.</div><div class="ui-item"><b>Seitenleiste</b>Playlists, Filter, Sortierung und – für Admins – Wartungsaktionen.</div><div class="ui-item"><b>Trackliste</b>Cover, Metadaten, Dauer, Playcount und die jeweils erlaubten Aktionen.</div><div class="ui-item"><b>Playerleiste</b>Zurück, Play/Pause, Weiter, Crossfade, Fortschritt und Lautstärke.</div></div>
+        <p>Auf kleinen Bildschirmen liegen die Filter in einem seitlichen Panel. Der Player bleibt am unteren Rand erreichbar.</p>
+      </section>
+
+      <section id="wiedergabe" data-search="wiedergabe now playing crossfade lautstärke shuffle mini player fortschritt">
+        <div class="kicker">03 · Player</div><h2>Wiedergabe & Now Playing</h2>
+        <ol class="steps"><li><strong>Titel abspielen:</strong> Trackzeile oder Play-Symbol wählen. Ein erneuter Klick pausiert.</li><li><strong>Position ändern:</strong> Den Fortschrittsregler in der Playerleiste oder Vollansicht ziehen.</li><li><strong>Crossfade:</strong> Das Übergangssymbol aktiviert Crossfade für Bibliothek und Playlists. Adolar puffert den Folgetitel und dessen Cover vor.</li><li><strong>Now Playing:</strong> Cover oder Vergrößern-Symbol öffnet Cover, Metadaten, Queue und große Bedienelemente.</li></ol>
+        <h3>Shuffle und Mini-Player</h3><p>Shuffle mischt die komplette aktuelle Auswahl und hält eine automatisch nachgefüllte Queue bereit. „Mini“ öffnet einen kompakten Player in einem eigenen Fenster.</p>
+      </section>
+
+      <section id="suchen" data-search="suche filter interpret titel album genre jahr jahrzehnt bpm bitrate format sortieren">
+        <div class="kicker">04 · Finden</div><h2>Suchen, filtern & sortieren</h2><p class="intro">Die Volltextsuche durchsucht Titel, Interpret, Album und Genre. Mehrere aktive Filter werden gemeinsam angewendet.</p>
+        <div class="cards"><article class="card"><div class="num">A</div><h3>Textsuche</h3><p>Begriff eingeben; nach kurzer Pause aktualisiert Adolar die Treffer automatisch.</p></article><article class="card"><div class="num">B</div><h3>Detailfilter</h3><p>Interpret, Titel, Album, Genre, Jahrzehnt, Dauer, Format, Bitrate, Jahr und BPM kombinieren.</p></article><article class="card"><div class="num">C</div><h3>Sortierung</h3><p>Nach Interpret, Titel, Album, Jahr, Dauer oder Playcount ordnen.</p></article></div>
+      </section>
+
+      <section id="playlists" data-search="playlist smart statisch bookmark favoriten löschen persönlich global">
+        <div class="kicker">05 · Sammeln</div><h2>Playlists</h2>
+        <h3>System- und globale Playlists</h3><p>Vordefinierte Listen wie „Zuletzt gespielt“, „Meistgespielt“, „Neueste 100“ und „Disco Hits“ stehen allen berechtigten Besuchern zur Verfügung.</p>
+        <h3>Persönliche Playlists</h3><p>Wenn der Admin diese Fähigkeit freigegeben hat, erscheint an Tracks das Bookmark-Symbol. Dort eine vorhandene statische Playlist wählen oder direkt eine neue anlegen. Persönliche Smart-Playlists speichern eine Filter- und Sortierkombination.</p>
+        <div class="callout warning"><strong>Recht deaktiviert?</strong>Vorhandene persönliche Inhalte bleiben erhalten und lesbar. Erstellung und Bearbeitung sind gesperrt, bis der Admin das Recht erneut aktiviert.</div>
+      </section>
+
+      <section id="radio" data-search="radio sender stations jingle regeln filter privat global crossfade">
+        <div class="kicker">06 · Automatik</div><h2>Radiosender</h2><p>Über „Radio“ einen globalen oder persönlichen Sender wählen. Adolar stellt fortlaufend passende Titel zusammen, vermeidet schnelle Wiederholungen und glättet – soweit möglich – BPM-Übergänge.</p>
+        <ol class="steps"><li><strong>Sender starten:</strong> Radio öffnen und beim gewünschten Sender Play wählen.</li><li><strong>Eigenen Sender bauen:</strong> „Neuer Sender“ wählen, Namen vergeben und Regeln für „alle“ beziehungsweise „eine der“ Bedingungen ergänzen.</li><li><strong>Testen:</strong> Die Treffermenge prüfen, bevor der Sender gespeichert wird.</li><li><strong>Jingle:</strong> Optional eine Station-ID hochladen und das Intervall in Tracks festlegen.</li></ol>
+        <p>Normale Benutzer verwalten ausschließlich eigene private Sender. Globale Sender und Systemeinstellungen gehören dem Admin.</p>
+      </section>
+
+      <section id="downloads" data-search="download korb zip herunterladen berechtigung">
+        <div class="kicker">07 · Export</div><h2>Downloadkorb</h2><p>Nur Benutzer mit Downloadrecht sehen das Downloadsymbol. Titel in den Korb legen, oben den Korb öffnen und „Als ZIP herunterladen“ wählen. Gäste können grundsätzlich nicht herunterladen.</p>
+      </section>
+
+      <section id="companion" class="companion" data-search="companion adolar radio windows einstellungen station cover favoriten bookmark">
+        <div class="kicker" style="color:var(--orange)">08 · Adolar Radio</div><h2>Radio Companion</h2><p class="intro">Der Companion ist die reduzierte Radio-Oberfläche für den dauerhaften Musikbetrieb – im Browser unter <code>/radio</code> oder eingebettet in der Windows-App.</p>
+        <div class="cards"><article class="card"><div class="num">01</div><h3>Verbinden</h3><p>In der Windows-App die Adresse des Adolar-Servers hinterlegen. Die Verbindung wird für den nächsten Start gespeichert.</p></article><article class="card"><div class="num">02</div><h3>Sender wählen</h3><p>Im Badge über dem Cover den gewünschten globalen oder eigenen Sender auswählen.</p></article><article class="card"><div class="num">03</div><h3>Steuern</h3><p>Play/Pause, Titel überspringen, Fortschritt und Lautstärke direkt im kompakten Fenster bedienen.</p></article></div>
+        <h3>Persönliche Funktionen</h3><p>Nach der Anmeldung erscheinen – abhängig von den Rechten – private Sender und das Bookmark-Symbol. Ein Bookmark landet in „Adolar Radio Favoriten“.</p>
+      </section>
+
+      <section id="anmeldung" data-search="companion anmelden login öffentlich authentifiziert deaktiviert passwort">
+        <div class="kicker">09 · Companion-Zugang</div><h2>Anmeldung im Companion</h2>
+        <table><thead><tr><th>Modus</th><th>Verhalten</th></tr></thead><tbody><tr><td>Öffentlich</td><td>Radio kann ohne Konto genutzt werden; „Anmelden“ schaltet persönliche Funktionen frei.</td></tr><tr><td>Nur Benutzer</td><td>Gäste werden zur Anmeldung geführt. Admins zählen als angemeldete Benutzer.</td></tr><tr><td>Deaktiviert</td><td>Die Companion-Seite ist nicht erreichbar.</td></tr></tbody></table>
+        <p>Die Anmeldung erfolgt über das Benutzer-Symbol beziehungsweise die Einstellungen. Muss ein Initialpasswort geändert werden, zuerst Adolar Web öffnen und dort das neue Passwort setzen.</p>
+      </section>
+
+      <section id="benutzer" data-search="admin benutzer rechte anonym gast account audit playlist radio download playcount">
+        <div class="kicker">10 · Administration</div><h2>Benutzer & Rechte</h2><p class="intro">Die Benutzerverwaltung liegt im Kontomenü des Admins. Rechte werden nicht nur in der Oberfläche ausgeblendet, sondern auch serverseitig geprüft.</p>
+        <table><thead><tr><th>Funktion</th><th>Admin</th><th>Benutzer</th><th>Gast</th></tr></thead><tbody><tr><td>Bibliothek und Wiedergabe</td><td class="yes">Immer</td><td class="yes">Ja</td><td>Konfigurierbar</td></tr><tr><td>Eigene Playlists</td><td class="yes">Ja</td><td>Global + pro Benutzer</td><td class="no">Nein</td></tr><tr><td>Eigene Radiosender</td><td class="yes">Ja</td><td>Global + pro Benutzer</td><td class="no">Nein</td></tr><tr><td>Downloads</td><td class="yes">Ja</td><td>Pro Benutzer</td><td class="no">Nein</td></tr><tr><td>Wartung & Benutzer</td><td class="yes">Ja</td><td class="no">Nein</td><td class="no">Nein</td></tr></tbody></table>
+        <h3>Konten verwalten</h3><p>Neue Benutzer erhalten ein Initialpasswort und müssen es bei der ersten Anmeldung ändern. Ein deaktiviertes Konto verliert sofort alle Sitzungen, behält aber Playlists, Radios und Playcounts. Die administrative Historie protokolliert relevante Rechte- und Kontoänderungen.</p>
+      </section>
+
+      <section id="wartung" data-search="wartung admin scan bpm tags lastfm playcount archiv">
+        <div class="kicker">11 · Administration</div><h2>Bibliothekswartung</h2>
+        <div class="ui-map"><div class="ui-item"><b>Bibliothek scannen</b>Neue und geänderte Dateien einlesen; unveränderte Titel werden übersprungen.</div><div class="ui-item"><b>BPM-Tags einlesen</b>Vorhandene TBPM-Werte schnell aus den Musikdateien übernehmen.</div><div class="ui-item"><b>BPM berechnen</b>Fehlende Werte im Hintergrund analysieren und in die Tags schreiben.</div><div class="ui-item"><b>Globale Playcounts</b>Autorisierte Plays erhöhen das Archiv; persönliche Zähler bleiben davon unabhängig.</div></div>
+      </section>
+
+      <section id="probleme" data-search="probleme fehler langsam kein cover kein download login gesperrt ton">
+        <div class="kicker">12 · Hilfe</div><h2>Häufige Fragen</h2>
+        <details><summary>Beim ersten Aufruf bleibt die Trackliste kurz leer</summary><p>Ein NAS kann seine Festplatten schlafen legen. Adolar zeigt nach einem erfolgreichen Aufruf eine zwischengespeicherte erste Seite sofort an und aktualisiert sie im Hintergrund. Der allererste Aufruf eines neuen Browsers benötigt den normalen Datenbankzugriff.</p></details>
+        <details><summary>Playlist-, Radio- oder Download-Schaltflächen fehlen</summary><p>Diese Funktionen hängen von globalen und persönlichen Benutzerrechten ab. Der Admin kann sie in der Benutzerverwaltung aktivieren.</p></details>
+        <details><summary>Ein Cover wird nicht angezeigt</summary><p>Fehlt eingebettetes Cover-Art oder ist es beschädigt, verwendet Adolar automatisch einen farbigen Platzhalter mit den Initialen des Interpreten.</p></details>
+        <details><summary>Die Anmeldung ist vorübergehend gesperrt</summary><p>Nach mehreren Fehlversuchen greift der Brute-Force-Schutz. Kurz warten oder den Admin bitten, die IP in der Benutzerverwaltung zu entsperren.</p></details>
+        <details><summary>Der Companion zeigt keine privaten Sender</summary><p>Im Companion anmelden und prüfen lassen, ob das Recht „Eigene Radiosender“ aktiv ist. Private Sender anderer Benutzer bleiben unsichtbar.</p></details>
+      </section>
+    </div>
+    <footer>Adolar v1.4.0 · © PolzeSoft 2026 · polze.net · Same rocket. Different mission.</footer>
+  </main>
+</div>
+<script>
+  const sections=[...document.querySelectorAll("#manual-content > section")];
+  const links=[...document.querySelectorAll("nav a")];
+  const search=document.getElementById("help-search");
+  search.addEventListener("input",()=>{
+    const q=search.value.trim().toLocaleLowerCase("de"); let visible=0;
+    sections.forEach(s=>{const hit=!q||(s.textContent+" "+(s.dataset.search||"")).toLocaleLowerCase("de").includes(q);s.classList.toggle("search-hidden",!hit);if(hit)visible++;});
+    document.getElementById("no-results").style.display=visible?"none":"block";
+  });
+  const observer=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.toggle("active",a.hash==="#"+e.target.id));}});},{rootMargin:"-20% 0px -68%",threshold:0});
+  sections.forEach(s=>observer.observe(s));
+</script>
+</body>
+</html>
