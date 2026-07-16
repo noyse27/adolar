@@ -1877,6 +1877,9 @@
       <button class="user-dd-item" onclick="openChangePassword()">
         <i class="ti ti-lock"></i> Passwort ändern
       </button>
+      <button class="user-dd-item" onclick="openAdolar4USettings()">
+        <i class="ti ti-sparkles"></i> Adolar4U
+      </button>
       <button class="user-dd-item" id="btn-user-mgmt" style="display:none" onclick="openUserMgmt()">
         <i class="ti ti-users"></i> Benutzerverwaltung
       </button>
@@ -2726,6 +2729,67 @@ const CF_PRELOAD = 25; // seconds before end: start buffering next track
 const CF_OUT     = 12; // seconds before end: start fade-out
 const CF_IN      =  8; // fade-in duration
 
+// ── Optional Adolar4U listening signals ──────────────────
+const adolar4uTelemetry = {
+  sessionId: (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`),
+  sequence: 0,
+  trackId: null,
+  source: "unknown",
+};
+
+function adolar4uSource() {
+  if (radio.active) return "radio";
+  if (listShuffle.active) return "shuffle";
+  if (_activePl) return "playlist";
+  return "library";
+}
+
+function sendAdolar4UEvent(trackId, eventType, details = {}, beacon = false) {
+  if (!_adolar4u.collecting || !trackId || String(trackId).startsWith("jingle-")) return;
+  const payload = {
+    event_type: eventType,
+    source: details.source || adolar4uTelemetry.source || "unknown",
+    reason: details.reason || null,
+    position_seconds: Number(details.position || 0),
+    duration_seconds: Number(details.duration || 0),
+    session_id: adolar4uTelemetry.sessionId,
+    client_event_id: `${adolar4uTelemetry.sessionId}:${++adolar4uTelemetry.sequence}:${eventType}`,
+  };
+  const url = `${API}/api/adolar4u/events/${trackId}`;
+  if (beacon && navigator.sendBeacon) {
+    navigator.sendBeacon(url, new Blob([JSON.stringify(payload)], {type: "application/json"}));
+    return;
+  }
+  fetch(url, {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload), keepalive: true,
+  }).catch(() => {});
+}
+
+function startAdolar4UTrack(track) {
+  if (!_adolar4u.collecting || !track || isJingle(track)) return;
+  adolar4uTelemetry.trackId = track.id;
+  adolar4uTelemetry.source = adolar4uSource();
+  sendAdolar4UEvent(track.id, "started", {
+    source: adolar4uTelemetry.source,
+    duration: Number(track.duration || 0),
+  });
+}
+
+function finishAdolar4UTrack(reason = "track_change", forceCompleted = false, beacon = false) {
+  const trackId = adolar4uTelemetry.trackId;
+  if (!trackId) return;
+  const duration = Number(audio.duration || state.currentTrack?.duration || 0);
+  const position = Math.min(Number(audio.currentTime || 0), duration || Infinity);
+  const ratio = duration > 0 ? position / duration : 0;
+  sendAdolar4UEvent(trackId, forceCompleted || ratio >= .9 ? "completed" : "skipped", {
+    source: adolar4uTelemetry.source,
+    reason: forceCompleted || ratio >= .9 ? "ended" : reason,
+    position, duration,
+  }, beacon);
+  adolar4uTelemetry.trackId = null;
+}
+
 // ── Helpers ───────────────────────────────────────────────
 function fmt(sec) {
   if (!sec || isNaN(sec)) return "0:00";
@@ -3365,6 +3429,7 @@ function updatePlayerUI(t) {
 function playTrack(idx) {
   const t = state.tracks[idx];
   if (!t) return;
+  finishAdolar4UTrack("track_change");
   if (!radio.active) resetNormalCrossfadeBuffer();
   state.currentIdx   = idx;
   state.currentTrack = t;
@@ -3375,6 +3440,7 @@ function playTrack(idx) {
   if (!playViewState.openedOnce && !playViewState.dismissed) openPlayView(true);
   audio.src = `${API}/api/stream/${t.id}`;
   audio.play();
+  startAdolar4UTrack(t);
   renderTracks();
   if (listShuffle.active) ensureListShuffleQueue();
 }
@@ -3609,6 +3675,7 @@ function leaveRadioToLibrary() {
     openRadioPanel();
     return;
   }
+  finishAdolar4UTrack("stop");
   stopRadio();
   audio.pause();
   audio.removeAttribute("src");
@@ -3738,6 +3805,7 @@ function startNormalCrossfade() {
     audioB.load();
     normalCrossfade.active = false;
     normalCrossfade.timer = null;
+    finishAdolar4UTrack("ended", true);
     state.currentIdx = nextIndex;
     state.currentTrack = nextTrack;
     _scrobbled = false;
@@ -3747,6 +3815,7 @@ function startNormalCrossfade() {
     audio.currentTime = nextTime;
     audio.volume = vol;
     audio.play();
+    startAdolar4UTrack(nextTrack);
     renderTracks();
     if (listShuffle.active) ensureListShuffleQueue();
   };
@@ -3786,6 +3855,7 @@ function startCrossfade() {
       const nextTime = audioB.currentTime;
       audioB.pause(); audioB.removeAttribute("src"); audioB.load();
       radio.cfActive = false;
+      finishAdolar4UTrack("ended", true);
       radioNext().then(() => {
         if (!radio.queue.length) return;
         _scrobbled = false;
@@ -3795,6 +3865,7 @@ function startCrossfade() {
         audio.currentTime = nextTime;
         audio.volume = vol;
         audio.play();
+        startAdolar4UTrack(state.currentTrack);
         renderTracks();
       });
     }
@@ -3850,6 +3921,7 @@ audio.onpause = () => {
   renderTracks();
 };
 audio.onended = async () => {
+  finishAdolar4UTrack("ended", true);
   if (radio.active) {
     if (radio.cfActive) return; // crossfade already handles the transition
     await radioNext();
@@ -3933,6 +4005,7 @@ $("btn-prev").onclick = () => {
   if (state.currentIdx > 0) playTrack(state.currentIdx - 1);
 };
 $("btn-next").onclick = async () => {
+  finishAdolar4UTrack("manual_next");
   if (radio.active) {
     clearTimeout(radio.cfTimer);
     radio.cfActive = false;
@@ -3947,6 +4020,8 @@ $("btn-next").onclick = async () => {
   const next = state.currentIdx + 1;
   if (next < state.tracks.length) playTrack(next);
 };
+
+window.addEventListener("pagehide", () => finishAdolar4UTrack("stop", false, true));
 
 $("btn-list-shuffle").onclick = startListShuffle;
 $("btn-crossfade").onclick = toggleNormalCrossfade;
@@ -5151,6 +5226,15 @@ function updateSavePlaylistBtn() { /* removed */ }
 
 // ── Current user / auth ───────────────────────────────────────────────────────
 let _me = null;
+let _adolar4u = { collecting: false, global: {}, user: {} };
+
+async function loadAdolar4UStatus() {
+  if (!_me) return;
+  try {
+    const r = await fetch("/api/adolar4u/status");
+    if (r.ok) _adolar4u = await r.json();
+  } catch {}
+}
 
 async function loadMe() {
   try {
@@ -5171,6 +5255,8 @@ async function loadMe() {
   if (_me.role === "admin") {
     $("btn-user-mgmt").style.display = "flex";
   }
+
+  await loadAdolar4UStatus();
 
   // Hide Last.fm for non-admin
   if (_me.role !== "admin") {
@@ -5219,6 +5305,7 @@ async function openUserMgmt() {
   $("usermgmt-modal").style.display = "flex";
   await refreshUserList();
   await refreshAccessSettings();
+  await refreshAdolar4UAdminSettings();
   await refreshBlockedIps();
   await refreshAuditLog();
 }
@@ -5359,6 +5446,71 @@ async function saveAccessSettings() {
     })
   });
   if (!r.ok) alert("Zugriffseinstellungen konnten nicht gespeichert werden.");
+}
+
+async function refreshAdolar4UAdminSettings() {
+  const r = await fetch("/api/admin/adolar4u/settings");
+  if (!r.ok) return;
+  const settings = await r.json();
+  $("setting-adolar4u-enabled").checked = Boolean(settings.enabled);
+  $("setting-adolar4u-analysis").checked = Boolean(settings.audio_analysis);
+  $("setting-adolar4u-collaborative").checked = Boolean(settings.collaborative);
+}
+
+async function saveAdolar4UAdminSettings() {
+  const r = await fetch("/api/admin/adolar4u/settings", {
+    method: "PUT", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      enabled: $("setting-adolar4u-enabled").checked,
+      audio_analysis: $("setting-adolar4u-analysis").checked,
+      collaborative: $("setting-adolar4u-collaborative").checked,
+    })
+  });
+  if (!r.ok) {
+    alert("Adolar4U-Einstellungen konnten nicht gespeichert werden.");
+    return;
+  }
+  await loadAdolar4UStatus();
+}
+
+async function openAdolar4USettings() {
+  $("user-dropdown").classList.remove("open");
+  await loadAdolar4UStatus();
+  const available = Boolean(_adolar4u.global?.enabled);
+  $("adolar4u-available").textContent = available
+    ? "Adolar4U ist auf diesem Server verfügbar."
+    : "Adolar4U ist derzeit global deaktiviert. Es werden keine Hörsignale erfasst.";
+  $("adolar4u-enabled").checked = Boolean(_adolar4u.user?.enabled);
+  $("adolar4u-paused").checked = Boolean(_adolar4u.user?.learning_paused);
+  $("adolar4u-collaborative").checked = Boolean(_adolar4u.user?.collaborative_enabled);
+  $("adolar4u-collaborative").disabled = !_adolar4u.global?.collaborative;
+  $("adolar4u-discovery").value = Math.round(Number(_adolar4u.user?.discovery_level ?? .15) * 100);
+  $("adolar4u-discovery-value").textContent = `${$("adolar4u-discovery").value}%`;
+  $("adolar4u-modal").style.display = "flex";
+}
+
+async function saveAdolar4USettings() {
+  const r = await fetch("/api/adolar4u/settings", {
+    method: "PUT", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      enabled: $("adolar4u-enabled").checked,
+      learning_paused: $("adolar4u-paused").checked,
+      collaborative_enabled: $("adolar4u-collaborative").checked,
+      discovery_level: Number($("adolar4u-discovery").value) / 100,
+    })
+  });
+  if (!r.ok) {
+    alert("Adolar4U-Einstellungen konnten nicht gespeichert werden.");
+    return;
+  }
+  await loadAdolar4UStatus();
+  $("adolar4u-modal").style.display = "none";
+}
+
+async function deleteAdolar4UProfile() {
+  if (!confirm("Persönliche Adolar4U-Lerndaten wirklich löschen?")) return;
+  const r = await fetch("/api/adolar4u/profile", {method: "DELETE"});
+  if (r.ok) alert("Deine Adolar4U-Lerndaten wurden gelöscht.");
 }
 
 async function refreshBlockedIps() {
@@ -5548,6 +5700,16 @@ setInterval(checkDiscoBadge, 30000);
       </div>
     </div>
 
+    <div style="border-top:0.5px solid var(--border-subtle);padding:18px 0;margin-bottom:4px">
+      <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Adolar4U · Spezialmodul</div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:10px 16px;align-items:center;font-size:13px;color:var(--text-secondary)">
+        <label for="setting-adolar4u-enabled">Adolar4U global bereitstellen</label><input id="setting-adolar4u-enabled" type="checkbox" onchange="saveAdolar4UAdminSettings()">
+        <label for="setting-adolar4u-analysis">Lokale Audioanalyse erlauben</label><input id="setting-adolar4u-analysis" type="checkbox" onchange="saveAdolar4UAdminSettings()">
+        <label for="setting-adolar4u-collaborative">Aggregiertes Lernen aus anderen Plays erlauben</label><input id="setting-adolar4u-collaborative" type="checkbox" onchange="saveAdolar4UAdminSettings()">
+      </div>
+      <p style="font-size:11px;line-height:1.5;color:var(--text-tertiary);margin:10px 0 0">Standardmäßig aus. Jeder Benutzer muss das persönliche Lernen zusätzlich selbst aktivieren.</p>
+    </div>
+
     <!-- Blocked IPs -->
     <div id="usermgmt-blocks-wrap" style="margin-bottom:20px;display:none">
       <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Gesperrte IPs</div>
@@ -5570,6 +5732,30 @@ setInterval(checkDiscoBadge, 30000);
         <button onclick="addUser()" style="padding:7px 14px;background:var(--accent);border:none;border-radius:7px;color:#fff;font-size:13px;cursor:pointer;white-space:nowrap">Anlegen</button>
       </div>
       <div id="usermgmt-error" style="display:none;margin-top:8px;font-size:12px;color:#f28b8b"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Personal Adolar4U settings ── -->
+<div id="adolar4u-modal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);align-items:center;justify-content:center" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:var(--bg-primary);border:0.5px solid var(--border-medium);border-radius:12px;padding:28px 32px;width:520px;max-width:94vw;position:relative">
+    <button onclick="$('adolar4u-modal').style.display='none'" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer">✕</button>
+    <div style="font-size:17px;font-weight:700;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-sparkles" style="color:var(--accent)"></i> Adolar4U</div>
+    <div style="font-size:12px;color:var(--accent);margin-bottom:16px">Deine Musik. Deine Mission.</div>
+    <p id="adolar4u-available" style="font-size:12px;line-height:1.5;color:var(--text-tertiary)"></p>
+    <div style="display:grid;grid-template-columns:1fr auto;gap:13px 16px;align-items:center;font-size:13px;color:var(--text-secondary);margin:18px 0">
+      <label for="adolar4u-enabled">Persönliches Lernen aktivieren</label><input id="adolar4u-enabled" type="checkbox">
+      <label for="adolar4u-paused">Lernen vorübergehend pausieren</label><input id="adolar4u-paused" type="checkbox">
+      <label for="adolar4u-collaborative">Aggregierte Signale anderer Benutzer verwenden</label><input id="adolar4u-collaborative" type="checkbox">
+    </div>
+    <label for="adolar4u-discovery" style="display:block;font-size:13px;color:var(--text-secondary);margin-bottom:7px">Überraschungsanteil: <strong id="adolar4u-discovery-value">15%</strong></label>
+    <input id="adolar4u-discovery" type="range" min="0" max="50" value="15" style="width:100%" oninput="$('adolar4u-discovery-value').textContent=this.value+'%'">
+    <div style="display:flex;justify-content:space-between;gap:8px;margin-top:22px;flex-wrap:wrap">
+      <button class="radio-secondary-btn" onclick="deleteAdolar4UProfile()"><i class="ti ti-trash"></i> Lerndaten löschen</button>
+      <div style="display:flex;gap:8px">
+        <button class="radio-secondary-btn" onclick="$('adolar4u-modal').style.display='none'">Abbrechen</button>
+        <button class="radio-primary-btn" onclick="saveAdolar4USettings()"><i class="ti ti-device-floppy"></i> Speichern</button>
+      </div>
     </div>
   </div>
 </div>

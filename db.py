@@ -3,6 +3,7 @@ import os
 import json
 from contextlib import contextmanager
 import smart_shuffle
+import adolar4u
 
 DB_PATH = os.environ.get("DB_PATH", "/data/adolar.db")
 
@@ -215,6 +216,7 @@ def init_db():
             except Exception:
                 pass
         _seed_radio_stations(conn)
+        adolar4u.init_schema(conn)
         # Play-count/BPM updates must not churn the full-text index.
         conn.executescript("""
             DROP TRIGGER IF EXISTS tracks_au;

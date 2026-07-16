@@ -11,6 +11,7 @@ import scanner
 import lastfm
 import auth as _auth
 import smart_shuffle
+import adolar4u
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -502,6 +503,82 @@ def api_access_settings_put():
         db.set_setting("companion_access", value)
     db.log_audit(g.user["id"], "access.settings_updated", "system")
     return api_access_settings_get()
+
+
+# ── Adolar4U optional personalization module ─────────────────────────────────
+
+@app.get("/api/adolar4u/status")
+@_auth.login_required
+def api_adolar4u_status():
+    global_settings = adolar4u.get_global_settings()
+    user_settings = adolar4u.get_user_settings(g.user["id"])
+    return jsonify({
+        "global": global_settings,
+        "user": user_settings,
+        "collecting": bool(
+            global_settings["enabled"]
+            and user_settings["enabled"]
+            and not user_settings["learning_paused"]
+        ),
+    })
+
+
+@app.put("/api/adolar4u/settings")
+@_auth.login_required
+def api_adolar4u_user_settings_put():
+    data = request.get_json(silent=True) or {}
+    allowed = {"enabled", "learning_paused", "collaborative_enabled", "discovery_level"}
+    boolean_fields = {"enabled", "learning_paused", "collaborative_enabled"}
+    if any(key not in allowed for key in data):
+        return jsonify({"error": "unknown setting"}), 400
+    if any(key in data and not isinstance(data[key], bool) for key in boolean_fields):
+        return jsonify({"error": "settings must be boolean"}), 400
+    try:
+        settings = adolar4u.update_user_settings(g.user["id"], data)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(settings)
+
+
+@app.delete("/api/adolar4u/profile")
+@_auth.login_required
+def api_adolar4u_profile_delete():
+    deleted = adolar4u.delete_profile(g.user["id"])
+    return jsonify({"ok": True, "deleted_events": deleted})
+
+
+@app.post("/api/adolar4u/events/<int:track_id>")
+@_auth.login_required
+def api_adolar4u_event(track_id):
+    try:
+        result = adolar4u.record_event(
+            g.user["id"], track_id, request.get_json(silent=True) or {},
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except LookupError:
+        abort(404)
+    return jsonify(result), 202 if result.get("accepted") else 200
+
+
+@app.get("/api/admin/adolar4u/settings")
+@_auth.admin_required
+def api_adolar4u_admin_settings_get():
+    return jsonify(adolar4u.get_global_settings())
+
+
+@app.put("/api/admin/adolar4u/settings")
+@_auth.admin_required
+def api_adolar4u_admin_settings_put():
+    data = request.get_json(silent=True) or {}
+    allowed = {"enabled", "audio_analysis", "collaborative"}
+    if any(key not in allowed for key in data):
+        return jsonify({"error": "unknown setting"}), 400
+    if any(not isinstance(value, bool) for value in data.values()):
+        return jsonify({"error": "settings must be boolean"}), 400
+    settings = adolar4u.update_global_settings(data)
+    db.log_audit(g.user["id"], "adolar4u.settings_updated", "system")
+    return jsonify(settings)
 
 
 @app.get("/api/admin/audit-log")
