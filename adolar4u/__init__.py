@@ -9,6 +9,7 @@ from .service import (
     update_global_settings,
     update_user_settings,
 )
+from .recommender import recommend_tracks
 
 __all__ = [
     "delete_profile",
@@ -16,6 +17,7 @@ __all__ = [
     "get_user_settings",
     "init_schema",
     "record_event",
+    "recommend_tracks",
     "update_global_settings",
     "update_user_settings",
 ]

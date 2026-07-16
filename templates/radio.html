@@ -96,6 +96,10 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       margin-top: 2px;
     }
+    #track-reason {
+      display: none; margin-top: 3px; font-size: 10px; color: rgba(255,255,255,.82);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
 
     /* ── Status badge ── */
     #radio-badge {
@@ -228,6 +232,7 @@
   <div id="track-info" style="display:none">
     <div id="track-title">—</div>
     <div id="track-artist"></div>
+    <div id="track-reason"></div>
   </div>
   <div id="not-playing">
     <i class="ti ti-radio spinning"></i>
@@ -294,6 +299,14 @@ const CF_IN      =  8;
 
 const radio = { queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false, session: 0, stationId: 1, stationName: "Adolar Radio", station: null, tracksSinceJingle: 0 };
 
+let _adolar4u = { collecting: false };
+const a4uTelemetry = {
+  sessionId: (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`),
+  sequence: 0,
+  trackId: null,
+  source: "radio",
+};
+
 let currentTrack  = null;
 let _scrobbled    = false;
 let _playCounted  = false;
@@ -340,6 +353,53 @@ function markCurrentPlayed() {
   if (radio.playedIds.length > 100) radio.playedIds = radio.playedIds.slice(-100);
 }
 
+function a4uSource() {
+  return radio.station?.engine === "adolar4u" ? "adolar4u" : "radio";
+}
+
+function sendA4UEvent(trackId, eventType, details = {}, beacon = false) {
+  if (!_adolar4u.collecting || !trackId || String(trackId).startsWith("jingle-")) return;
+  const payload = {
+    event_type: eventType,
+    source: details.source || a4uTelemetry.source,
+    reason: details.reason || null,
+    position_seconds: Number(details.position || 0),
+    duration_seconds: Number(details.duration || 0),
+    session_id: a4uTelemetry.sessionId,
+    client_event_id: `${a4uTelemetry.sessionId}:${++a4uTelemetry.sequence}:${eventType}`,
+  };
+  const url = `${API}/api/adolar4u/events/${trackId}`;
+  if (beacon && navigator.sendBeacon) {
+    navigator.sendBeacon(url, new Blob([JSON.stringify(payload)], {type: "application/json"}));
+  } else {
+    fetch(url, {method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload), keepalive: true}).catch(() => {});
+  }
+}
+
+function startA4UTrack(track) {
+  if (!_adolar4u.collecting || !track || isJingle(track)) return;
+  a4uTelemetry.trackId = track.id;
+  a4uTelemetry.source = a4uSource();
+  sendA4UEvent(track.id, "started", {
+    source: a4uTelemetry.source, duration: Number(track.duration || 0),
+  });
+}
+
+function finishA4UTrack(reason = "track_change", forceCompleted = false, beacon = false) {
+  if (!a4uTelemetry.trackId) return;
+  const duration = Number(audio.duration || currentTrack?.duration || 0);
+  const position = Math.min(Number(audio.currentTime || 0), duration || Infinity);
+  const ratio = duration > 0 ? position / duration : 0;
+  const completed = forceCompleted || ratio >= .9;
+  sendA4UEvent(a4uTelemetry.trackId, completed ? "completed" : "skipped", {
+    source: a4uTelemetry.source,
+    reason: completed ? "ended" : reason,
+    position, duration,
+  }, beacon);
+  a4uTelemetry.trackId = null;
+}
+
 // ── Radio queue ───────────────────────────────────────────
 async function loadQueue(count, exclude = []) {
   const p = new URLSearchParams({ count });
@@ -353,6 +413,7 @@ async function loadQueue(count, exclude = []) {
 }
 
 async function startRadio() {
+  finishA4UTrack("stop");
   radio.queue = [];
   radio.playedIds = [];
   radio.shuffleSession = null;
@@ -428,6 +489,7 @@ async function radioNext(fromCrossfade = false) {
     _scrobbled   = false;
     _playCounted = false;
     updateUI(track);
+    startA4UTrack(track);
     if (lfm.connected) {
       lfmCheckLoved(track).then(loved => setLoved(loved));
       fetch(`${API}/api/lastfm/nowplaying`, {
@@ -444,6 +506,7 @@ async function radioNext(fromCrossfade = false) {
 // ── Playback ──────────────────────────────────────────────
 function playTrack(track) {
   if (!track) return;
+  finishA4UTrack("track_change");
   markCurrentPlayed();
   currentTrack  = track;
   _scrobbled    = false;
@@ -457,6 +520,7 @@ function playTrack(track) {
   updateUI(track);
   audio.src = `${API}/api/stream/${track.id}`;
   audio.play().catch(() => {});
+  startA4UTrack(track);
 
   if (lfm.connected) {
     lfmCheckLoved(track).then(loved => setLoved(loved));
@@ -489,6 +553,9 @@ function updateUI(track) {
   document.getElementById("track-title").textContent  = track.title  || "—";
   document.getElementById("track-artist").textContent =
     [track.artist, track.year].filter(Boolean).join(" · ");
+  const reason = document.getElementById("track-reason");
+  reason.textContent = track.adolar4u_reason || "";
+  reason.style.display = track.adolar4u_reason ? "block" : "none";
   document.title = track.title ? `${track.title} – ${track.artist || ""}` : "Adolar Radio";
 
   updateBookmarkBtn(track);
@@ -578,6 +645,7 @@ function startCrossfade() {
         audio.volume = vol;
         old.pause(); old.removeAttribute("src"); old.load();
         radio.cfActive = false;
+        finishA4UTrack("ended", true);
         radioNext(true);
       }
     };
@@ -594,7 +662,12 @@ function startCrossfade() {
 // ── Audio events ──────────────────────────────────────────
 function onPlay(e)  { if (e.target === audio) setPlayBtn(true); }
 function onPause(e) { if (e.target === audio) setPlayBtn(false); }
-function onEnded(e) { if (e.target === audio && !radio.cfActive) radioNext(); }
+function onEnded(e) {
+  if (e.target === audio && !radio.cfActive) {
+    finishA4UTrack("ended", true);
+    radioNext();
+  }
+}
 function onTimeUpdate(e) {
   if (e.target !== audio) return;
   const cur = audio.currentTime;
@@ -640,6 +713,7 @@ for (const el of [audioA, audioB]) {
 // ── Controls ──────────────────────────────────────────────
 document.getElementById("btn-play").onclick = () => audio.paused ? audio.play() : audio.pause();
 document.getElementById("btn-next").onclick = () => {
+  finishA4UTrack("manual_next");
   radio.cfActive = false;
   cancelAnimationFrame(radio.cfTimer);
   const inactive = getInactive();
@@ -647,6 +721,7 @@ document.getElementById("btn-next").onclick = () => {
   audio.volume = document.getElementById("volume").valueAsNumber;
   radioNext();
 };
+window.addEventListener("pagehide", () => finishA4UTrack("stop", false, true));
 document.getElementById("btn-prev").onclick = () => {
   if (audio.currentTime > 5) { audio.currentTime = 0; return; }
   if (radio.playedIds.length) {
@@ -684,6 +759,10 @@ async function initUser() {
     nameBadge.style.display = "inline";
     loginBtn.style.display  = "none";
     bookmarkBtn.style.display = "";
+    try {
+      const status = await fetch(`${API}/api/adolar4u/status`);
+      if (status.ok) _adolar4u = await status.json();
+    } catch { _adolar4u = { collecting: false }; }
   } else {
     loginBtn.style.display  = "inline";
     nameBadge.style.display = "none";

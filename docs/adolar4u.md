@@ -1,7 +1,5 @@
 # Adolar4U
 
-**Deine Musik. Deine Mission.**
-
 Adolar4U is an optional, privacy-first personalization module. It is developed
 separately from the stable Smart Shuffle and must have no behavioral or runtime
 cost when disabled.
@@ -32,10 +30,17 @@ The first implementation milestone provides:
 - personal history deletion;
 - Web-player signal reporting, including manual skips, natural completion,
   crossfades, track changes, radio exit, and page exit.
+- Radio Companion signal reporting for authenticated, opted-in users;
+- a globally defined but individually visible `Adolar4U` system station;
+- metadata-first personal ranking with Cold Start and controlled discovery;
+- recommendation reasons returned with each selected track;
+- Smart Shuffle sequencing after personal candidate ranking.
 
-It does not yet rank tracks or expose the final Adolar4U station. Until that
-ranking engine exists, normal radio and Smart Shuffle behavior remains the only
-playback path.
+The current ranking uses play counts, favourites, personal playlists,
+completion/skip history, early skips, recency, same-hour listening patterns,
+artist/genre affinity, and the user's discovery setting. Audio embeddings,
+key/mood/energy analysis, and collaborative ranking are later milestones; their
+switches are marked as being in preparation in the UI.
 
 ## Data model
 
@@ -79,3 +84,8 @@ The recommendation engine will remain hybrid and explainable:
 Audio extraction and embeddings will be background jobs with versioned feature
 records. They must not run when global audio analysis is disabled and must never
 block streaming or library scans.
+
+## Manual verification
+
+See [`adolar4u-testing.md`](adolar4u-testing.md) for activation, learning,
+privacy, discovery, and Radio Companion test scenarios.

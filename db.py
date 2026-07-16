@@ -187,6 +187,7 @@ def init_db():
                 created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
                 created_at  TEXT    DEFAULT (datetime('now')),
                 updated_at  TEXT    DEFAULT (datetime('now')),
+                engine      TEXT    NOT NULL DEFAULT 'smart_shuffle',
                 UNIQUE(scope, owner_id, name)
             );
         """)
@@ -207,6 +208,7 @@ def init_db():
             "ALTER TABLE radio_stations ADD COLUMN jingle_enabled INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE radio_stations ADD COLUMN created_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
             "ALTER TABLE radio_stations ADD COLUMN updated_at TEXT",
+            "ALTER TABLE radio_stations ADD COLUMN engine TEXT NOT NULL DEFAULT 'smart_shuffle'",
             "ALTER TABLE users ADD COLUMN allow_playlists INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE users ADD COLUMN allow_radio_stations INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
@@ -266,6 +268,15 @@ def _seed_radio_stations(conn):
         VALUES
             (1, 'Adolar Radio', 'Alle Tracks in zufälliger Reihenfolge',
              '{"mode":"all","rules":[]}', 'global', NULL, 0, 0, 1, NULL)
+    """)
+    conn.execute("""
+        INSERT OR IGNORE INTO radio_stations
+            (name, description, filter_json, scope, owner_id, jingle_every_tracks,
+             jingle_enabled, is_system, created_by, engine)
+        VALUES
+            ('Adolar4U', 'Persönlicher, lernender Radiosender',
+             '{"mode":"all","rules":[]}', 'global', NULL, 0, 0, 1, NULL,
+             'adolar4u')
     """)
 
 
@@ -751,6 +762,7 @@ def _radio_station_from_row(row) -> dict:
     d["jingle_enabled"] = bool(d.get("jingle_enabled"))
     d["has_jingle"] = bool(d.pop("jingle_path", None))
     d["scope"] = d.get("scope") or "global"
+    d["engine"] = d.get("engine") or "smart_shuffle"
     try:
         d["filter"] = json.loads(d.pop("filter_json") or "{}")
     except Exception:
@@ -772,12 +784,13 @@ def list_radio_stations(user_id: int | None = None, include_all_private: bool = 
             SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
                    rs.owner_id, u.username AS owner_name, rs.jingle_path,
                    rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
-                   rs.created_at, rs.updated_at
+                   rs.created_at, rs.updated_at, rs.engine
             FROM radio_stations rs
             LEFT JOIN users u ON u.id=rs.owner_id
             WHERE """ + " OR ".join(where) + """
             GROUP BY rs.id
             ORDER BY rs.is_system DESC,
+                     CASE rs.engine WHEN 'adolar4u' THEN 1 ELSE 0 END,
                      CASE rs.scope WHEN 'global' THEN 0 ELSE 1 END,
                      u.username COLLATE NOCASE,
                      rs.name COLLATE NOCASE
@@ -791,7 +804,7 @@ def get_radio_station(station_id: int) -> dict | None:
             SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
                    rs.owner_id, u.username AS owner_name, rs.jingle_path,
                    rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
-                   rs.created_at, rs.updated_at
+                   rs.created_at, rs.updated_at, rs.engine
             FROM radio_stations rs
             LEFT JOIN users u ON u.id=rs.owner_id
             WHERE rs.id=?
@@ -915,6 +928,13 @@ def get_radio_station_tracks(station_id: int, count=25, exclude_ids=None, user_i
     station = get_radio_station(station_id)
     if not station:
         return None
+    if station.get("engine") == "adolar4u":
+        if not user_id:
+            return None
+        return adolar4u.recommend_tracks(
+            int(user_id), count=count, exclude_ids=exclude_ids,
+            shuffle_state=shuffle_state,
+        )
     return get_radio_filter_tracks(
         station.get("filter") or {}, count, exclude_ids,
         user_id=user_id, shuffle_state=shuffle_state,

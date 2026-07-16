@@ -1159,7 +1159,19 @@ def api_radio_stations_list():
         user and user.get("role") == "admin" and request.args.get("admin") == "1"
     )
     user_id = user["id"] if user else None
-    return jsonify(db.list_radio_stations(user_id=user_id, include_all_private=include_all_private))
+    stations = db.list_radio_stations(
+        user_id=user_id, include_all_private=include_all_private,
+    )
+    a4u_available = False
+    if user:
+        global_settings = adolar4u.get_global_settings()
+        user_settings = adolar4u.get_user_settings(user["id"])
+        a4u_available = global_settings["enabled"] and user_settings["enabled"]
+    stations = [
+        station for station in stations
+        if station.get("engine") != "adolar4u" or a4u_available
+    ]
+    return jsonify(stations)
 
 
 @app.post("/api/radio-stations")

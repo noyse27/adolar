@@ -158,10 +158,12 @@ def select_tracks(
     rng=None,
     unique_genres: int = 0,
     use_genre_spacing: bool = True,
+    candidate_penalties: dict[int, float] | None = None,
 ) -> list:
     """Order up to count candidates and update state for the planned play order."""
     count = max(0, int(count))
     rng = rng or random
+    candidate_penalties = candidate_penalties or {}
     w_track, w_artist, w_album = cooldown_windows(
         total_tracks, unique_artists, unique_albums
     )
@@ -238,6 +240,7 @@ def select_tracks(
                     w_album, 75.0,
                 )
                 + bpm_penalty(state.last_bpm, row["bpm"])
+                + max(0.0, float(candidate_penalties.get(int(row["id"]), 0.0)))
                 + rng.uniform(0, 15)
             )
             if score < best_score:
