@@ -2804,6 +2804,42 @@ function makeJingleItem() {
 
 // ── Fetch ─────────────────────────────────────────────────
 let _loadTracksRequest = 0;
+const INITIAL_TRACK_CACHE_VERSION = 1;
+
+function initialTrackCacheKey() {
+  return `adolar_initial_tracks_v${INITIAL_TRACK_CACHE_VERSION}_${_me?.id || "guest"}`;
+}
+
+function isInitialTrackRequest(page) {
+  return page === 1 && !state.query && state.sort === "artist" &&
+    !Object.values(state.filters).some(Boolean) && !_activePl && !radio.active;
+}
+
+function hydrateInitialTrackCache() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(initialTrackCacheKey()) || "null");
+    if (!cached?.results?.length || Date.now() - cached.savedAt > 7 * 86400000) return;
+    state.tracks = cached.results;
+    state.total = cached.total || cached.results.length;
+    state.pages = cached.pages || Math.max(1, Math.ceil(state.total / 50));
+    state.page = 1;
+    renderTracks();
+    renderPagination();
+    $("result-count").textContent = t().results(state.total);
+    fetchMemberships(state.tracks);
+  } catch (_) {}
+}
+
+function cacheInitialTracks(data) {
+  try {
+    localStorage.setItem(initialTrackCacheKey(), JSON.stringify({
+      results: data.results,
+      total: data.total,
+      pages: data.pages,
+      savedAt: Date.now(),
+    }));
+  } catch (_) {}
+}
 
 function _setSearching(on) {
   const wrap = document.querySelector('.search-input-wrap');
@@ -2861,6 +2897,7 @@ async function loadTracks(page = 1, forceCount = false) {
   }
 
   state.tracks = data.results;
+  if (isInitialTrackRequest(page) && data.results?.length) cacheInitialTracks(data);
   // Preserve cached total when not recounting
   if (needCount) {
     state.total = data.total;
@@ -2986,7 +3023,7 @@ function renderTracks(overrideTracks) {
     }
 
     // Bookmark button (alle eingeloggten Nutzer)
-    if (_me) {
+    if (_me?.allow_playlists) {
       const bmBtn = document.createElement("button");
       bmBtn.className = "btn-bookmark";
       bmBtn.dataset.trackId = track.id;
@@ -3075,29 +3112,59 @@ function updatePlayViewClock() {
   clock.dateTime = now.toISOString();
 }
 
-function setPlayViewCover(track) {
-  const wrap = $("play-view-cover");
-  wrap.innerHTML = "";
-  if (track?.has_cover) {
-    const img = document.createElement("img");
+const artworkPreloads = new Map();
+let playViewCoverRequest = 0;
+
+function artworkUrl(track, full = false) {
+  if (!track?.has_cover) return null;
+  return `${API}/api/cover/${track.cover_hash}${full ? "?full=1" : ""}`;
+}
+
+function preloadImage(url) {
+  if (!url) return Promise.resolve(null);
+  if (artworkPreloads.has(url)) return artworkPreloads.get(url);
+  const pending = new Promise(resolve => {
+    const img = new Image();
     img.alt = "";
-    img.src = `${API}/api/cover/${track.cover_hash}?full=1`;
-    img.onerror = () => {
-      wrap.innerHTML = "";
-      const ph = document.createElement("div");
-      ph.className = "cover-placeholder";
-      ph.style.background = artistColor(track.artist);
-      ph.textContent = initials(track.artist);
-      wrap.appendChild(ph);
+    img.onload = async () => {
+      try { await img.decode(); } catch (_) {}
+      resolve(img);
     };
-    wrap.appendChild(img);
-    return;
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+  artworkPreloads.set(url, pending);
+  if (artworkPreloads.size > 20) {
+    artworkPreloads.delete(artworkPreloads.keys().next().value);
   }
+  return pending;
+}
+
+function preloadTrackArtwork(track) {
+  if (!track?.has_cover) return;
+  preloadImage(artworkUrl(track));
+  preloadImage(artworkUrl(track, true));
+}
+
+async function setPlayViewCover(track) {
+  const wrap = $("play-view-cover");
+  const request = ++playViewCoverRequest;
+  if (track?.has_cover) {
+    const loaded = await preloadImage(artworkUrl(track, true));
+    if (request !== playViewCoverRequest) return;
+    if (loaded) {
+      const img = loaded.cloneNode();
+      img.alt = "";
+      wrap.replaceChildren(img);
+      return;
+    }
+  }
+  if (request !== playViewCoverRequest) return;
   const ph = document.createElement("div");
   ph.className = "cover-placeholder";
   ph.style.background = artistColor(track?.artist);
   ph.textContent = initials(track?.artist);
-  wrap.appendChild(ph);
+  wrap.replaceChildren(ph);
 }
 
 function makePlayViewQueueCover(track) {
@@ -3600,10 +3667,11 @@ async function radioNext() {
   $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
 }
 
-function preloadNext(nextTrackId) {
+function preloadNext(nextTrack) {
   // Buffer the next track silently so it's ready when crossfade starts
+  preloadTrackArtwork(nextTrack);
   if (audioB.getAttribute("src")) return; // already preloading
-  audioB.src = `${API}/api/stream/${nextTrackId}`;
+  audioB.src = `${API}/api/stream/${nextTrack.id}`;
   audioB.volume = 0;
   audioB.preload = "auto";
   audioB.load();
@@ -3834,14 +3902,14 @@ audio.ontimeupdate = () => {
       // Only crossfade if track is long enough (skip CF for short tracks)
       const trackDur = audio.duration || 0;
       const cfEnabled = trackDur > CF_OUT + 2; // need at least CF_OUT+2s
-      if (!radio.cfActive && remaining <= CF_PRELOAD) preloadNext(next.id);
+      if (!radio.cfActive && remaining <= CF_PRELOAD) preloadNext(next);
       if (!radio.cfActive && cfEnabled && remaining <= CF_OUT) startCrossfade();
     }
   } else if (normalCrossfade.enabled) {
     const remaining = audio.duration - audio.currentTime;
     const next = state.tracks[state.currentIdx + 1];
     const trackSupportsFade = audio.duration > CF_OUT + 2;
-    if (next && !normalCrossfade.active && remaining <= CF_PRELOAD) preloadNext(next.id);
+    if (next && !normalCrossfade.active && remaining <= CF_PRELOAD) preloadNext(next);
     if (next && !normalCrossfade.active && trackSupportsFade && remaining <= CF_OUT) {
       startNormalCrossfade();
     }
@@ -3964,14 +4032,14 @@ function renderRadioStations() {
     items.forEach(st => group.appendChild(renderRadioStationRow(st)));
     list.appendChild(group);
   });
-  $("btn-radio-new").style.display = _me ? "inline-flex" : "none";
+  $("btn-radio-new").style.display = _me?.allow_radio_stations ? "inline-flex" : "none";
 }
 
 function renderRadioStationRow(st) {
   const row = document.createElement("div");
   row.className = "radio-station-row";
   const isOwner = _me && st.owner_id === _me.id;
-  const canEdit = _me && (
+  const canEdit = _me?.allow_radio_stations && (
     (_me.role === "admin" && st.is_system) ||
     (!st.is_system && (st.scope === "private" ? (isOwner || _me.role === "admin") : _me.role === "admin"))
   );
@@ -4953,7 +5021,7 @@ function renderPlaylistSidebar() {
     item.innerHTML = `
       <i class="ti ${icon}"></i>
       <span class="pl-item-name">${esc(pl.name)}</span>
-      ${!pl.is_system ? `<button class="pl-del" title="Löschen" data-id="${pl.id}"><i class="ti ti-x"></i></button>` : ""}
+      ${!pl.is_system && _me?.allow_playlists ? `<button class="pl-del" title="Löschen" data-id="${pl.id}"><i class="ti ti-x"></i></button>` : ""}
     `;
     item.addEventListener("click", e => {
       if (e.target.closest(".pl-del")) return;
@@ -5084,10 +5152,17 @@ let _me = null;
 
 async function loadMe() {
   try {
-    const r = await fetch("/api/me");
-    if (r.status === 401) { location.href = "/login"; return; }
+    const r = await fetch("/api/me-optional");
     _me = await r.json();
   } catch { return; }
+
+  if (!_me) {
+    $("user-menu-name").textContent = "Anmelden";
+    $("btn-user-menu").onclick = () => { location.href = "/login?next=/"; };
+    $("user-dropdown").style.display = "none";
+    $("lastfm-status").style.display = "none";
+    return;
+  }
 
   $("user-menu-name").textContent = _me.username;
 
@@ -5116,7 +5191,7 @@ async function loadMe() {
     if (scanWrap) scanWrap.style.display = "none";
   }
 }
-loadMe().then(() => {
+const meReady = loadMe().then(() => {
   loadPlaylists();
   loadRadioStations();
 });
@@ -5141,7 +5216,9 @@ async function openUserMgmt() {
   $("user-dropdown").classList.remove("open");
   $("usermgmt-modal").style.display = "flex";
   await refreshUserList();
+  await refreshAccessSettings();
   await refreshBlockedIps();
+  await refreshAuditLog();
 }
 function closeUserMgmt() {
   $("usermgmt-modal").style.display = "none";
@@ -5161,8 +5238,20 @@ async function refreshUserList() {
       <span style="flex:1;font-size:13px;color:var(--text-primary)">${esc(u.username)}</span>
       <span style="font-size:11px;padding:2px 7px;border-radius:99px;background:${u.role==='admin'?'rgba(127,119,221,.2)':'var(--bg-secondary)'};color:${u.role==='admin'?'var(--accent)':'var(--text-tertiary)'}">${u.role}</span>
       <label title="Download erlaubt" style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-tertiary);cursor:pointer">
-        <input type="checkbox" data-uid="${u.id}" class="dl-toggle" ${u.allow_download?'checked':''}>
+        <input type="checkbox" data-uid="${u.id}" class="dl-toggle" ${u.allow_download?'checked':''} ${u.role==='admin'?'disabled':''}>
         <i class="ti ti-download" style="font-size:12px"></i>
+      </label>
+      <label title="Eigene Playlists" style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-tertiary);cursor:pointer">
+        <input type="checkbox" data-uid="${u.id}" data-cap="playlists" class="cap-toggle" ${u.allow_playlists?'checked':''} ${u.role==='admin'?'disabled':''}>
+        <i class="ti ti-playlist" style="font-size:12px"></i>
+      </label>
+      <label title="Eigene Radiosender" style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-tertiary);cursor:pointer">
+        <input type="checkbox" data-uid="${u.id}" data-cap="radio_stations" class="cap-toggle" ${u.allow_radio_stations?'checked':''} ${u.role==='admin'?'disabled':''}>
+        <i class="ti ti-radio" style="font-size:12px"></i>
+      </label>
+      <label title="Account aktiv" style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-tertiary);cursor:pointer">
+        <input type="checkbox" data-uid="${u.id}" class="active-toggle" ${u.is_active?'checked':''} ${isMe?'disabled':''}>
+        <i class="ti ti-user-check" style="font-size:12px"></i>
       </label>
       <label title="Plays dieses Nutzers erhöhen den Archiv-Playcount" style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-tertiary);cursor:pointer">
         <input type="checkbox" data-uid="${u.id}" class="pc-toggle" ${u.contributes_playcount?'checked':''}>
@@ -5202,6 +5291,26 @@ async function refreshUserList() {
     };
   });
 
+  list.querySelectorAll(".cap-toggle").forEach(cb => {
+    cb.onchange = async () => {
+      const r = await fetch(`/api/users/${cb.dataset.uid}/capability/${cb.dataset.cap}`, {
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({allow: cb.checked})
+      });
+      if (!r.ok) cb.checked = !cb.checked;
+    };
+  });
+
+  list.querySelectorAll(".active-toggle").forEach(cb => {
+    cb.onchange = async () => {
+      const r = await fetch(`/api/users/${cb.dataset.uid}/active`, {
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({active: cb.checked})
+      });
+      if (!r.ok) cb.checked = !cb.checked;
+    };
+  });
+
   // Password reset
   list.querySelectorAll(".pw-reset-btn").forEach(btn => {
     btn.onclick = async () => {
@@ -5225,6 +5334,29 @@ async function refreshUserList() {
       await refreshUserList();
     };
   });
+}
+
+async function refreshAccessSettings() {
+  const r = await fetch("/api/admin/access-settings");
+  if (!r.ok) return;
+  const settings = await r.json();
+  $("setting-anonymous-web").checked = settings.allow_anonymous_web === "1";
+  $("setting-user-playlists").checked = settings.allow_user_playlists !== "0";
+  $("setting-user-radios").checked = settings.allow_user_radio_stations !== "0";
+  $("setting-companion-access").value = settings.companion_access || "public";
+}
+
+async function saveAccessSettings() {
+  const r = await fetch("/api/admin/access-settings", {
+    method: "PUT", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      allow_anonymous_web: $("setting-anonymous-web").checked,
+      allow_user_playlists: $("setting-user-playlists").checked,
+      allow_user_radio_stations: $("setting-user-radios").checked,
+      companion_access: $("setting-companion-access").value,
+    })
+  });
+  if (!r.ok) alert("Zugriffseinstellungen konnten nicht gespeichert werden.");
 }
 
 async function refreshBlockedIps() {
@@ -5259,6 +5391,18 @@ async function refreshBlockedIps() {
   });
 }
 
+async function refreshAuditLog() {
+  const r = await fetch("/api/admin/audit-log?limit=30");
+  if (!r.ok) return;
+  const entries = await r.json();
+  const el = $("usermgmt-audit");
+  el.innerHTML = entries.length ? entries.map(item => `
+    <div style="display:grid;grid-template-columns:125px 105px 1fr;gap:8px;padding:4px 0;border-bottom:0.5px solid var(--border-subtle);font-size:11px;color:var(--text-tertiary)">
+      <span>${esc(item.created_at)}</span><span>${esc(item.actor)}</span>
+      <span>${esc(item.action)}${item.target ? ` · ${esc(item.target)}` : ""}${item.details ? ` · ${esc(item.details)}` : ""}</span>
+    </div>`).join("") : `<div style="font-size:12px;color:var(--text-tertiary)">Noch keine Einträge.</div>`;
+}
+
 async function addUser() {
   const errEl = $("usermgmt-error");
   errEl.style.display = "none";
@@ -5284,7 +5428,12 @@ setInterval(checkDiscoBadge, 30000);
 (async () => {
   applyLang();
   setupRadioModalDrag();
-  await Promise.all([loadStats(), loadGenres(), loadTracks(1), lfmInit()]);
+  await meReady;
+  hydrateInitialTrackCache();
+  // Prioritize the visible track list on a cold NAS disk. Secondary metadata
+  // queries run only after the first page has arrived (or refreshed the cache).
+  await loadTracks(1);
+  await Promise.all([loadStats(), loadGenres(), lfmInit()]);
 
   const res  = await fetch(`${API}/api/scan/status`);
   const data = await res.json();
@@ -5373,7 +5522,7 @@ setInterval(checkDiscoBadge, 30000);
 
 <!-- ── User Management Modal ── -->
 <div id="usermgmt-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);align-items:center;justify-content:center" onclick="if(event.target===this)closeUserMgmt()">
-  <div style="background:var(--bg-primary);border:0.5px solid var(--border-medium);border-radius:12px;padding:28px 32px;width:460px;max-width:95vw;max-height:85vh;overflow-y:auto;position:relative">
+  <div style="background:var(--bg-primary);border:0.5px solid var(--border-medium);border-radius:12px;padding:28px 32px;width:640px;max-width:95vw;max-height:85vh;overflow-y:auto;position:relative">
     <button onclick="closeUserMgmt()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer">✕</button>
     <div style="font-size:15px;font-weight:600;margin-bottom:20px;color:var(--text-primary)">
       <i class="ti ti-users" style="color:var(--accent)"></i> Benutzerverwaltung
@@ -5382,11 +5531,31 @@ setInterval(checkDiscoBadge, 30000);
     <!-- User list -->
     <div id="usermgmt-list" style="margin-bottom:20px"></div>
 
+    <div style="border-top:0.5px solid var(--border-subtle);padding:18px 0;margin-bottom:4px">
+      <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Zugriff und Standardrechte</div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:10px 16px;align-items:center;font-size:13px;color:var(--text-secondary)">
+        <label for="setting-anonymous-web">Adolar Web anonym verwenden</label><input id="setting-anonymous-web" type="checkbox" onchange="saveAccessSettings()">
+        <label for="setting-user-playlists">Benutzer dürfen eigene Playlists anlegen</label><input id="setting-user-playlists" type="checkbox" onchange="saveAccessSettings()">
+        <label for="setting-user-radios">Benutzer dürfen eigene Radiosender anlegen</label><input id="setting-user-radios" type="checkbox" onchange="saveAccessSettings()">
+        <label for="setting-companion-access">Radio Companion</label>
+        <select id="setting-companion-access" onchange="saveAccessSettings()" style="padding:5px 8px;background:var(--bg-secondary);border:0.5px solid var(--border-subtle);border-radius:6px;color:var(--text-primary)">
+          <option value="public">Öffentlich</option>
+          <option value="authenticated">Nur angemeldete Benutzer</option>
+          <option value="disabled">Deaktiviert</option>
+        </select>
+      </div>
+    </div>
+
     <!-- Blocked IPs -->
     <div id="usermgmt-blocks-wrap" style="margin-bottom:20px;display:none">
       <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Gesperrte IPs</div>
       <div id="usermgmt-blocks"></div>
     </div>
+
+    <details style="border-top:0.5px solid var(--border-subtle);padding:14px 0;margin-bottom:6px">
+      <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em">Administrative Historie</summary>
+      <div id="usermgmt-audit" style="margin-top:10px"></div>
+    </details>
 
     <!-- Add user form -->
     <div style="border-top:0.5px solid var(--border-subtle);padding-top:18px">
@@ -5408,7 +5577,7 @@ setInterval(checkDiscoBadge, 30000);
     <button onclick="document.getElementById('about-modal').style.display='none'" style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer;line-height:1">✕</button>
     <img src="/static/logo.svg" width="48" height="48" alt="Adolar" style="margin-bottom:12px">
     <div style="font-family:'Orbitron',sans-serif;font-size:1.3rem;font-weight:700;color:var(--accent);margin-bottom:4px">Adolar</div>
-    <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:16px">Version v1.3.0</div>
+    <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:16px">Version v1.4.0</div>
     <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:8px">(c) PolzeSoft 2026</div>
     <a href="https://polze.net" target="_blank" style="color:var(--accent);font-size:var(--text-sm);display:block;margin-bottom:4px">https://polze.net</a>
     <a href="mailto:adolar@polze.net" style="color:var(--accent);font-size:var(--text-sm)">adolar@polze.net</a>

@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO,
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", os.urandom(32))
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 
 # Restrict CORS to origins defined via env var (space-separated).
 # Default: deny all cross-origin requests (safe for local NAS use).
@@ -141,7 +141,7 @@ def login_post():
         next_url = "/"
 
     user = _auth.get_user_by_name(username)
-    if not user or not _auth.verify_password(user, password):
+    if not user or not user.get("is_active", 1) or not _auth.verify_password(user, password):
         _auth._bf_record_failure(ip)
         blocked2, secs2 = _auth._bf_check(ip)
         err = "Ungültiger Benutzername oder Passwort."
@@ -180,7 +180,7 @@ def api_radio_login():
     password = data.get("password") or ""
     remember = bool(data.get("remember", True))
     user = _auth.get_user_by_name(username)
-    if not user or not _auth.verify_password(user, password):
+    if not user or not user.get("is_active", 1) or not _auth.verify_password(user, password):
         _auth._bf_record_failure(ip)
         blocked2, secs2 = _auth._bf_check(ip)
         return jsonify({
@@ -256,6 +256,8 @@ def api_me():
         "username":       g.user["username"],
         "role":           g.user["role"],
         "allow_download": is_admin or bool(g.user["allow_download"]),
+        "allow_playlists": is_admin or _auth.can(g.user, "create_playlists"),
+        "allow_radio_stations": is_admin or _auth.can(g.user, "create_radio_stations"),
         "contributes_playcount": bool(g.user["contributes_playcount"]),
     })
 
@@ -280,6 +282,7 @@ def api_users_create():
     if _auth.get_user_by_name(username):
         return jsonify({"error": "Benutzername bereits vergeben."}), 409
     uid = _auth.create_user(username, password, role="user")
+    db.log_audit(g.user["id"], "user.created", f"user:{uid}", username)
     return jsonify({"ok": True, "id": uid}), 201
 
 @app.delete("/api/users/<int:user_id>")
@@ -287,7 +290,9 @@ def api_users_create():
 def api_users_delete(user_id):
     if user_id == g.user["id"]:
         return jsonify({"error": "Eigenen Account nicht löschbar."}), 400
+    deleted = _auth.get_user_by_id(user_id)
     _auth.delete_user(user_id)
+    db.log_audit(g.user["id"], "user.deleted", f"user:{user_id}", deleted["username"] if deleted else "")
     return jsonify({"ok": True})
 
 @app.post("/api/users/<int:user_id>/password")
@@ -298,6 +303,7 @@ def api_users_set_password(user_id):
     if len(password) < 8:
         return jsonify({"error": "Passwort muss mindestens 8 Zeichen haben."}), 400
     _auth.set_password(user_id, password, must_change=True)
+    db.log_audit(g.user["id"], "user.password_reset", f"user:{user_id}")
     return jsonify({"ok": True})
 
 @app.post("/api/users/<int:user_id>/download")
@@ -306,7 +312,30 @@ def api_users_set_download(user_id):
     data  = request.get_json(silent=True) or {}
     allow = bool(data.get("allow", False))
     _auth.set_allow_download(user_id, allow)
+    db.log_audit(g.user["id"], "user.capability", f"user:{user_id}", f"download={allow}")
     return jsonify({"ok": True, "allow_download": allow})
+
+
+@app.post("/api/users/<int:user_id>/capability/<capability>")
+@_auth.admin_required
+def api_users_set_capability(user_id, capability):
+    if capability not in ("playlists", "radio_stations", "download"):
+        return jsonify({"error": "unknown capability"}), 400
+    allow = bool((request.get_json(silent=True) or {}).get("allow", False))
+    _auth.set_user_capability(user_id, capability, allow)
+    db.log_audit(g.user["id"], "user.capability", f"user:{user_id}", f"{capability}={allow}")
+    return jsonify({"ok": True, "capability": capability, "allow": allow})
+
+
+@app.post("/api/users/<int:user_id>/active")
+@_auth.admin_required
+def api_users_set_active(user_id):
+    if user_id == g.user["id"]:
+        return jsonify({"error": "Eigenen Account nicht deaktivierbar."}), 400
+    active = bool((request.get_json(silent=True) or {}).get("active", False))
+    _auth.set_user_active(user_id, active)
+    db.log_audit(g.user["id"], "user.active", f"user:{user_id}", str(active))
+    return jsonify({"ok": True, "active": active})
 
 
 @app.post("/api/users/<int:user_id>/playcount")
@@ -315,6 +344,7 @@ def api_users_set_playcount(user_id):
     data = request.get_json(silent=True) or {}
     allow = bool(data.get("allow", False))
     _auth.set_contributes_playcount(user_id, allow)
+    db.log_audit(g.user["id"], "user.playcount_contribution", f"user:{user_id}", str(allow))
     return jsonify({"ok": True, "contributes_playcount": allow})
 
 @app.get("/api/me-optional")
@@ -330,6 +360,8 @@ def api_me_optional():
                 "username":       user["username"],
                 "role":           user["role"],
                 "allow_download": is_admin or bool(user["allow_download"]),
+                "allow_playlists": is_admin or _auth.can(user, "create_playlists"),
+                "allow_radio_stations": is_admin or _auth.can(user, "create_radio_stations"),
                 "contributes_playcount": bool(user["contributes_playcount"]),
             })
     return jsonify(None)
@@ -351,6 +383,8 @@ def api_radio_bookmark(track_id):
 
 @app.get("/api/playlists/memberships")
 def api_playlist_memberships():
+    if not g.user or not _auth.can(g.user, "create_playlists"):
+        return jsonify({})
     ids_raw = request.args.get("ids", "")
     try:
         track_ids = [int(x) for x in ids_raw.split(",") if x.strip().isdigit()]
@@ -361,6 +395,8 @@ def api_playlist_memberships():
 
 @app.post("/api/playlists/<int:playlist_id>/tracks")
 def api_playlist_add_track(playlist_id):
+    if not _auth.can(g.user, "create_playlists"):
+        return jsonify({"error": "forbidden"}), 403
     data     = request.get_json(silent=True) or {}
     track_id = data.get("track_id")
     if not isinstance(track_id, int):
@@ -380,7 +416,7 @@ def api_playlist_add_track(playlist_id):
 
 @app.get("/api/playlists/<int:playlist_id>/tracks")
 def api_playlist_tracks(playlist_id):
-    tracks = db.get_playlist_tracks(playlist_id, g.user["id"])
+    tracks = db.get_playlist_tracks(playlist_id, g.user["id"] if g.user else 0)
     if tracks is None:
         return jsonify({"error": "Nicht gefunden."}), 404
     return jsonify(tracks)
@@ -388,10 +424,12 @@ def api_playlist_tracks(playlist_id):
 
 @app.get("/api/playlists")
 def api_playlists_list():
-    return jsonify(db.get_playlists(g.user["id"]))
+    return jsonify(db.get_playlists(g.user["id"] if g.user else 0))
 
 @app.post("/api/playlists")
 def api_playlists_create():
+    if not _auth.can(g.user, "create_playlists"):
+        return jsonify({"error": "forbidden"}), 403
     import json
     data    = request.get_json(silent=True) or {}
     name    = (data.get("name") or "").strip()
@@ -405,12 +443,16 @@ def api_playlists_create():
 
 @app.delete("/api/playlists/<int:playlist_id>")
 def api_playlists_delete(playlist_id):
+    if not _auth.can(g.user, "create_playlists"):
+        return jsonify({"error": "forbidden"}), 403
     if not db.delete_playlist(playlist_id, g.user["id"]):
         return jsonify({"error": "Nicht gefunden oder keine Berechtigung."}), 404
     return jsonify({"ok": True})
 
 @app.patch("/api/playlists/<int:playlist_id>")
 def api_playlists_rename(playlist_id):
+    if not _auth.can(g.user, "create_playlists"):
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
@@ -430,6 +472,42 @@ def api_blocked_ips():
 def api_unblock_ip(ip):
     _auth.unblock_ip(ip)
     return jsonify({"ok": True})
+
+
+ACCESS_SETTINGS = {
+    "allow_anonymous_web": "0",
+    "allow_user_playlists": "1",
+    "allow_user_radio_stations": "1",
+    "companion_access": "public",
+}
+
+
+@app.get("/api/admin/access-settings")
+@_auth.admin_required
+def api_access_settings_get():
+    return jsonify({key: db.get_setting(key, default) for key, default in ACCESS_SETTINGS.items()})
+
+
+@app.put("/api/admin/access-settings")
+@_auth.admin_required
+def api_access_settings_put():
+    data = request.get_json(silent=True) or {}
+    for key in ("allow_anonymous_web", "allow_user_playlists", "allow_user_radio_stations"):
+        if key in data:
+            db.set_setting(key, "1" if bool(data[key]) else "0")
+    if "companion_access" in data:
+        value = str(data["companion_access"])
+        if value not in ("public", "authenticated", "disabled"):
+            return jsonify({"error": "invalid companion_access"}), 400
+        db.set_setting("companion_access", value)
+    db.log_audit(g.user["id"], "access.settings_updated", "system")
+    return api_access_settings_get()
+
+
+@app.get("/api/admin/audit-log")
+@_auth.admin_required
+def api_audit_log():
+    return jsonify(db.get_audit_log(_int_arg("limit", 100, 1, 500)))
 
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
@@ -452,11 +530,18 @@ def miniplayer():
 
 @app.get("/radio")
 def radio_companion():
+    access = db.get_setting("companion_access", "public")
+    if access == "disabled":
+        abort(404)
+    if access == "authenticated" and not g.user:
+        return redirect("/login?next=/radio")
     return render_template("radio.html")
 
 
 @app.get("/radio/settings")
 def radio_companion_settings():
+    if not g.user or g.user.get("role") != "admin":
+        abort(403)
     return render_template("radio_settings.html", app_version=APP_VERSION)
 
 
@@ -677,7 +762,7 @@ def _parse_range(header: str, size: int):
 
 @app.post("/api/download")
 def api_download():
-    if not g.user or not g.user.get("allow_download"):
+    if not _auth.can(g.user, "download_tracks"):
         return jsonify({"error": "Download nicht erlaubt."}), 403
     import zipfile, io, time
     ids = request.json.get("ids", [])
@@ -719,6 +804,7 @@ def api_download():
 # ── Play count ───────────────────────────────────────────────────────────────
 
 @app.post("/api/track/<int:track_id>/bpm")
+@_auth.admin_required
 def api_track_bpm(track_id):
     """Accept a BPM value from an external tool (e.g. Adolar Disco)."""
     data = request.get_json(silent=True) or {}
@@ -990,8 +1076,8 @@ def api_radio_stations_list():
 
 @app.post("/api/radio-stations")
 def api_radio_stations_create():
-    if not g.user:
-        return jsonify({"error": "unauthorized"}), 401
+    if not _auth.can(g.user, "create_radio_stations"):
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
@@ -1020,8 +1106,8 @@ def api_radio_stations_create():
 
 @app.put("/api/radio-stations/<int:station_id>")
 def api_radio_stations_update(station_id):
-    if not g.user:
-        return jsonify({"error": "unauthorized"}), 401
+    if not _auth.can(g.user, "create_radio_stations"):
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
@@ -1049,8 +1135,8 @@ def api_radio_stations_update(station_id):
 
 @app.delete("/api/radio-stations/<int:station_id>")
 def api_radio_stations_delete(station_id):
-    if not g.user:
-        return jsonify({"error": "unauthorized"}), 401
+    if not _auth.can(g.user, "create_radio_stations"):
+        return jsonify({"error": "forbidden"}), 403
     if not db.delete_radio_station(station_id, g.user["id"], g.user["role"] == "admin"):
         return jsonify({"error": "not found or system station"}), 404
     return jsonify({"ok": True})
@@ -1074,8 +1160,8 @@ def api_radio_stations_test():
 
 
 def _can_manage_station_or_404(station_id: int):
-    if not g.user:
-        return jsonify({"error": "unauthorized"}), 401
+    if not _auth.can(g.user, "create_radio_stations"):
+        return jsonify({"error": "forbidden"}), 403
     if not db.can_manage_radio_station(station_id, g.user["id"], g.user["role"] == "admin"):
         return jsonify({"error": "not found or forbidden"}), 404
     return None
@@ -1420,6 +1506,7 @@ def api_lastfm_loved():
 # ── Scanner ───────────────────────────────────────────────────────────────────
 
 @app.post("/api/scan/start")
+@_auth.admin_required
 def api_scan_start():
     if not os.path.isdir(MUSIC_ROOT):
         return jsonify({"error": f"MUSIC_ROOT not found: {MUSIC_ROOT}"}), 400
@@ -1428,6 +1515,7 @@ def api_scan_start():
 
 
 @app.post("/api/scan/bpm-tags")
+@_auth.admin_required
 def api_bpm_tags():
     """Read BPM from file tags (TBPM etc.) and update DB — fast, no audio analysis."""
     import threading
@@ -1457,6 +1545,7 @@ def api_bpm_tags():
 
 
 @app.post("/api/scan/bpm")
+@_auth.admin_required
 def api_bpm_scan():
     """Trigger background BPM analysis for tracks without BPM.
     Optional JSON body: {"limit": 500} to cap the number analysed."""

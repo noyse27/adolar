@@ -27,7 +27,7 @@ PUBLIC_PREFIXES = (
     "/api/stats", "/api/disco-status", "/api/me-optional",
     "/api/radio/", "/api/radio-stations",
     "/api/search",   # read-only; called by Disco server without user session
-    "/radio", "/static/",
+    "/static/",
 )
 # Disco-specific endpoints (no session needed, called by Disco server)
 PUBLIC_SUFFIXES = ("/disco-played",)
@@ -103,10 +103,11 @@ def get_user_by_token(token: str) -> dict | None:
     now = time.time()
     with db.db() as conn:
         row = conn.execute(
-            """SELECT u.id, u.username, u.role, u.allow_download, u.contributes_playcount,
+            """SELECT u.id, u.username, u.role, u.allow_download, u.allow_playlists,
+                      u.allow_radio_stations, u.contributes_playcount, u.is_active,
                       u.must_change_password
                FROM sessions s JOIN users u ON u.id = s.user_id
-               WHERE s.token=? AND s.expires_at > ?""",
+               WHERE s.token=? AND s.expires_at > ? AND u.is_active=1""",
             (token, now)
         ).fetchone()
     return dict(row) if row else None
@@ -132,7 +133,8 @@ def purge_expired_sessions():
 def get_all_users() -> list[dict]:
     with db.db() as conn:
         rows = conn.execute(
-            """SELECT id, username, role, allow_download, contributes_playcount,
+            """SELECT id, username, role, allow_download, allow_playlists,
+                      allow_radio_stations, contributes_playcount, is_active,
                       must_change_password, created_at FROM users ORDER BY id"""
         ).fetchall()
     return [dict(r) for r in rows]
@@ -140,7 +142,8 @@ def get_all_users() -> list[dict]:
 def get_user_by_id(user_id: int) -> dict | None:
     with db.db() as conn:
         row = conn.execute(
-            """SELECT id, username, role, allow_download, contributes_playcount,
+            """SELECT id, username, role, allow_download, allow_playlists,
+                      allow_radio_stations, contributes_playcount, is_active,
                       must_change_password FROM users WHERE id=?""",
             (user_id,)
         ).fetchone()
@@ -150,7 +153,8 @@ def get_user_by_name(username: str) -> dict | None:
     with db.db() as conn:
         row = conn.execute(
             """SELECT id, username, password_hash, role, allow_download,
-                      contributes_playcount, must_change_password
+                      allow_playlists, allow_radio_stations, contributes_playcount,
+                      is_active, must_change_password
                FROM users WHERE LOWER(username)=LOWER(?)""",
             (username,)
         ).fetchone()
@@ -182,6 +186,26 @@ def set_allow_download(user_id: int, allow: bool):
         conn.execute("UPDATE users SET allow_download=? WHERE id=?", (1 if allow else 0, user_id))
 
 
+def set_user_capability(user_id: int, capability: str, allow: bool):
+    columns = {
+        "playlists": "allow_playlists",
+        "radio_stations": "allow_radio_stations",
+        "download": "allow_download",
+    }
+    column = columns.get(capability)
+    if not column:
+        raise ValueError("unknown capability")
+    with db.db() as conn:
+        conn.execute(f"UPDATE users SET {column}=? WHERE id=?", (1 if allow else 0, user_id))
+
+
+def set_user_active(user_id: int, active: bool):
+    with db.db() as conn:
+        conn.execute("UPDATE users SET is_active=? WHERE id=?", (1 if active else 0, user_id))
+        if not active:
+            conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+
+
 def set_contributes_playcount(user_id: int, allow: bool):
     with db.db() as conn:
         conn.execute(
@@ -192,6 +216,11 @@ def set_contributes_playcount(user_id: int, allow: bool):
 def delete_user(user_id: int):
     with db.db() as conn:
         conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        conn.execute(
+            "DELETE FROM playlist_tracks WHERE playlist_id IN (SELECT id FROM playlists WHERE owner_id=?)",
+            (user_id,),
+        )
+        conn.execute("DELETE FROM playlists WHERE owner_id=?", (user_id,))
         conn.execute("DELETE FROM users WHERE id=?", (user_id,))
 
 def get_blocked_ips() -> list[dict]:
@@ -220,6 +249,24 @@ def _is_public(path: str) -> bool:
             return True
     return False
 
+
+def setting_enabled(key: str, default: bool = False) -> bool:
+    return str(db.get_setting(key, "1" if default else "0")).lower() in ("1", "true", "yes", "on")
+
+
+def can(user: dict | None, capability: str) -> bool:
+    if user and user.get("role") == "admin":
+        return True
+    if capability == "view_web":
+        return bool(user) or setting_enabled("allow_anonymous_web")
+    if capability == "create_playlists":
+        return bool(user and setting_enabled("allow_user_playlists", True) and user.get("allow_playlists", 1))
+    if capability == "create_radio_stations":
+        return bool(user and setting_enabled("allow_user_radio_stations", True) and user.get("allow_radio_stations", 1))
+    if capability == "download_tracks":
+        return bool(user and user.get("allow_download"))
+    return False
+
 def before_request():
     """Attach current user to g; redirect unauthenticated requests."""
     g.user = None
@@ -238,6 +285,15 @@ def before_request():
             return
 
     if _is_public(request.path):
+        return
+
+    if request.method in ("GET", "HEAD") and request.path in ("/", "/miniplayer", "/api/genres", "/api/playlists", "/api/shuffle"):
+        if can(None, "view_web"):
+            return
+    if request.method in ("GET", "HEAD") and request.path.startswith("/api/playlists/") and request.path.endswith("/tracks"):
+        if can(None, "view_web"):
+            return
+    if request.path == "/radio" and db.get_setting("companion_access", "public") == "public":
         return
 
     if request.path.startswith("/api/"):

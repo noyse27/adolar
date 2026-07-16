@@ -1,6 +1,6 @@
 # Adolar
 
-Current version: **1.3.0**
+Current version: **1.4.0**
 
 A self-hosted music archive web app for Synology NAS (or any Docker host). Browse, search, and stream your local MP3/FLAC/M4A collection from any browser — no cloud required.
 
@@ -30,14 +30,27 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Background scanner** — indexes library without blocking UI, skips unchanged files (mtime), generates cover thumbnails after scan
 - **Last.fm scrobbling** — auto-scrobble + love tracks; loved status cached locally for instant display (no per-page API calls)
 - **Adolar Disco badge** — shows 🪩 Disco in topbar when Adolar Disco is connected
-- **User authentication** — first-run setup, login with remember-me, brute-force protection (IP ban after 10 failed attempts), admin-managed user accounts
-- **Per-user permissions** — admin controls download access per user; Last.fm and scan functions are admin-only
+- **User authentication** — first-run admin setup, optional additional accounts, account deactivation, remember-me login, and brute-force protection
+- **Capability-based permissions** — playlist creation, private radio stations, downloads, and archive play-count contribution can be controlled without granting maintenance rights
+- **Optional guest access** — Adolar Web can expose the read-only library, global playlists, and global radio while keeping personal and administrative actions locked
+- **Configurable Radio Companion access** — public, authenticated users only, or disabled
+- **Administrative audit log** — records user, capability, password-reset, account-status, and global access-setting changes without logging listening history
 - **Per-user play counts** — each user tracks their own play history; optionally authorized users contribute plays to a durable archive count
 - **Durable archive counts** — the highest value from database, Last.fm, or file tag wins; changed tags are written nightly or manually
 - **Playlists** — smart playlists (saved filter/sort state) and static playlists; 4 system playlists for all users (Recently played, Most played, Newest 100, Disco Hits)
 - **Bookmark button** — add any track to a personal playlist directly from the track list; create new playlists on the fly
 - **Radio bookmarks** — log in via Adolar Radio companion to bookmark tracks into a personal "Radio Favourites" playlist
 - **DE / EN interface** — language switch in topbar
+
+## What's new in 1.4.0
+
+- Capability-based access control for personal playlists, private radio stations, downloads, and global play-count contribution
+- Optional read-only guest access to Adolar Web with a visible login entry point
+- Configurable Radio Companion access: public, authenticated users only, or disabled
+- Account deactivation with immediate session revocation and an administrative audit log
+- Server-enforced admin protection for scans, BPM maintenance, and other administrative operations
+- Faster cold starts through a per-user stale-while-revalidate track cache and prioritized first-page loading
+- Preloaded and atomically swapped Now Playing artwork for smoother crossfade transitions
 
 ## Quick Start (Docker)
 
@@ -90,6 +103,38 @@ Connect it to your Adolar server in the settings dialog. An optional Adolar logi
 
 On first start, navigate to `/setup` to create the admin account. All subsequent users are added by the admin via the user management panel (topbar → admin menu).
 
+## Access control and permission matrix
+
+Adolar uses three visible access levels (`Admin`, `User`, and `Anonymous`) plus individual user capabilities. Permissions are checked by the server; hiding a control in the interface is not used as an authorization mechanism.
+
+| Capability | Admin | User | Anonymous |
+|---|:---:|:---:|:---:|
+| Use Adolar Web and browse the library | Always | Yes | Configurable |
+| Play tracks | Yes | Yes | Yes when anonymous Web is enabled |
+| Use global playlists | Yes | Yes | Yes when anonymous Web is enabled |
+| Create and manage personal playlists | Yes | Global setting + per-user permission | No |
+| Listen to global radio stations | Yes | Yes | Yes |
+| Create and manage private radio stations | Yes | Global setting + per-user permission | No |
+| Create or edit global radio stations | Yes | No | No |
+| Download tracks | Yes | Per-user permission | No |
+| Maintain a personal play count | Yes | Yes | No |
+| Contribute plays to the archive/global count | Yes | Per-user setting | No |
+| Use Last.fm administration and love controls | Yes | No | No |
+| Scan the library and run BPM maintenance | Yes | No | No |
+| Manage users, blocked IPs, and access settings | Yes | No | No |
+| View the administrative audit log | Yes | No | No |
+
+Global access settings in the user-management panel:
+
+| Setting | Values | Default |
+|---|---|---|
+| Anonymous Adolar Web | Enabled / disabled | Disabled |
+| Personal playlists for users | Enabled / disabled | Enabled |
+| Private radio stations for users | Enabled / disabled | Enabled |
+| Radio Companion | Public / authenticated users / disabled | Public |
+
+Disabling playlist or radio creation does not delete existing personal content. Deactivated accounts keep their content and play-count history, but all active sessions are revoked immediately.
+
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -120,8 +165,8 @@ On first start, navigate to `/setup` to create the admin account. All subsequent
 | POST | `/api/track/<id>/played` | Increment per-user play count (auth required) |
 | POST | `/api/track/<id>/disco-played` | Increment Disco play count (public, never writes file) |
 | GET | `/api/disco-status` | Check if Adolar Disco is connected |
-| GET | `/api/playlists` | List user's playlists (auth required) |
-| POST | `/api/playlists` | Create playlist (auth required) |
+| GET | `/api/playlists` | List global plus personal playlists; global-only for anonymous access |
+| POST | `/api/playlists` | Create playlist (playlist capability required) |
 | POST | `/api/playlists/<id>/tracks` | Add track to static playlist (auth required) |
 | GET | `/api/me` | Current user info (auth required) |
 | GET | `/api/me-optional` | Current user info or null (public) |

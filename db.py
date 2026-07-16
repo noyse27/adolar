@@ -10,8 +10,9 @@ DB_PATH = os.environ.get("DB_PATH", "/data/adolar.db")
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA mmap_size=134217728")
     return conn
 
 
@@ -30,6 +31,8 @@ def db():
 
 def init_db():
     with db() as conn:
+        # Set the persistent journal mode once instead of repeating it on every request.
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS tracks (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,7 +114,10 @@ def init_db():
                 password_hash        TEXT    NOT NULL,
                 role                 TEXT    NOT NULL DEFAULT 'user',
                 allow_download       INTEGER NOT NULL DEFAULT 0,
+                allow_playlists      INTEGER NOT NULL DEFAULT 1,
+                allow_radio_stations INTEGER NOT NULL DEFAULT 1,
                 contributes_playcount INTEGER NOT NULL DEFAULT 0,
+                is_active            INTEGER NOT NULL DEFAULT 1,
                 must_change_password INTEGER NOT NULL DEFAULT 1,
                 created_at           TEXT    DEFAULT (datetime('now'))
             );
@@ -126,6 +132,16 @@ def init_db():
                 ip           TEXT PRIMARY KEY,
                 blocked_until REAL NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                action     TEXT NOT NULL,
+                target     TEXT,
+                details    TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
 
             CREATE TABLE IF NOT EXISTS user_play_counts (
                 user_id        INTEGER NOT NULL,
@@ -190,6 +206,9 @@ def init_db():
             "ALTER TABLE radio_stations ADD COLUMN jingle_enabled INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE radio_stations ADD COLUMN created_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
             "ALTER TABLE radio_stations ADD COLUMN updated_at TEXT",
+            "ALTER TABLE users ADD COLUMN allow_playlists INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN allow_radio_stations INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
         ]:
             try:
                 conn.execute(migration)
@@ -1071,6 +1090,26 @@ def get_setting(key: str, default=None):
 def set_setting(key: str, value: str):
     with db() as conn:
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (key, value))
+
+
+def log_audit(actor_id: int | None, action: str, target: str = "", details: str = ""):
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO audit_log (actor_id, action, target, details) VALUES (?,?,?,?)",
+            (actor_id, action, target, details),
+        )
+
+
+def get_audit_log(limit: int = 100) -> list[dict]:
+    with db() as conn:
+        rows = conn.execute(
+            """SELECT a.id, a.action, a.target, a.details, a.created_at,
+                      COALESCE(u.username, 'System') AS actor
+               FROM audit_log a LEFT JOIN users u ON u.id=a.actor_id
+               ORDER BY a.id DESC LIMIT ?""",
+            (max(1, min(int(limit), 500)),),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def del_setting(key: str):
