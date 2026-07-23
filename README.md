@@ -39,6 +39,9 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Per-user play counts** — each user tracks their own play history; optionally authorized users contribute plays to a durable archive count
 - **Durable archive counts** — the highest value from database, Last.fm, or file tag wins; changed tags are written nightly or manually
 - **Playlists** — smart playlists, static playlists, four global system playlists, and one protected personal Favorites playlist per user
+- **Playlist editor** — visual editor with track search, rule-based smart filters, drag-and-drop ordering, random fill, and portable `.adolarplaylist` import/export
+- **Database backups** — consistent SQLite snapshots with integrity check, SHA-256 checksum, jingle archive, daily automatic runs, and retention policy
+- **Connection monitor** — admin overview of connected clients with heartbeats and masked IP addresses
 - **Local Favorites** — a star works without Last.fm; optionally and by default, adding a favorite also loves it on the connected Last.fm account
 - **Private Adolar4U learning journal** — records versioned score components, candidate groups, profile snapshots, and listening outcomes; a personal ZIP export provides analysis-ready CSV and JSON files
 - **Bookmark button** — add any track to a personal playlist directly from the track list; create new playlists on the fly
@@ -54,6 +57,8 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - Admin connection monitor with client heartbeats and masked IP addresses
 - Resilient NAS streaming through bounded Gunicorn thread workers; Last.fm calls moved to a background queue so network outages cannot stall requests
 - Adolar Android companion app for playback and personal learning on the go
+- Specific, curated validation messages across the playlist, filter, and radio APIs to make problems easier to pin down
+- Security hardening: exception details never reach API responses, and the login redirect target is strictly normalized to same-origin paths
 
 ## What's new in 1.4.0
 
