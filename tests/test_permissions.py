@@ -65,6 +65,10 @@ class PermissionTests(unittest.TestCase):
             response = self.client.post("/api/scan/start")
         self.assertEqual(response.status_code, 403)
 
+        with self._login():
+            response = self.client.get("/api/admin/backups")
+        self.assertEqual(response.status_code, 403)
+
     def test_companion_can_require_login(self):
         with mock.patch.object(
             app_module.db, "get_setting", side_effect=lambda key, default=None: (

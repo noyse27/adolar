@@ -56,6 +56,7 @@ class ShuffleState:
     unique_artists: int | None = None
     unique_albums: int | None = None
     unique_genres: int | None = None
+    adolar4u_bucket_counts: dict[str, int] = field(default_factory=dict)
     touched_at: float = field(default_factory=time.time)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -72,6 +73,7 @@ class ShuffleState:
         self.unique_artists = None
         self.unique_albums = None
         self.unique_genres = None
+        self.adolar4u_bucket_counts.clear()
 
 
 _sessions: dict[str, ShuffleState] = {}

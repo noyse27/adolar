@@ -124,7 +124,7 @@
       <div class="nav-label">Verwaltung</div>
       <a href="#benutzer">Benutzer & Rechte</a><a href="#wartung">Wartung</a><a href="#probleme">Problemlösung</a>
     </nav>
-    <div class="side-foot">Adolar v1.4.0<br>Same rocket. Different mission.</div>
+    <div class="side-foot">Adolar v1.5.0<br>Same rocket. Different mission.</div>
   </aside>
 
   <main class="main">
@@ -206,11 +206,14 @@
         <div class="kicker">10 · Administration</div><h2>Benutzer & Rechte</h2><p class="intro">Die Benutzerverwaltung liegt im Kontomenü des Admins. Rechte werden nicht nur in der Oberfläche ausgeblendet, sondern auch serverseitig geprüft.</p>
         <table><thead><tr><th>Funktion</th><th>Admin</th><th>Benutzer</th><th>Gast</th></tr></thead><tbody><tr><td>Bibliothek und Wiedergabe</td><td class="yes">Immer</td><td class="yes">Ja</td><td>Konfigurierbar</td></tr><tr><td>Eigene Playlists</td><td class="yes">Ja</td><td>Global + pro Benutzer</td><td class="no">Nein</td></tr><tr><td>Eigene Radiosender</td><td class="yes">Ja</td><td>Global + pro Benutzer</td><td class="no">Nein</td></tr><tr><td>Downloads</td><td class="yes">Ja</td><td>Pro Benutzer</td><td class="no">Nein</td></tr><tr><td>Wartung & Benutzer</td><td class="yes">Ja</td><td class="no">Nein</td><td class="no">Nein</td></tr></tbody></table>
         <h3>Konten verwalten</h3><p>Neue Benutzer erhalten ein Initialpasswort und müssen es bei der ersten Anmeldung ändern. Ein deaktiviertes Konto verliert sofort alle Sitzungen, behält aber Playlists, Radios und Playcounts. Die administrative Historie protokolliert relevante Rechte- und Kontoänderungen.</p>
+        <h3>Favoriten und Last.fm</h3><p>Der Stern ist der lokale Adolar-Favorit, das Herz gehört ausschließlich zu Last.fm. Ein neuer Adolar-Favorit setzt bei aktivierter Synchronisation zusätzlich das Last.fm-Herz. Umgekehrt erzeugt ein Last.fm-Herz bewusst keinen lokalen Favoriten; auch ein Loved-Import füllt die Favoriten-Playlist nicht automatisch.</p>
       </section>
 
-      <section id="wartung" data-search="wartung admin scan bpm tags lastfm playcount archiv">
+      <section id="wartung" data-search="wartung admin scan bpm tags lastfm playcount archiv backup datensicherung usb">
         <div class="kicker">11 · Administration</div><h2>Bibliothekswartung</h2>
-        <div class="ui-map"><div class="ui-item"><b>Bibliothek scannen</b>Neue und geänderte Dateien einlesen; unveränderte Titel werden übersprungen.</div><div class="ui-item"><b>BPM-Tags einlesen</b>Vorhandene TBPM-Werte schnell aus den Musikdateien übernehmen.</div><div class="ui-item"><b>BPM berechnen</b>Fehlende Werte im Hintergrund analysieren und in die Tags schreiben.</div><div class="ui-item"><b>Globale Playcounts</b>Autorisierte Plays erhöhen das Archiv; persönliche Zähler bleiben davon unabhängig.</div></div>
+        <div class="ui-map"><div class="ui-item"><b>Bibliothek scannen</b>Neue und geänderte Dateien einlesen; unveränderte Titel werden übersprungen.</div><div class="ui-item"><b>BPM-Tags einlesen</b>Vorhandene TBPM-Werte schnell aus den Musikdateien übernehmen.</div><div class="ui-item"><b>BPM berechnen</b>Fehlende Werte im Hintergrund analysieren und in die Tags schreiben.</div><div class="ui-item"><b>Globale Playcounts</b>Autorisierte Plays erhöhen das Archiv; persönliche Zähler bleiben davon unabhängig.</div><div class="ui-item"><b>Datensicherung</b>Admins können konsistente Datenbank-Snapshots starten, prüfen, herunterladen und löschen. Automatische Sicherungen laufen standardmäßig täglich ab 03:00 Uhr; die neuesten sieben bleiben erhalten.</div></div>
+        <p>Eine Sicherung wird erst angezeigt, nachdem SQLite sie geprüft und Adolar eine SHA-256-Prüfsumme erzeugt hat. Sie enthält Konten, Favoriten, Last.fm-Zuordnungen und Adolar4U-Lerndaten und ist deshalb vertraulich. Das externe Backup-Ziel sollte zusätzlich mit Hyper Backup auf ein zweites Medium gesichert werden.</p>
+        <p>In der persönlichen Adolar4U-Lernhistorie lädt <b>Analyse-Export</b> den gewählten Zeitraum als ZIP herunter. Empfehlungen, Hörereignisse und Profil-Snapshots liegen als auswertbare CSV-Dateien bei; <code>summary.json</code> enthält die aggregierten Gruppenanteile und Profiländerungen. Der Export gehört ausschließlich zum angemeldeten Benutzer und enthält keine Passwörter, Last.fm-Sitzungsschlüssel oder Musikdateipfade.</p>
       </section>
 
       <section id="probleme" data-search="probleme fehler langsam kein cover kein download login gesperrt ton">
@@ -222,7 +225,7 @@
         <details><summary>Der Companion zeigt keine privaten Sender</summary><p>Im Companion anmelden und prüfen lassen, ob das Recht „Eigene Radiosender“ aktiv ist. Private Sender anderer Benutzer bleiben unsichtbar.</p></details>
       </section>
     </div>
-    <footer>Adolar v1.4.0 · © PolzeSoft 2026 · polze.net · Same rocket. Different mission.</footer>
+    <footer>Adolar v1.5.0 · © PolzeSoft 2026 · polze.net · Same rocket. Different mission.</footer>
   </main>
 </div>
 <script>

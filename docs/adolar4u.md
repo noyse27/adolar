@@ -1,5 +1,8 @@
 # Adolar4U
 
+> Project handoff: [`adolar4u-roadmap.md`](adolar4u-roadmap.md) records the
+> current phase, fixed decisions, next milestone, and explicit non-goals.
+
 Adolar4U is an optional, privacy-first personalization module. It is developed
 separately from the stable Smart Shuffle and must have no behavioral or runtime
 cost when disabled.
@@ -33,12 +36,19 @@ The first implementation milestone provides:
 - Radio Companion signal reporting for authenticated, opted-in users;
 - a globally defined but individually visible `Adolar4U` system station;
 - metadata-first personal ranking with Cold Start and controlled discovery;
+- bounded anchor, similar, familiar, and discovery candidate groups;
+- personal Last.fm Loved and local Adolar Favorites as deduplicated taste signals;
 - recommendation reasons returned with each selected track;
+- a private, versioned recommendation journal with exact score components,
+  queue composition, profile snapshots, and linked listening outcomes;
 - Smart Shuffle sequencing after personal candidate ranking.
 
-The current ranking uses play counts, favourites, personal playlists,
+The current ranking uses play counts, personal Last.fm Loved tracks, local
+Adolar Favorites, personal playlists,
 completion/skip history, early skips, recency, same-hour listening patterns,
-artist/genre affinity, and the user's discovery setting. Audio embeddings,
+artist/genre affinity, and the user's discovery setting. Skip penalties are
+Bayesian-smoothed ratios: a single skip is a mild dampener, and only repeated
+skips approach the full penalty (see roadmap decision 8). Audio embeddings,
 key/mood/energy analysis, and collaborative ranking are later milestones; their
 switches are marked as being in preparation in the UI.
 
@@ -54,6 +64,20 @@ Server-side completion ratios are derived from playback position and duration.
 The event API never stores search text, IP addresses, filenames, free-form
 client metadata, or another user's identity.
 
+`adolar4u_recommendation_batches` stores one compact diagnostic snapshot for an
+actual queue request. `adolar4u_recommendations` stores only selected tracks,
+not every rejected library candidate. The returned decision ID links subsequent
+listening events to the exact recommendation without timestamp guessing.
+Diagnostic records are personal, obey learning pause, are retained for at most
+60 days, and are removed with the personal learning history. A logging failure
+must never prevent a playable queue.
+
+Direct Loved/Favorite playback is capped through candidate groups. Explicit
+favorites primarily seed artist and genre affinity and cannot fill an entire
+queue when other candidate groups are available. The bucket label returned by
+the experimental station is intended for verification while Adolar4U remains
+disabled by default.
+
 ## API foundation
 
 | Method | Endpoint | Purpose |
@@ -62,11 +86,18 @@ client metadata, or another user's identity.
 | `PUT` | `/api/adolar4u/settings` | Update personal consent and preferences |
 | `DELETE` | `/api/adolar4u/profile` | Delete personal learning history |
 | `POST` | `/api/adolar4u/events/<track_id>` | Record an allowed listening event |
+| `GET` | `/api/adolar4u/history` | Private recommendation and learning journal |
+| `GET` | `/api/adolar4u/history/export` | Personal ZIP export with complete CSV data for 1–60 days |
 | `GET` | `/api/admin/adolar4u/settings` | Read global module switches |
 | `PUT` | `/api/admin/adolar4u/settings` | Update global module switches |
 
 All endpoints require an authenticated user. Administrative endpoints also
 require the admin role.
+
+The export is always scoped to the authenticated user. It contains a JSON
+summary plus CSV files for recommendations, listening events, and profile
+batches. It deliberately excludes credentials, Last.fm session keys, client
+session identifiers, and music file paths.
 
 ## Planned ranking pipeline
 

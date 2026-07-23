@@ -1,6 +1,6 @@
 # Adolar
 
-Current version: **1.4.0**
+Current version: **1.5.0**
 
 A self-hosted music archive web app for Synology NAS (or any Docker host). Browse, search, and stream your local MP3/FLAC/M4A collection from any browser — no cloud required.
 
@@ -18,6 +18,7 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Cover art** — 80×80 WebP thumbnails cached on filesystem, colored initials fallback; full-size for Radio
 - **Fast paging** — COUNT cached after first page, subsequent pages skip DB count entirely
 - **HTTP range streaming** — seekable audio in the browser
+- **Resilient NAS streaming** — bounded Gunicorn thread workers isolate slow or paused audio clients instead of timing out an entire worker
 - **Configurable radio stations** — global and private smart radio stations with admin/user ownership, filter builder, test mode, and optional station jingles
 - **Smart Shuffle** — shuffle the complete current search, filter result, or static playlist with session-wide track cooldown, dynamic artist/album spacing, proportional genre distribution, BPM-smoothed transitions, and an automatically refilled 100-track queue; explicit genre filters remain untouched
 - **Radio playback** — equal-power crossfade (12s out / 8s in), next track pre-buffered; crossfade skipped for short tracks and station jingles
@@ -28,7 +29,7 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Download basket** — select tracks, export as ZIP
 - **BPM support** — reads TBPM tag (Mixmeister-compatible), background librosa analysis for untagged tracks, writes result back to file tag; BPM shown in search results and filter
 - **Background scanner** — indexes library without blocking UI, skips unchanged files (mtime), generates cover thumbnails after scan
-- **Last.fm scrobbling** — auto-scrobble + love tracks; loved status cached locally for instant display (no per-page API calls)
+- **Personal Last.fm accounts** — every signed-in user can connect an independent account for scrobbling, Loved tracks, and play-count imports
 - **Adolar Disco badge** — shows 🪩 Disco in topbar when Adolar Disco is connected
 - **User authentication** — first-run admin setup, optional additional accounts, account deactivation, remember-me login, and brute-force protection
 - **Capability-based permissions** — playlist creation, private radio stations, downloads, and archive play-count contribution can be controlled without granting maintenance rights
@@ -37,10 +38,22 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Administrative audit log** — records user, capability, password-reset, account-status, and global access-setting changes without logging listening history
 - **Per-user play counts** — each user tracks their own play history; optionally authorized users contribute plays to a durable archive count
 - **Durable archive counts** — the highest value from database, Last.fm, or file tag wins; changed tags are written nightly or manually
-- **Playlists** — smart playlists (saved filter/sort state) and static playlists; 4 system playlists for all users (Recently played, Most played, Newest 100, Disco Hits)
+- **Playlists** — smart playlists, static playlists, four global system playlists, and one protected personal Favorites playlist per user
+- **Local Favorites** — a star works without Last.fm; optionally and by default, adding a favorite also loves it on the connected Last.fm account
+- **Private Adolar4U learning journal** — records versioned score components, candidate groups, profile snapshots, and listening outcomes; a personal ZIP export provides analysis-ready CSV and JSON files
 - **Bookmark button** — add any track to a personal playlist directly from the track list; create new playlists on the fly
-- **Radio bookmarks** — log in via Adolar Radio companion to bookmark tracks into a personal "Radio Favourites" playlist
+- **Radio favorites** — the Radio companion uses the same personal Favorites list as the Web player
 - **DE / EN interface** — language switch in topbar
+
+## What's new in 1.5.0
+
+- Visual playlist editor with track search, rule-based smart filters, portable `.adolarplaylist` import/export, drag-and-drop ordering, and random fill
+- Personal Last.fm accounts: every signed-in user can connect their own account for scrobbling, Loved tracks, and play-count imports
+- Local Favorites with a protected personal Favorites playlist per user; optional one-way sync to Last.fm Loved (enabled by default)
+- Database backup system: consistent SQLite snapshots with integrity check, SHA-256 checksum, jingle archive, daily automatic backups, and retention policy — managed under Wartung → Datensicherung
+- Admin connection monitor with client heartbeats and masked IP addresses
+- Resilient NAS streaming through bounded Gunicorn thread workers; Last.fm calls moved to a background queue so network outages cannot stall requests
+- Adolar Android companion app for playback and personal learning on the go
 
 ## What's new in 1.4.0
 
@@ -52,6 +65,12 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - Faster cold starts through a per-user stale-while-revalidate track cache and prioritized first-page loading
 - Preloaded and atomically swapped Now Playing artwork for smoother crossfade transitions
 - Genre-aware Smart Shuffle that proportionally distributes genres in library and radio playback, while respecting explicit genre filters
+
+## Development notes
+
+- [Adolar4U current status and roadmap](docs/adolar4u-roadmap.md)
+- [Adolar4U architecture and privacy model](docs/adolar4u.md)
+- [Adolar4U private validation guide](docs/adolar4u-testing.md)
 
 ## Quick Start (Docker)
 
@@ -66,9 +85,11 @@ services:
     volumes:
       - /your/music:/music:ro
       - adolar-data:/data
+      - /your/backup/location:/backups
     environment:
       MUSIC_ROOT: /music
       DB_PATH: /data/adolar.db
+      BACKUP_PATH: /backups
 ```
 
 ```bash
@@ -76,6 +97,52 @@ docker compose up -d
 # Open http://your-server:15002
 # Then scan your library via the sidebar button
 ```
+
+The container runs two Gunicorn `gthread` workers with four request threads
+each. Long or paused audio streams can therefore outlive the worker timeout
+without making the process appear frozen. Compose allows 30 seconds for a
+graceful Gunicorn shutdown before forcing the container to stop. Non-critical
+Last.fm Now Playing and scrobble calls use a small background queue; a Last.fm
+network outage cannot hold an Adolar web request open.
+
+## Database backups
+
+The live SQLite database stays in the Docker-managed `adolar-data` volume. A
+separate bind mount exposes `/backups` on the host; the Synology compose example
+defaults to `/volumeUSB1/usbshare/adolarDBbackup`. Create that directory before
+starting the container. Compose is configured with `create_host_path: false`, so
+the container fails safely instead of silently writing to the NAS system disk
+when the USB share is absent.
+
+Administrators can create, inspect, download, and delete snapshots under
+**Wartung → Datensicherung**. Adolar uses SQLite's online backup mechanism, runs
+`PRAGMA quick_check`, calculates a SHA-256 checksum, and only then publishes the
+backup directory. Uploaded radio jingles are stored alongside the database as a
+small archive. Interrupted `.partial` directories are never shown as valid
+backups.
+
+By default, one automatic snapshot is created daily after 03:00 and the newest
+seven snapshots are retained. The host location and policy can be changed in
+`.env`:
+
+```dotenv
+BACKUP_HOST_PATH=/volumeUSB1/usbshare/adolarDBbackup
+BACKUP_AUTO_ENABLED=true
+BACKUP_HOUR=3
+BACKUP_RETENTION=7
+TZ=Europe/Berlin
+```
+
+The backup contains personal accounts, Last.fm sessions, favorites, and
+Adolar4U learning data. Protect the directory accordingly and copy it to a
+second device or destination with Synology Hyper Backup. A backup on the same
+NAS alone does not protect against disk or device failure.
+
+A guided in-app restore is a committed operational milestone in the
+[Adolar4U/project roadmap](docs/adolar4u-roadmap.md). Until its maintenance
+mode, emergency snapshot, atomic replacement, restart validation, and rollback
+path are implemented and tested, restoration remains a documented manual
+migration operation.
 
 ## Pre-generate Cover Thumbnails
 
@@ -124,7 +191,7 @@ Adolar uses three visible access levels (`Admin`, `User`, and `Anonymous`) plus 
 | Download tracks | Yes | Per-user permission | No |
 | Maintain a personal play count | Yes | Yes | No |
 | Contribute plays to the archive/global count | Yes | Per-user setting | No |
-| Use Last.fm administration and love controls | Yes | No | No |
+| Connect and use a personal Last.fm account | Yes | Yes | No |
 | Scan the library and run BPM maintenance | Yes | No | No |
 | Manage users, blocked IPs, and access settings | Yes | No | No |
 | View the administrative audit log | Yes | No | No |
@@ -146,6 +213,12 @@ Disabling playlist or radio creation does not delete existing personal content. 
 |---|---|---|
 | `MUSIC_ROOT` | `/music` | Path to music library |
 | `DB_PATH` | `/data/adolar.db` | SQLite database path |
+| `BACKUP_PATH` | `/backups` | Backup directory inside the container |
+| `BACKUP_HOST_PATH` | `/volumeUSB1/usbshare/adolarDBbackup` | Host directory mounted at `/backups` by Compose |
+| `BACKUP_AUTO_ENABLED` | `true` in Compose | Enable the daily verified snapshot |
+| `BACKUP_HOUR` | `3` | Local hour after which the daily backup starts |
+| `BACKUP_RETENTION` | `7` | Number of completed snapshots to retain |
+| `TZ` | `Europe/Berlin` | Time zone used by scheduled maintenance jobs |
 | `SECRET_KEY` | random | Flask session secret — set a fixed value to survive restarts |
 | `LASTFM_API_KEY` | — | Last.fm API key (optional) |
 | `LASTFM_API_SECRET` | — | Last.fm API secret (optional) |
@@ -166,6 +239,9 @@ Disabling playlist or radio creation does not delete existing personal content. 
 | POST | `/api/scan/start` | Start library scan (admin only) |
 | POST | `/api/scan/bpm-tags` | Read BPM from file tags into DB (admin only) |
 | POST | `/api/scan/bpm` | Background librosa BPM analysis (admin only) |
+| GET/POST | `/api/admin/backups` | List or start verified backups (admin only) |
+| DELETE | `/api/admin/backups/<id>` | Delete a completed backup (admin only) |
+| GET | `/api/adolar4u/history/export?days=60` | Download the current user's private analysis export |
 | POST | `/api/track/<id>/bpm` | Write BPM value (used by Adolar Disco) |
 | POST | `/api/track/<id>/played` | Increment per-user play count (auth required) |
 | POST | `/api/track/<id>/disco-played` | Increment Disco play count (public, never writes file) |

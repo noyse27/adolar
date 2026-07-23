@@ -26,6 +26,10 @@ Admins can still upload, configure, and remove a jingle for the default station.
 - Normal users can create and edit only their own private stations.
 - Anonymous companion users see only global stations.
 - The companion `/radio` page uses the same station list and track endpoint.
+- In the main Web UI, opening a playlist or library result does not stop an
+  active station. While browsing, the active station button changes to a return
+  action and restores the current queue; pressing it again from the queue stops
+  the radio. Background queue refills must never replace the browsed list.
 
 ## API
 
@@ -90,6 +94,6 @@ an explicit genre rule, including a nested rule. Eligible candidates are scored
 by recent artist/album occurrence, BPM distance from the previous planned
 track, and a small random tie-breaker.
 
-Jingles are represented as non-track queue items. They can be inserted every N
-tracks per station and do not affect play counts, scrobbling, bookmarks, or
-recently played history.
+Jingles are represented as non-track queue items. An enabled station jingle is
+played once when the station starts and then again every N tracks. Jingles do
+not affect play counts, scrobbling, bookmarks, or recently played history.

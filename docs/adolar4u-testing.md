@@ -39,7 +39,7 @@ Expected:
 Use a recognizable group of tracks or artists:
 
 1. Let several desired tracks reach at least 90 percent.
-2. Add one or two to a personal playlist or Radio Favourites.
+2. Add one or two to a personal playlist or local Favorites.
 3. Skip several unwanted tracks within their first 25 percent.
 4. Restart the station after a few decisions.
 
@@ -98,8 +98,43 @@ Expected:
 - completed tracks, manual Next actions, and crossfade transitions are recorded;
 - a recommendation reason appears below the current artist.
 
+## 7. Learning history
+
+Open **Adolar4U -> Lernhistorie** after several station sessions and compare 7,
+14, 30, and 60 days.
+
+Expected:
+
+- every selected track has the algorithm version, group, candidate rank, score,
+  bonuses, penalties, and controlled random contribution that were current at
+  selection time;
+- completed and skipped outcomes attach to the exact decision, not merely to a
+  nearby timestamp;
+- group shares and average completion make long-session behavior visible;
+- artist and genre changes compare the first and latest profile snapshots in
+  the selected period;
+- pausing learning creates no new diagnostic decisions;
+- deleting personal learning data also deletes the journal;
+- records older than 60 days are removed automatically.
+
+Profile weights are normalized relative affinities. A change therefore means
+that the relationship inside the profile changed; it is not an absolute
+probability that the next track will use that artist or genre. The controlled
+random contribution is deliberately shown so that a surprising selection is
+not incorrectly explained as learned taste.
+
+Use **Analyse-Export** in the history header to download the complete selected
+period. The ZIP must contain `summary.json`, `recommendations.csv`,
+`listening-events.csv`, `profile-batches.csv`, and `README.txt`. Verify that CSV
+row counts match `summary.json`, recommendation outcomes link through
+`recommendation_id`, Unicode artist/title values open correctly, and no data
+from another Adolar user appears in the files.
+
 ## Not expected yet
 
-The MVP does not yet analyze raw audio. Tonality, mood, energy, embeddings, and
-collaborative recommendations from other users are intentionally not part of
-this test. Their switches are placeholders for the next isolated milestones.
+The MVP does not yet analyze raw audio. Tonality, mood, energy, embeddings,
+nightly profile generation, and collaborative recommendations from other users
+are intentionally not part of this test. Their switches are placeholders for
+later isolated milestones. The ordered handoff and the work immediately after
+this test phase are documented in
+[`adolar4u-roadmap.md`](adolar4u-roadmap.md).

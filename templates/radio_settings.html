@@ -145,7 +145,7 @@
 
   <div class="section" id="login-section">
     <div class="label">Optional anmelden</div>
-    <div class="sub">Angemeldet kannst du private Sender sehen und Radio-Favoriten speichern.</div>
+    <div class="sub">Angemeldet kannst du private Sender sehen und Titel in deinen Favoriten speichern.</div>
     <input id="username" autocomplete="username" placeholder="Benutzer">
     <input id="password" type="password" autocomplete="current-password" placeholder="Passwort">
     <div class="login-actions">
@@ -192,7 +192,10 @@
       const res = await fetch("/api/radio/login", {
         method: "POST",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Adolar-Product": "companion",
+        },
         body: JSON.stringify({ username, password, remember: true }),
       });
       if (!res.ok) {

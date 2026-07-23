@@ -9,6 +9,11 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import db
 
 # ── Constants ─────────────────────────────────────────────────────────────────
+# Development-only bypass: every request runs as a local "dev-admin" account.
+# Never set this in a production deployment; it disables authentication.
+DEV_ADMIN_ENABLED = os.environ.get("ADOLAR_DEV_ADMIN", "").lower() in ("1", "true", "yes")
+DEV_ADMIN_USERNAME = "dev-admin"
+
 SESSION_COOKIE   = "adolar_session"
 SESSION_TTL      = 2 * 3600          # 2 hours (without remember-me)
 SESSION_TTL_LONG = 30 * 24 * 3600   # 30 days (remember-me)
@@ -27,6 +32,7 @@ PUBLIC_PREFIXES = (
     "/api/stats", "/api/disco-status", "/api/me-optional",
     "/api/radio/", "/api/radio-stations",
     "/api/search",   # read-only; called by Disco server without user session
+    "/api/client/heartbeat",
     "/static/", "/hilfe/",
 )
 # Disco-specific endpoints (no session needed, called by Disco server)
@@ -112,15 +118,37 @@ def get_user_by_token(token: str) -> dict | None:
         ).fetchone()
     return dict(row) if row else None
 
-def create_session(user_id: int, remember: bool) -> str:
+def create_session(user_id: int, remember: bool, product: str = "adolar_web",
+                   ip_address: str = "") -> str:
     token = secrets.token_urlsafe(32)
-    expires = time.time() + (SESSION_TTL_LONG if remember else SESSION_TTL)
+    now = time.time()
+    expires = now + (SESSION_TTL_LONG if remember else SESSION_TTL)
     with db.db() as conn:
+        user = conn.execute("SELECT username FROM users WHERE id=?", (user_id,)).fetchone()
+        connection = conn.execute(
+            """INSERT INTO connection_log
+                   (user_id, username, product, ip_address, connected_at, last_seen_at)
+               VALUES (?,?,?,?,?,?)""",
+            (user_id, user["username"] if user else "Unbekannt", product,
+             ip_address, now, now),
+        )
         conn.execute(
-            "INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)",
-            (token, user_id, expires)
+            """INSERT INTO sessions (token, user_id, expires_at, connection_id)
+               VALUES (?,?,?,?)""",
+            (token, user_id, expires, connection.lastrowid)
         )
     return token
+
+
+def touch_session(token: str) -> None:
+    """Mark an authenticated client as active without extending its login."""
+    now = time.time()
+    with db.db() as conn:
+        conn.execute(
+            """UPDATE connection_log SET last_seen_at=?
+               WHERE id=(SELECT connection_id FROM sessions WHERE token=?)""",
+            (now, token),
+        )
 
 def delete_session(token: str):
     with db.db() as conn:
@@ -267,16 +295,38 @@ def can(user: dict | None, capability: str) -> bool:
         return bool(user and user.get("allow_download"))
     return False
 
+def _get_dev_admin() -> dict | None:
+    """Return (and lazily create) the local development admin account."""
+    user = get_user_by_name(DEV_ADMIN_USERNAME)
+    if user is None:
+        pw_hash = generate_password_hash(secrets.token_urlsafe(32))
+        with db.db() as conn:
+            conn.execute(
+                """INSERT INTO users (username, password_hash, role, must_change_password)
+                   VALUES (?,?, 'admin', 0)""",
+                (DEV_ADMIN_USERNAME, pw_hash),
+            )
+        user = get_user_by_name(DEV_ADMIN_USERNAME)
+    if user:
+        user.pop("password_hash", None)
+    return user
+
+
 def before_request():
     """Attach current user to g; redirect unauthenticated requests."""
     g.user = None
     if request.method == "HEAD":
         return
+    if DEV_ADMIN_ENABLED:
+        g.user = _get_dev_admin()
+        if g.user:
+            return
     token = request.cookies.get(SESSION_COOKIE)
     if token:
         user = get_user_by_token(token)
         if user:
             g.user = user
+            touch_session(token)
             # Force password change before anything else
             if user["must_change_password"] and request.path not in ("/change-password", "/api/auth/change-password"):
                 if request.path.startswith("/api/"):

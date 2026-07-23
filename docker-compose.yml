@@ -1,18 +1,27 @@
-version: "3.9"
-
 services:
   adolar:
     build: .
     container_name: adolar
     restart: unless-stopped
+    stop_grace_period: 30s
     ports:
       - "15002:5000"
     volumes:
       - /volume1/music:/music             # required for optional play-count tag persistence
-      - adolar-data:/data            # SQLite DB + cover cache
+      - adolar-data:/data                 # live SQLite DB + cover cache
+      - type: bind
+        source: ${BACKUP_HOST_PATH:-/volumeUSB1/usbshare/adolarDBbackup}
+        target: /backups
+        bind:
+          create_host_path: false         # fail safely when the USB share is absent
     environment:
       MUSIC_ROOT: /music
       DB_PATH: /data/adolar.db
+      BACKUP_PATH: /backups
+      BACKUP_AUTO_ENABLED: ${BACKUP_AUTO_ENABLED:-true}
+      BACKUP_HOUR: ${BACKUP_HOUR:-3}
+      BACKUP_RETENTION: ${BACKUP_RETENTION:-7}
+      TZ: ${TZ:-Europe/Berlin}
       LASTFM_API_KEY: ${LASTFM_API_KEY}
       LASTFM_API_SECRET: ${LASTFM_API_SECRET}
     healthcheck:
