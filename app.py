@@ -16,6 +16,7 @@ import db
 import scanner
 import lastfm
 import auth as _auth
+import errors
 import smart_shuffle
 import adolar4u
 import backup_service
@@ -589,6 +590,8 @@ def api_playlist_editor_preview():
             sort=data.get("sort") or "artist",
             limit=500,
         )
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
     except ValueError as exc:
         return _client_error("Ungültige Filterparameter.", exc)
     return jsonify({"results": tracks, "total": len(tracks)})
@@ -608,6 +611,8 @@ def api_playlist_editor_fill():
             random_order=True,
             exclude_ids=data.get("exclude_ids") or [],
         )
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
     except (TypeError, ValueError) as exc:
         return _client_error("Ungültige Filterparameter.", exc)
     return jsonify({"results": tracks, "total": len(tracks)})
@@ -719,6 +724,8 @@ def api_playlists_create():
             g.user["id"], name, type_, json.dumps(filters), sort,
             data.get("track_ids") or [],
         )
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
     except (TypeError, ValueError) as exc:
         return _client_error("Ungültige Playlist-Daten.", exc)
     return jsonify({"ok": True, "id": pid}), 201
@@ -739,6 +746,8 @@ def api_playlists_update(playlist_id):
             data.get("sort") or "artist", data.get("track_ids") or [],
             playlist_id=playlist_id,
         )
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
     except (TypeError, ValueError) as exc:
         return _client_error("Ungültige Playlist-Daten.", exc)
     if saved_id is None:
@@ -837,6 +846,8 @@ def api_adolar4u_onboarding_options():
         options = adolar4u.search_onboarding_options(
             kind, request.args.get("q", ""), _int_arg("limit", 12, 1, 30),
         )
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
     except ValueError as exc:
         return _client_error("Ungültige Onboarding-Anfrage.", exc)
     return jsonify(options)
@@ -851,6 +862,8 @@ def api_adolar4u_onboarding_complete():
             g.user["id"], data.get("artists"), data.get("genres"),
         )
         initial_playlist = adolar4u.recommend_tracks(g.user["id"], count=25) or []
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
     except ValueError as exc:
         return _client_error("Ungültige Onboarding-Auswahl.", exc)
     return jsonify({
@@ -871,6 +884,8 @@ def api_adolar4u_user_settings_put():
         return jsonify({"error": "settings must be boolean"}), 400
     try:
         settings = adolar4u.update_user_settings(g.user["id"], data)
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
     except ValueError as exc:
         return _client_error("Ungültige Adolar4U-Einstellungen.", exc)
     return jsonify(settings)
@@ -890,6 +905,8 @@ def api_adolar4u_event(track_id):
         result = adolar4u.record_event(
             g.user["id"], track_id, request.get_json(silent=True) or {},
         )
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
     except ValueError as exc:
         return _client_error("Ungültiges Hörereignis.", exc)
     except LookupError:
@@ -1786,6 +1803,8 @@ def api_radio_stations_create():
             user_id=g.user["id"],
             scope=requested_scope,
         )
+    except errors.ValidationError as e:
+        return _client_error(e.user_message, e)
     except ValueError as e:
         return _client_error("Ungültige Senderdefinition.", e)
     except Exception as e:
@@ -1813,6 +1832,8 @@ def api_radio_stations_update(station_id):
             is_admin=g.user["role"] == "admin",
             scope=data.get("scope"),
         )
+    except errors.ValidationError as e:
+        return _client_error(e.user_message, e)
     except ValueError as e:
         return _client_error("Ungültige Senderdefinition.", e)
     except Exception as e:
@@ -1845,6 +1866,8 @@ def api_radio_stations_test():
             exclude_ids=[],
             user_id=g.user["id"],
         )
+    except errors.ValidationError as e:
+        return _client_error(e.user_message, e)
     except ValueError as e:
         return _client_error("Ungültige Senderdefinition.", e)
     return jsonify({"results": tracks, "total": len(tracks)})

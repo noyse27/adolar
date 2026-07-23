@@ -2,6 +2,7 @@ import sqlite3
 import os
 import json
 from contextlib import contextmanager
+import errors
 import smart_shuffle
 import adolar4u
 
@@ -939,10 +940,10 @@ def _normalize_radio_filter(filter_def) -> dict:
 
 
 def validate_radio_filter(filter_def) -> dict:
-    """Return a normalized filter tree or raise ValueError."""
+    """Return a normalized filter tree or raise errors.ValidationError."""
     def walk(node, depth=0):
         if depth > 4:
-            raise ValueError("filter too deeply nested")
+            raise errors.ValidationError("Filter ist zu tief verschachtelt (maximal 4 Ebenen).")
         node = _normalize_radio_filter(node)
         out = {"mode": node["mode"], "rules": []}
         for rule in node["rules"]:
@@ -958,22 +959,25 @@ def validate_radio_filter(filter_def) -> dict:
             value = rule.get("value")
             if field in _RADIO_TEXT_FIELDS:
                 if op not in ("contains", "not_contains"):
-                    raise ValueError(f"invalid operator for {field}")
+                    raise errors.ValidationError(
+                        f"Ungültiger Operator für Textfeld '{field}'.")
                 value = str(value or "").strip()
                 if value:
                     out["rules"].append({"field": field, "op": op, "value": value[:120]})
             elif field in _RADIO_NUM_FIELDS:
                 if op not in ("eq", "ne", "gt", "lt"):
-                    raise ValueError(f"invalid operator for {field}")
+                    raise errors.ValidationError(
+                        f"Ungültiger Operator für Zahlenfeld '{field}'.")
                 try:
                     num = int(value)
                 except (TypeError, ValueError):
-                    raise ValueError(f"invalid numeric value for {field}")
+                    raise errors.ValidationError(
+                        f"Ungültiger Zahlenwert für Feld '{field}'.")
                 if field == "decade":
                     num = (num // 10) * 10
                 out["rules"].append({"field": field, "op": op, "value": num})
             else:
-                raise ValueError("invalid filter field")
+                raise errors.ValidationError("Unbekanntes Filterfeld.")
         return out
     return walk(filter_def)
 
@@ -1506,7 +1510,7 @@ def get_playlists(user_id: int) -> list[dict]:
 def create_playlist(user_id: int, name: str, filters: str, sort: str,
                     type_: str = "smart") -> int:
     if type_ not in ("smart", "static"):
-        raise ValueError("invalid playlist type")
+        raise errors.ValidationError("Unbekannter Playlist-Typ (erwartet: smart oder static).")
     with db() as conn:
         cur = conn.execute(
             "INSERT INTO playlists (owner_id, name, type, filters, sort) VALUES (?,?,?,?,?)",
@@ -1550,7 +1554,7 @@ def save_personal_playlist(user_id: int, name: str, type_: str, filters: str,
                            playlist_id: int | None = None) -> int | None:
     """Create or replace a personal playlist and its ordered static tracks."""
     if type_ not in ("smart", "static"):
-        raise ValueError("invalid playlist type")
+        raise errors.ValidationError("Unbekannter Playlist-Typ (erwartet: smart oder static).")
     clean_ids = []
     seen = set()
     for value in track_ids:
@@ -1567,7 +1571,8 @@ def save_personal_playlist(user_id: int, name: str, type_: str, filters: str,
                 ).fetchall()
             }
             if len(existing) != len(clean_ids):
-                raise ValueError("unknown track")
+                raise errors.ValidationError(
+                    "Mindestens ein Track der Playlist existiert nicht mehr in der Bibliothek.")
         if playlist_id is None:
             cur = conn.execute(
                 """INSERT INTO playlists (owner_id, name, type, filters, sort)

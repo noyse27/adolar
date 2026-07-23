@@ -7,6 +7,8 @@ import json
 import math
 import time
 
+import errors
+
 
 EVENT_TYPES = {"started", "skipped", "completed"}
 EVENT_SOURCES = {"library", "playlist", "shuffle", "radio", "adolar4u", "unknown"}
@@ -80,9 +82,11 @@ def update_user_settings(user_id: int, values: dict) -> dict:
         try:
             discovery = float(values["discovery_level"])
         except (TypeError, ValueError):
-            raise ValueError("invalid discovery_level")
+            raise errors.ValidationError(
+                "Ungültiges Entdeckungs-Level (Zahl zwischen 0 und 1 erwartet).")
         if not math.isfinite(discovery) or not 0 <= discovery <= 1:
-            raise ValueError("invalid discovery_level")
+            raise errors.ValidationError(
+                "Ungültiges Entdeckungs-Level (Zahl zwischen 0 und 1 erwartet).")
         current["discovery_level"] = discovery
 
     global_settings = get_global_settings()
@@ -149,7 +153,7 @@ def get_onboarding_state(user_id: int) -> dict:
 
 def search_onboarding_options(kind: str, query: str = "", limit: int = 12) -> list[dict]:
     if kind not in ("artist", "genre"):
-        raise ValueError("invalid kind")
+        raise errors.ValidationError("Unbekannte Onboarding-Kategorie (erwartet: artist oder genre).")
     column = "artist" if kind == "artist" else "genre"
     query = str(query or "").strip().casefold()
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -168,9 +172,11 @@ def search_onboarding_options(kind: str, query: str = "", limit: int = 12) -> li
 
 
 def complete_onboarding(user_id: int, artists: list, genres: list) -> dict:
+    labels = {"artists": "Künstler", "genres": "Genres"}
+
     def clean(values, field):
         if not isinstance(values, list):
-            raise ValueError(f"invalid {field}")
+            raise errors.ValidationError(f"Ungültige Liste für {labels[field]}.")
         result = []
         seen = set()
         for value in values:
@@ -180,7 +186,7 @@ def complete_onboarding(user_id: int, artists: list, genres: list) -> dict:
                 result.append(label)
                 seen.add(key)
         if not 3 <= len(result) <= 5:
-            raise ValueError(f"{field} must contain 3 to 5 entries")
+            raise errors.ValidationError(f"Bitte 3 bis 5 {labels[field]} auswählen.")
         return result
 
     artists = clean(artists, "artists")
@@ -202,9 +208,11 @@ def complete_onboarding(user_id: int, artists: list, genres: list) -> dict:
             """)
         }
         if any(value.casefold() not in valid_artists for value in artists):
-            raise ValueError("unknown artist")
+            raise errors.ValidationError(
+                "Mindestens ein gewählter Künstler ist nicht in der Bibliothek.")
         if any(value.casefold() not in valid_genres for value in genres):
-            raise ValueError("unknown genre")
+            raise errors.ValidationError(
+                "Mindestens ein gewähltes Genre ist nicht in der Bibliothek.")
 
         conn.execute("DELETE FROM adolar4u_seed_preferences WHERE user_id=?", (int(user_id),))
         rows = [
@@ -247,9 +255,9 @@ def _nonnegative_number(value, field: str) -> float:
     try:
         result = float(value or 0)
     except (TypeError, ValueError):
-        raise ValueError(f"invalid {field}")
+        raise errors.ValidationError(f"Ungültiger Wert für '{field}' (nicht-negative Zahl erwartet).")
     if not math.isfinite(result) or result < 0:
-        raise ValueError(f"invalid {field}")
+        raise errors.ValidationError(f"Ungültiger Wert für '{field}' (nicht-negative Zahl erwartet).")
     return result
 
 
@@ -265,7 +273,8 @@ def record_event(user_id: int, track_id: int, event: dict) -> dict:
 
     event_type = str(event.get("event_type") or "").strip().lower()
     if event_type not in EVENT_TYPES:
-        raise ValueError("invalid event_type")
+        raise errors.ValidationError(
+            "Unbekannter Ereignistyp (erwartet: started, skipped oder completed).")
     source = str(event.get("source") or "unknown").strip().lower()
     if source not in EVENT_SOURCES:
         source = "unknown"

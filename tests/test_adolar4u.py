@@ -66,6 +66,20 @@ class Adolar4UTests(unittest.TestCase):
             app_module._auth, "get_user_by_token", return_value=user or self.user,
         )
 
+    def test_validation_errors_return_curated_specific_messages(self):
+        with self._login():
+            response = self.client.put(
+                "/api/adolar4u/settings",
+                json={"discovery_level": 5},
+            )
+        self.assertEqual(response.status_code, 400)
+        # Clients get the specific, curated message -- never raw
+        # exception text (CodeQL py/stack-trace-exposure).
+        self.assertEqual(
+            response.get_json()["error"],
+            "Ungültiges Entdeckungs-Level (Zahl zwischen 0 und 1 erwartet).",
+        )
+
     def test_event_collection_requires_global_and_personal_opt_in(self):
         with self._login():
             disabled = self.client.post(
