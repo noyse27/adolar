@@ -146,6 +146,23 @@ def _safe_data_path(path: str, root: str) -> str | None:
     return real
 
 
+def _safe_next_url(raw) -> str:
+    """Normalize a post-login redirect target to a same-origin path.
+
+    Never validates and passes the raw value through -- it rebuilds the
+    target from the parsed path instead. This rejects absolute URLs,
+    protocol-relative "//host" targets (browsers collapse any number of
+    leading slashes), and backslash variants (CodeQL py/url-redirection).
+    """
+    parsed = urlparse(str(raw or "/").replace("\\", "/"))
+    if parsed.scheme or parsed.netloc:
+        return "/"
+    path = "/" + parsed.path.lstrip("/")
+    if parsed.query:
+        return f"{path}?{parsed.query}"
+    return path
+
+
 def _client_error(message: str, exc: Exception, status: int = 400):
     """Log the technical exception, return only a stable message to the client.
 
@@ -230,13 +247,7 @@ def login_post():
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
     remember = bool(request.form.get("remember"))
-    next_url = request.form.get("next", "/") or "/"
-    # Only same-origin paths: reject absolute URLs, protocol-relative
-    # "//host" targets, and backslash tricks (CodeQL py/url-redirection).
-    parsed_next = urlparse(next_url)
-    if (parsed_next.scheme or parsed_next.netloc
-            or not next_url.startswith("/") or "\\" in next_url):
-        next_url = "/"
+    next_url = _safe_next_url(request.form.get("next"))
 
     user = _auth.get_user_by_name(username)
     if not user or not user.get("is_active", 1) or not _auth.verify_password(user, password):
