@@ -236,11 +236,24 @@
     .pl-item:hover { background: var(--bg-secondary); color: var(--text-primary); }
     .pl-item.active { background: color-mix(in srgb, var(--accent) 15%, var(--bg-secondary)); color: var(--accent); }
     .pl-item i { font-size: 13px; flex-shrink: 0; }
-    .pl-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pl-del { opacity: 0; background: none; border: none; color: var(--text-tertiary);
+    .pl-item-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .pl-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pl-item-type { margin-top: 1px; color: var(--text-tertiary); font-size: 9px;
+                    line-height: 1.1; text-transform: uppercase; letter-spacing: .05em; }
+    .pl-action { opacity: 0; background: none; border: none; color: var(--text-tertiary);
               cursor: pointer; padding: 2px 4px; font-size: 12px; flex-shrink: 0; }
-    .pl-item:hover .pl-del { opacity: 1; }
+    .pl-item:hover .pl-action, .pl-item:focus-within .pl-action { opacity: 1; }
+    .pl-edit:hover { color: var(--accent); }
     .pl-del:hover { color: #e03e3e; }
+    #btn-playlist-editor {
+      display: none; width: 100%; margin: 2px 0 8px; padding: 7px 10px;
+      align-items: center; justify-content: center; gap: 6px;
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      border: 0.5px solid var(--accent-border); border-radius: 6px;
+      color: var(--accent); font-size: var(--text-sm); font-weight: 650;
+      letter-spacing: .04em; cursor: pointer;
+    }
+    #btn-playlist-editor:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
     #btn-save-playlist {
       display: none; width: 100%; margin-top: 8px; padding: 6px 10px;
       background: none; border: 0.5px dashed var(--border-medium);
@@ -249,6 +262,104 @@
       align-items: center; justify-content: center; gap: 6px;
     }
     #btn-save-playlist:hover { border-color: var(--accent-border); color: var(--accent); }
+
+    /* ── Playlist editor ──────────────────────────────── */
+    #playlist-editor-modal {
+      display: none; position: fixed; inset: 0; z-index: 9800;
+      background: rgba(0,0,0,.72); padding: 22px;
+    }
+    #playlist-editor-shell {
+      width: min(1180px, 100%); height: min(820px, 100%); margin: auto;
+      display: flex; flex-direction: column; overflow: hidden;
+      background: var(--bg-primary); border: 0.5px solid var(--border-medium);
+      border-radius: 12px; box-shadow: 0 24px 70px rgba(0,0,0,.5);
+    }
+    .ple-header, .ple-playlist-head, .ple-actions {
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+      border-bottom: 0.5px solid var(--border-subtle);
+    }
+    .ple-header { padding: 12px 16px; background: var(--bg-tertiary); }
+    .ple-header strong { color: var(--accent); font-family: Orbitron,sans-serif;
+                         font-size: 15px; letter-spacing: .08em; }
+    .ple-spacer { flex: 1; }
+    .ple-body { min-height: 0; flex: 1; display: grid; grid-template-columns: 410px 1fr; }
+    .ple-left, .ple-right { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+    .ple-left { border-right: 0.5px solid var(--border-subtle); }
+    .ple-tools { padding: 10px; max-height: 54%; overflow: auto;
+                 border-bottom: 0.5px solid var(--border-subtle); }
+    .ple-tool { margin-bottom: 8px; overflow: hidden; background: var(--bg-secondary);
+                border: 0.5px solid var(--border-subtle); border-radius: 7px; }
+    .ple-tool summary { padding: 9px 11px; cursor: pointer; color: var(--text-secondary);
+                        font-size: 12px; font-weight: 650; }
+    .ple-tool[open] summary { color: var(--accent); border-bottom: 0.5px solid var(--border-subtle); }
+    .ple-tool-content { padding: 10px; }
+    .ple-field-stack { display: grid; gap: 7px; }
+    .ple-input, .ple-select {
+      width: 100%; padding: 7px 8px; outline: none; color: var(--text-primary);
+      background: var(--bg-tertiary); border: 0.5px solid var(--border-medium);
+      border-radius: 5px; font: inherit; font-size: var(--text-base);
+    }
+    .ple-input:focus, .ple-select:focus { border-color: var(--accent); }
+    .ple-rule-group + .ple-rule-group { margin-top: 12px; }
+    .ple-rule-head { display:flex;justify-content:space-between;align-items:center;
+                     margin-bottom:7px;color:var(--text-tertiary);font-size:10px;
+                     text-transform:uppercase;letter-spacing:.05em; }
+    .ple-rule-row { display:grid;grid-template-columns:1fr 1fr 1.15fr 28px;
+                    gap:5px;margin-bottom:6px; }
+    .ple-rule-row .ple-input,.ple-rule-row .ple-select { min-width:0;padding:6px 5px; }
+    .ple-mini-btn, .ple-secondary, .ple-danger, .ple-primary {
+      border-radius: 5px; padding: 6px 9px; cursor: pointer; font: inherit;
+      font-size: var(--text-base);
+    }
+    .ple-mini-btn,.ple-secondary { background:transparent;border:.5px solid var(--border-medium);
+                                   color:var(--text-secondary); }
+    .ple-mini-btn:hover,.ple-secondary:hover { color:var(--accent);border-color:var(--accent); }
+    .ple-danger { background:transparent;border:.5px solid #6b3c3c;color:#d58282; }
+    .ple-primary { background:var(--accent);border:.5px solid var(--accent);color:#fff;font-weight:650; }
+    .ple-wide { width:100%;margin-top:8px; }
+    .ple-results, .ple-tracks { min-height: 0; flex: 1; overflow: auto; padding: 6px 8px; }
+    .ple-result, .ple-track { display:flex;align-items:center;gap:7px;padding:6px 8px;
+                             border:1px solid transparent;border-radius:5px;font-size:12px; }
+    .ple-result { cursor:pointer; }
+    .ple-result:hover { background:color-mix(in srgb,var(--accent) 10%,transparent);
+                        border-color:color-mix(in srgb,var(--accent) 28%,transparent); }
+    .ple-artist { width:110px;flex-shrink:0;color:var(--accent);overflow:hidden;
+                  text-overflow:ellipsis;white-space:nowrap; }
+    .ple-title { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600; }
+    .ple-year { color:var(--text-tertiary);font-size:11px; }
+    .ple-empty { padding:22px 10px;text-align:center;color:var(--text-tertiary);font-size:12px; }
+    .ple-add-all { padding:8px;border-top:.5px solid var(--border-subtle); }
+    .ple-add-all button { width:100%; }
+    .ple-playlist-head { padding:10px 12px; }
+    .ple-playlist-head span { flex:1;color:var(--text-secondary);font-size:11px;
+                              text-transform:uppercase;letter-spacing:.06em; }
+    .ple-track { cursor:default; }
+    .ple-track.drag-over { border-color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,transparent); }
+    .ple-handle { cursor:grab;color:var(--text-tertiary);font-size:15px; }
+    .ple-pos { width:24px;text-align:right;color:var(--text-tertiary);font-size:11px; }
+    .ple-track button { border:0;background:none;color:var(--text-tertiary);cursor:pointer;font-size:16px; }
+    .ple-fill { padding:10px 14px;background:var(--bg-secondary);
+                border-top:.5px solid var(--border-subtle); }
+    .ple-fill-row { display:flex;align-items:center;gap:8px; }
+    .ple-fill-row .ple-input { width:76px; }
+    .ple-note { margin-top:6px;color:var(--text-tertiary);font-size:11px;line-height:1.4; }
+    .ple-actions { padding:10px 14px;border-top:.5px solid var(--border-subtle);border-bottom:0;
+                   background:var(--bg-tertiary); }
+    #ple-status { color:var(--accent);font-size:12px; }
+    #ple-save-dialog { display:none;position:absolute;inset:0;align-items:center;justify-content:center;
+                       background:rgba(0,0,0,.66);z-index:2; }
+    .ple-save-card { width:min(430px,calc(100% - 32px));padding:20px;background:var(--bg-primary);
+                     border:.5px solid var(--border-medium);border-radius:10px;box-shadow:0 16px 45px #0008; }
+    .ple-type-options { display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:13px 0; }
+    .ple-type-option { display:flex;gap:8px;padding:10px;border:.5px solid var(--border-medium);
+                       border-radius:7px;color:var(--text-secondary);font-size:12px;line-height:1.35; }
+    .ple-type-option input { accent-color:var(--accent); }
+    @media(max-width:760px) {
+      #playlist-editor-modal{padding:0}.ple-body{grid-template-columns:1fr;overflow:auto}
+      #playlist-editor-shell{height:100%;border-radius:0}.ple-left{min-height:440px;border-right:0}
+      .ple-right{min-height:500px}.ple-tools{max-height:260px}
+    }
+    @media(hover:none) { .pl-action { opacity: 1; } }
 
     .sidebar-scan {
       margin-top: auto;
@@ -343,14 +454,15 @@
     }
     #btn-loved-filter.running { color: var(--accent); border-color: var(--accent-border); }
     /* Wartung panel */
-    #btn-wartung-toggle {
+    #btn-wartung-toggle, #btn-monitor {
       display: flex; align-items: center; gap: 6px;
       width: 100%; padding: 6px 10px;
       background: transparent; border: 0.5px solid var(--border-medium);
       border-radius: 6px; font-size: var(--text-base);
       color: var(--text-secondary); cursor: pointer; transition: background .1s;
     }
-    #btn-wartung-toggle:hover { background: var(--bg-secondary); }
+    #btn-wartung-toggle:hover, #btn-monitor:hover { background: var(--bg-secondary); }
+    #btn-monitor { display: none; margin-bottom: 6px; }
     #wartung-panel { display: none; margin-top: 6px; }
     #wartung-panel button {
       display: flex; align-items: center; gap: 6px;
@@ -363,6 +475,22 @@
     #wartung-panel button:hover { background: var(--bg-secondary); }
     #wartung-panel button.running { color: var(--accent); }
     #btn-loved-sync, #btn-pc-sync { display: none; }
+    #backup-panel {
+      display: none; margin: 6px 0 2px; padding: 8px;
+      border: 0.5px solid var(--border-subtle); border-radius: 6px;
+      background: var(--bg-secondary); font-size: 11px; color: var(--text-tertiary);
+    }
+    #backup-panel #btn-backup-create { margin: 0 0 7px; justify-content: center; }
+    #backup-summary { line-height: 1.4; margin-bottom: 5px; overflow-wrap: anywhere; }
+    .backup-item { padding: 6px 0; border-top: 0.5px solid var(--border-subtle); }
+    .backup-item-head { color: var(--text-secondary); margin-bottom: 3px; }
+    .backup-item-actions { display: flex; gap: 8px; align-items: center; }
+    .backup-item-actions a, .backup-delete {
+      color: var(--accent); background: none; border: 0; padding: 0;
+      margin: 0; width: auto; font-size: 11px; text-decoration: none; cursor: pointer;
+    }
+    #wartung-panel .backup-delete { display: inline; border: 0; padding: 0; margin: 0; width: auto; }
+    #wartung-panel .backup-delete:hover { color: #e03e3e; background: none; }
 
     /* ── Content area ─────────────────────────────────── */
     #content {
@@ -506,6 +634,39 @@
       cursor: pointer;
       font-size: 18px;
     }
+    .monitor-metrics {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+      margin-bottom: 22px;
+    }
+    .monitor-card {
+      padding: 14px; border: 0.5px solid var(--border-subtle); border-radius: 9px;
+      background: var(--bg-secondary);
+    }
+    .monitor-card-head { display:flex; justify-content:space-between; gap:10px; margin-bottom:9px; }
+    .monitor-card-label { color:var(--text-secondary); font-size:12px; }
+    .monitor-card-value { color:var(--text-primary); font-size:14px; font-weight:650; }
+    .monitor-bar { height:7px; overflow:hidden; border-radius:99px; background:var(--bg-tertiary); }
+    .monitor-bar > span { display:block; height:100%; width:0; border-radius:inherit; background:var(--accent); transition:width .3s; }
+    .monitor-section-title { font-size:12px; font-weight:650; color:var(--text-tertiary); text-transform:uppercase; letter-spacing:.05em; margin:18px 0 8px; }
+    .monitor-table-wrap { overflow-x:auto; border:0.5px solid var(--border-subtle); border-radius:8px; }
+    .monitor-table { width:100%; border-collapse:collapse; font-size:12px; color:var(--text-secondary); }
+    .monitor-table th, .monitor-table td { padding:9px 10px; text-align:left; white-space:nowrap; border-bottom:0.5px solid var(--border-subtle); }
+    .monitor-table th { color:var(--text-tertiary); font-weight:600; background:var(--bg-secondary); }
+    .monitor-table tr:last-child td { border-bottom:0; }
+    .monitor-empty { padding:14px; color:var(--text-tertiary); font-size:12px; }
+    .monitor-live { display:inline-block; width:7px; height:7px; border-radius:50%; background:#55b985; margin-right:6px; }
+    .a4u-onboarding-step { margin-top:18px; }
+    .a4u-onboarding-label { display:flex;justify-content:space-between;gap:10px;font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:7px; }
+    .a4u-onboarding-search { display:flex;gap:7px; }
+    .a4u-onboarding-search input { flex:1;min-width:0;padding:8px 10px;background:var(--bg-secondary);border:.5px solid var(--border-medium);border-radius:7px;color:var(--text-primary);outline:none; }
+    .a4u-onboarding-results { display:none;margin-top:5px;border:.5px solid var(--border-subtle);border-radius:7px;overflow:hidden;max-height:155px;overflow-y:auto; }
+    .a4u-onboarding-results button { display:flex;width:100%;justify-content:space-between;gap:12px;padding:8px 10px;border:0;border-bottom:.5px solid var(--border-subtle);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer;text-align:left; }
+    .a4u-onboarding-results button:last-child { border-bottom:0; }
+    .a4u-onboarding-results button:hover { background:var(--bg-tertiary);color:var(--text-primary); }
+    .a4u-onboarding-selected { display:flex;flex-wrap:wrap;gap:6px;min-height:28px;margin-top:8px; }
+    .a4u-onboarding-chip { display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border-radius:99px;background:color-mix(in srgb,var(--accent) 15%,var(--bg-secondary));color:var(--accent);font-size:12px; }
+    .a4u-onboarding-chip button { border:0;background:none;color:inherit;padding:0;cursor:pointer; }
+    #a4u-onboarding-submit:disabled { opacity:.4; cursor:default; }
     .radio-station-row {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -681,6 +842,14 @@
     }
     .btn-love:hover { color: #e03e3e; transform: scale(1.15); }
     .btn-love.loved { color: #e03e3e; }
+
+    .btn-favorite {
+      background: none; border: none; color: var(--text-tertiary); cursor: pointer;
+      padding: 4px; border-radius: 5px; display: inline-flex; align-items: center;
+      justify-content: center; transition: color .12s, transform .12s;
+    }
+    .btn-favorite:hover { color: #e6b94f; transform: scale(1.15); }
+    .btn-favorite.favorite { color: #e6b94f; }
     /* Bookmark button */
     .btn-bookmark {
       background: none; border: none; cursor: pointer;
@@ -1877,6 +2046,12 @@
       <button class="user-dd-item" onclick="openChangePassword()">
         <i class="ti ti-lock"></i> Passwort ändern
       </button>
+      <button class="user-dd-item" onclick="openLastFmSettings()">
+        <i class="ti ti-brand-lastfm"></i> Last.fm
+      </button>
+      <button class="user-dd-item" id="btn-adolar4u" style="display:none" onclick="openAdolar4USettings()">
+        <i class="ti ti-sparkles"></i> Adolar4U
+      </button>
       <button class="user-dd-item" id="btn-user-mgmt" style="display:none" onclick="openUserMgmt()">
         <i class="ti ti-users"></i> Benutzerverwaltung
       </button>
@@ -2044,11 +2219,18 @@
     <!-- Playlists -->
     <div id="playlist-section">
       <span class="filter-label">Playlists</span>
+      <button id="btn-playlist-editor" type="button" onclick="openPlaylistEditor()">
+        <i class="ti ti-edit"></i> EDITOR
+      </button>
       <div id="playlist-system"></div>
       <div id="playlist-user" style="margin-top:4px"></div>
     </div>
 
     <div class="sidebar-scan">
+      <button id="btn-monitor" onclick="openMonitor()">
+        <i class="ti ti-activity-heartbeat"></i>
+        <span data-i18n="monitor">Monitor</span>
+      </button>
       <button id="btn-wartung-toggle" onclick="toggleWartung()">
         <i class="ti ti-tool"></i>
         <span data-i18n="wartung">Wartung</span>
@@ -2079,6 +2261,18 @@
           <i class="ti ti-device-floppy"></i>
           <span>Playcount-Tags schreiben</span>
         </button>
+        <button id="btn-backup-toggle" title="Geprüfte Datenbanksicherungen verwalten">
+          <i class="ti ti-database-export"></i>
+          <span>Datensicherung</span>
+          <i class="ti ti-chevron-down" id="backup-chevron" style="margin-left:auto;font-size:11px"></i>
+        </button>
+        <div id="backup-panel">
+          <button id="btn-backup-create">
+            <i class="ti ti-device-floppy"></i><span>Jetzt sichern</span>
+          </button>
+          <div id="backup-summary">Backup-Ziel wird geprüft…</div>
+          <div id="backup-list"></div>
+        </div>
       </div>
     </div>
 
@@ -2112,6 +2306,11 @@
     <div id="results-header">
       <span id="result-count">–</span>
       <div id="view-toggle">
+        <button class="view-btn" id="btn-playlist-export" type="button"
+                title="Aktuelle Playlist exportieren" aria-label="Aktuelle Playlist exportieren"
+                onclick="exportActivePlaylist()" style="display:none">
+          <i class="ti ti-file-export"></i><span style="font-size:12px;margin-left:5px">Aktuelle Playlist exportieren</span>
+        </button>
         <button class="view-btn" id="btn-play-view-open" title="Player öffnen" aria-label="Player öffnen" disabled>
           <i class="ti ti-arrows-maximize"></i>
         </button>
@@ -2190,6 +2389,9 @@
           <button class="play-view-icon-btn" id="play-view-love" type="button" title="Bei Last.fm liken" aria-label="Bei Last.fm liken" style="display:none">
             <i class="ti ti-heart"></i>
           </button>
+          <button class="play-view-icon-btn btn-favorite" id="play-view-favorite" type="button" title="Zu Favoriten" aria-label="Zu Favoriten">
+            <i class="ti ti-star"></i>
+          </button>
           <button class="play-view-icon-btn" id="play-view-bookmark" type="button" title="Zu Playlist hinzufügen" aria-label="Zu Playlist hinzufügen" style="display:none">
             <i class="ti ti-bookmark"></i>
           </button>
@@ -2246,6 +2448,9 @@
   <button class="btn-love" id="player-love" title="Bei Last.fm liken" style="display:none">
     <i class="ti ti-heart"></i>
   </button>
+  <button class="btn-favorite" id="player-favorite" title="Zu Favoriten" style="display:none">
+    <i class="ti ti-star"></i>
+  </button>
 </div>
 
 <audio id="audio"></audio>
@@ -2255,6 +2460,21 @@
 <script>
 const API = "";
 const $ = id => document.getElementById(id);
+
+const connectionClientId = sessionStorage.getItem("adolar-connection-id")
+  || (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+sessionStorage.setItem("adolar-connection-id", connectionClientId);
+
+function sendConnectionHeartbeat() {
+  fetch("/api/client/heartbeat", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({product: "adolar_web", client_id: connectionClientId}),
+    keepalive: true,
+  }).catch(() => {});
+}
+sendConnectionHeartbeat();
+setInterval(sendConnectionHeartbeat, 30000);
 
 // ── i18n ──────────────────────────────────────────────────
 const LANG = {
@@ -2273,6 +2493,7 @@ const LANG = {
     min_bitrate:      "Mindest-Bitrate",
     all:              "Alle",
     wartung:          "Wartung",
+    monitor:          "Monitor",
     scan_lib:         "Bibliothek scannen",
     scanning:         "Bibliothek wird gescannt…",
     bpm_tags:         "BPM-Tags einlesen",
@@ -2329,6 +2550,7 @@ const LANG = {
     results_q:        (n, q) => `${n.toLocaleString("de")} Ergebnisse für „${q}"`,
     radio_loading:    "Radio – …",
     radio_tracks:     (n) => `Radio – ${n} Tracks`,
+    radio_return:     "Aktuelles Radio anzeigen",
     no_tracks:        "Keine Tracks gefunden.",
     mini_title:       "Mini-Player abdocken",
     now_playing:      "Es läuft",
@@ -2419,6 +2641,7 @@ const LANG = {
     results_q:        (n, q) => `${n.toLocaleString("en")} results for "${q}"`,
     radio_loading:    "Radio – …",
     radio_tracks:     (n) => `Radio – ${n} tracks`,
+    radio_return:     "Show current radio",
     no_tracks:        "No tracks found.",
     mini_title:       "Pop out mini-player",
     now_playing:      "Now playing",
@@ -2427,6 +2650,7 @@ const LANG = {
     close_player:     "Close player",
     queue_empty:      "No more tracks.",
     wartung:          "Maintenance",
+    monitor:          "Monitor",
     bpm_tags:         "Read BPM tags",
     bpm_calc:         "Calculate BPM",
     lfm_love:         "Love on Last.fm",
@@ -2515,7 +2739,7 @@ function applyLang() {
   $("play-view-crossfade").setAttribute("aria-label", L.crossfade);
   $("play-view-library").title = L.radio_exit;
   $("play-view-library").setAttribute("aria-label", L.radio_exit);
-  $("btn-radio").title = radio.active ? L.radio_exit : L.radio_manage;
+  updateRadioButton();
   $("play-view-play").title = audio.paused ? L.play : L.pause;
   $("play-view-play").setAttribute("aria-label", audio.paused ? L.play : L.pause);
   $("play-view-love").title = L.lfm_love;
@@ -2703,7 +2927,7 @@ const playBtn    = $("play-btn");
 const progress   = $("progress");
 
 // ── Radio state ───────────────────────────────────────────
-const radio = { active: false, queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false };
+const radio = { active: false, browsingLibrary: false, queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false };
 radio.stationId = 1;
 radio.stationName = "Adolar Radio";
 radio.station = null;
@@ -2725,6 +2949,72 @@ const normalCrossfade = {
 const CF_PRELOAD = 25; // seconds before end: start buffering next track
 const CF_OUT     = 12; // seconds before end: start fade-out
 const CF_IN      =  8; // fade-in duration
+
+// ── Optional Adolar4U listening signals ──────────────────
+const adolar4uTelemetry = {
+  sessionId: (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`),
+  sequence: 0,
+  trackId: null,
+  decisionId: null,
+  source: "unknown",
+};
+
+function adolar4uSource() {
+  if (radio.active && radio.station?.engine === "adolar4u") return "adolar4u";
+  if (radio.active) return "radio";
+  if (listShuffle.active) return "shuffle";
+  if (_activePl) return "playlist";
+  return "library";
+}
+
+function sendAdolar4UEvent(trackId, eventType, details = {}, beacon = false) {
+  if (!_adolar4u.collecting || !trackId || String(trackId).startsWith("jingle-")) return;
+  const payload = {
+    event_type: eventType,
+    source: details.source || adolar4uTelemetry.source || "unknown",
+    reason: details.reason || null,
+    position_seconds: Number(details.position || 0),
+    duration_seconds: Number(details.duration || 0),
+    session_id: adolar4uTelemetry.sessionId,
+    recommendation_id: details.decisionId || adolar4uTelemetry.decisionId || null,
+    client_event_id: `${adolar4uTelemetry.sessionId}:${++adolar4uTelemetry.sequence}:${eventType}`,
+  };
+  const url = `${API}/api/adolar4u/events/${trackId}`;
+  if (beacon && navigator.sendBeacon) {
+    navigator.sendBeacon(url, new Blob([JSON.stringify(payload)], {type: "application/json"}));
+    return;
+  }
+  fetch(url, {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload), keepalive: true,
+  }).catch(() => {});
+}
+
+function startAdolar4UTrack(track) {
+  if (!_adolar4u.collecting || !track || isJingle(track)) return;
+  adolar4uTelemetry.trackId = track.id;
+  adolar4uTelemetry.decisionId = track.adolar4u_decision_id || null;
+  adolar4uTelemetry.source = adolar4uSource();
+  sendAdolar4UEvent(track.id, "started", {
+    source: adolar4uTelemetry.source,
+    duration: Number(track.duration || 0),
+  });
+}
+
+function finishAdolar4UTrack(reason = "track_change", forceCompleted = false, beacon = false) {
+  const trackId = adolar4uTelemetry.trackId;
+  if (!trackId) return;
+  const duration = Number(audio.duration || state.currentTrack?.duration || 0);
+  const position = Math.min(Number(audio.currentTime || 0), duration || Infinity);
+  const ratio = duration > 0 ? position / duration : 0;
+  sendAdolar4UEvent(trackId, forceCompleted || ratio >= .9 ? "completed" : "skipped", {
+    source: adolar4uTelemetry.source,
+    reason: forceCompleted || ratio >= .9 ? "ended" : reason,
+    position, duration,
+  }, beacon);
+  adolar4uTelemetry.trackId = null;
+  adolar4uTelemetry.decisionId = null;
+}
 
 // ── Helpers ───────────────────────────────────────────────
 function fmt(sec) {
@@ -2857,9 +3147,16 @@ function _setSearching(on) {
 }
 
 async function loadTracks(page = 1, forceCount = false) {
-  if (radio.active) return;
-  resetNormalCrossfadeBuffer();
-  if (listShuffle.active) stopListShuffle(false);
+  // Browsing/searching is independent of the active radio queue.  Keep the
+  // station playing until the user explicitly starts one of the search hits.
+  if (radio.active) {
+    radio.browsingLibrary = true;
+    updateRadioButton();
+  }
+  else {
+    resetNormalCrossfadeBuffer();
+    if (listShuffle.active) stopListShuffle(false);
+  }
   $("radio-test-banner")?.classList.remove("visible");
   const requestId = ++_loadTracksRequest;
   updateSavePlaylistBtn();
@@ -3005,8 +3302,8 @@ function renderTracks(overrideTracks) {
       row.appendChild(dlBtn);
     }
 
-    // Love button (Last.fm — nur für Admin)
-    if (lfm.connected && _me && _me.role === "admin") {
+    // Last.fm love button for the current user's personal account
+    if (lfm.connected && _me) {
       const loveBtn = document.createElement("button");
       const loveKey = `${track.artist}||${track.title}`;
       const isLoved = Boolean(track.loved || lfm.lovedCache.get(loveKey));
@@ -3022,6 +3319,18 @@ function renderTracks(overrideTracks) {
         lfmToggleLove(track, loveBtn);
       });
       row.appendChild(loveBtn);
+    }
+
+    if (_me) {
+      const favoriteBtn = document.createElement("button");
+      favoriteBtn.className = "btn-favorite";
+      favoriteBtn.dataset.trackId = track.id;
+      applyFavoriteState(favoriteBtn, _favoriteIds.has(Number(track.id)));
+      favoriteBtn.addEventListener("click", e => {
+        e.stopPropagation();
+        toggleFavorite(track, favoriteBtn);
+      });
+      row.appendChild(favoriteBtn);
     }
 
     // Bookmark button (alle eingeloggten Nutzer)
@@ -3266,8 +3575,10 @@ function updatePlayView(track) {
 
   const context = $("play-view-context");
   context.classList.toggle("radio-active", radio.active);
+  const recommendationReason = track.adolar4u_reason
+    ? ` · ${esc(track.adolar4u_reason)}` : "";
   context.innerHTML = radio.active
-    ? `<i class="ti ti-radio"></i><span>${esc(t().radio)} · ${esc(radio.stationName || "Adolar Radio")}</span>`
+    ? `<i class="ti ti-radio"></i><span>${esc(t().radio)} · ${esc(radio.stationName || "Adolar Radio")}${recommendationReason}</span>`
     : listShuffle.active
       ? `<i class="ti ti-arrows-shuffle"></i><span>${esc(t().shuffle)}</span>`
     : `<i class="ti ti-list"></i><span>${esc(t().queue)}</span>`;
@@ -3293,6 +3604,11 @@ function updatePlayView(track) {
   loveBtn.dataset.key = `${track.artist}||${track.title}`;
   const loved = Boolean(track.loved || lfm.lovedCache.get(loveBtn.dataset.key));
   applyLovedState(loveBtn, loved);
+
+  const favoriteBtn = $("play-view-favorite");
+  favoriteBtn.style.display = _me && !jingle ? "inline-flex" : "none";
+  favoriteBtn.dataset.trackId = track.id;
+  applyFavoriteState(favoriteBtn, _favoriteIds.has(Number(track.id)));
 
   const bookmarkBtn = $("play-view-bookmark");
   bookmarkBtn.style.display = _me && !jingle ? "inline-flex" : "none";
@@ -3347,8 +3663,12 @@ function updatePlayerUI(t) {
   }
   if (isJingle(t)) {
     applyLovedState($("player-love"), false);
+    $("player-favorite").style.display = "none";
     return;
   }
+  $("player-favorite").style.display = _me ? "inline-flex" : "none";
+  $("player-favorite").dataset.trackId = t.id;
+  applyFavoriteState($("player-favorite"), _favoriteIds.has(Number(t.id)));
   if (lfm.connected) {
     const key = `${t.artist}||${t.title}`;
     const loved = Boolean(t.loved || lfm.lovedCache.get(key));
@@ -3365,6 +3685,12 @@ function updatePlayerUI(t) {
 function playTrack(idx) {
   const t = state.tracks[idx];
   if (!t) return;
+  if (radio.active && radio.browsingLibrary) {
+    finishAdolar4UTrack("track_change");
+    stopRadio();
+    radio.browsingLibrary = false;
+  }
+  finishAdolar4UTrack("track_change");
   if (!radio.active) resetNormalCrossfadeBuffer();
   state.currentIdx   = idx;
   state.currentTrack = t;
@@ -3375,8 +3701,22 @@ function playTrack(idx) {
   if (!playViewState.openedOnce && !playViewState.dismissed) openPlayView(true);
   audio.src = `${API}/api/stream/${t.id}`;
   audio.play();
+  startAdolar4UTrack(t);
   renderTracks();
   if (listShuffle.active) ensureListShuffleQueue();
+}
+
+function playRadioTrack(track) {
+  if (!track) return;
+  state.currentIdx = radio.browsingLibrary ? -1 : 0;
+  state.currentTrack = track;
+  _scrobbled = false;
+  _playCounted = false;
+  updatePlayerUI(track);
+  audio.src = `${API}/api/stream/${track.id}`;
+  audio.play();
+  startAdolar4UTrack(track);
+  renderTracks();
 }
 
 function playJingle() {
@@ -3550,11 +3890,16 @@ async function loadRadioQueue(count, excludeIds = []) {
   } catch { return []; }
 }
 
-async function startRadio(station = null) {
+async function startRadio(station = null, initialPlaylist = null) {
+  if (station?.engine === "adolar4u" && _adolar4u.onboarding?.required && !initialPlaylist) {
+    openAdolar4UOnboarding(station);
+    return;
+  }
   stopListShuffle(false);
   resetNormalCrossfadeBuffer();
   $("radio-test-banner")?.classList.remove("visible");
   radio.active = true;
+  radio.browsingLibrary = false;
   radio.queue  = [];
   radio.playedIds = [];
   radio.shuffleSession = null;
@@ -3564,14 +3909,12 @@ async function startRadio(station = null) {
     radio.stationName = station.name;
     radio.station = station;
   }
-  $("btn-radio").classList.add("active");
-  $("btn-radio").innerHTML = `<i class="ti ti-radio"></i> ${esc(radio.stationName || t().radio)} <i class="ti ti-x"></i>`;
-  $("btn-radio").title = t().radio_exit;
+  updateRadioButton();
   updatePlaybackModeControls();
   closeRadioPanel();
 
   // Fetch 5 tracks first → play immediately, then fetch remaining in background
-  const initial = await loadRadioQueue(5);
+  const initial = initialPlaylist?.slice(0, 5) || await loadRadioQueue(5);
   if (!initial.length) { stopRadio(); return; }
 
   radio.queue   = initial;
@@ -3582,24 +3925,62 @@ async function startRadio(station = null) {
 
   // Background fill to 25 — guarded by session token
   const mySession = radio.session;
-  loadRadioQueue(20, initial.map(t => t.id)).then(more => {
+  const remaining = initialPlaylist?.slice(5) || null;
+  (remaining ? Promise.resolve(remaining) : loadRadioQueue(20, initial.map(t => t.id))).then(more => {
     if (!radio.active || radio.session !== mySession) return;
     radio.queue.push(...more);
-    state.tracks = [...radio.queue];
-    $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
-    renderTracks();
+    if (!radio.browsingLibrary) {
+      state.tracks = [...radio.queue];
+      state.total = radio.queue.length;
+      $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
+      renderTracks();
+    }
   });
+}
+
+function updateRadioButton() {
+  const button = $("btn-radio");
+  if (!button) return;
+  button.classList.toggle("active", radio.active);
+  if (!radio.active) {
+    button.innerHTML = `<i class="ti ti-radio"></i> ${t().radio}`;
+    button.title = t().radio_manage;
+    return;
+  }
+  const actionIcon = radio.browsingLibrary ? "ti-arrow-back-up" : "ti-x";
+  button.innerHTML = `<i class="ti ti-radio"></i> ${esc(radio.stationName || t().radio)} <i class="ti ${actionIcon}"></i>`;
+  button.title = radio.browsingLibrary ? t().radio_return : t().radio_exit;
+}
+
+function showCurrentRadioQueue() {
+  if (!radio.active) return;
+  ++_loadTracksRequest;
+  _setSearching(false);
+  radio.browsingLibrary = false;
+  if (_activePl !== null) clearPlaylist();
+  state.tracks = [...radio.queue];
+  state.total = state.tracks.length;
+  state.page = 1;
+  state.pages = 1;
+  state.currentIdx = isJingle(state.currentTrack)
+    ? -1
+    : state.tracks.findIndex(track => Number(track.id) === Number(state.currentTrack?.id));
+  renderTracks();
+  renderPagination();
+  fetchMemberships(state.tracks);
+  $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
+  updateRadioButton();
+  document.getElementById("track-list")?.scrollTo({top: 0, behavior: "instant"});
 }
 
 function stopRadio() {
   radio.active = false;
+  radio.browsingLibrary = false;
   radio.cfActive = false;
   clearTimeout(radio.cfTimer);
   audioB.pause(); audioB.removeAttribute("src"); audioB.load();
   audio.volume = parseFloat($("volume").value) || 0.8;
-  $("btn-radio").classList.remove("active");
-  $("btn-radio").innerHTML = `<i class="ti ti-radio"></i> ${t().radio}`;
-  $("btn-radio").title = t().radio_manage;
+  updateRadioButton();
   updatePlaybackModeControls();
   if (state.currentTrack) updatePlayView(state.currentTrack);
 }
@@ -3609,6 +3990,7 @@ function leaveRadioToLibrary() {
     openRadioPanel();
     return;
   }
+  finishAdolar4UTrack("stop");
   stopRadio();
   audio.pause();
   audio.removeAttribute("src");
@@ -3626,6 +4008,11 @@ async function radioNext() {
       radio.queue.push(...fresh);
     }
     if (!radio.queue.length) { stopRadio(); return; }
+    if (radio.browsingLibrary) {
+      state.currentIdx = -1;
+      state.currentTrack = radio.queue[0];
+      return;
+    }
     state.tracks = [...radio.queue];
     state.currentIdx = 0;
     state.currentTrack = radio.queue[0];
@@ -3655,13 +4042,21 @@ async function radioNext() {
 
   if (stationHasJingle() && radio.tracksSinceJingle >= stationJingleEvery()) {
     radio.tracksSinceJingle = 0;
-    state.tracks = [...radio.queue];
-    renderTracks();
-    $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
+    if (!radio.browsingLibrary) {
+      state.tracks = [...radio.queue];
+      renderTracks();
+      $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
+    }
     playJingle();
     return;
   }
 
+  if (radio.browsingLibrary) {
+    state.currentIdx = -1;
+    state.currentTrack = radio.queue[0];
+    updatePlayerUI(state.currentTrack);
+    return;
+  }
   state.tracks = [...radio.queue];
   state.currentIdx = 0;
   state.currentTrack = radio.queue[0];
@@ -3738,6 +4133,7 @@ function startNormalCrossfade() {
     audioB.load();
     normalCrossfade.active = false;
     normalCrossfade.timer = null;
+    finishAdolar4UTrack("ended", true);
     state.currentIdx = nextIndex;
     state.currentTrack = nextTrack;
     _scrobbled = false;
@@ -3747,6 +4143,7 @@ function startNormalCrossfade() {
     audio.currentTime = nextTime;
     audio.volume = vol;
     audio.play();
+    startAdolar4UTrack(nextTrack);
     renderTracks();
     if (listShuffle.active) ensureListShuffleQueue();
   };
@@ -3767,7 +4164,10 @@ function startCrossfade() {
   audioB.play().catch(() => {
     // Autoplay blocked or src invalid — fall back to direct next
     radio.cfActive = false;
-    radioNext().then(() => { if (radio.queue.length && !isJingle(state.currentTrack)) playTrack(0); });
+    radioNext().then(() => {
+      if (!radio.queue.length || isJingle(state.currentTrack)) return;
+      radio.browsingLibrary ? playRadioTrack(radio.queue[0]) : playTrack(0);
+    });
   });
 
   const startTime = performance.now();
@@ -3786,6 +4186,7 @@ function startCrossfade() {
       const nextTime = audioB.currentTime;
       audioB.pause(); audioB.removeAttribute("src"); audioB.load();
       radio.cfActive = false;
+      finishAdolar4UTrack("ended", true);
       radioNext().then(() => {
         if (!radio.queue.length) return;
         _scrobbled = false;
@@ -3795,6 +4196,7 @@ function startCrossfade() {
         audio.currentTime = nextTime;
         audio.volume = vol;
         audio.play();
+        startAdolar4UTrack(state.currentTrack);
         renderTracks();
       });
     }
@@ -3824,6 +4226,7 @@ $("play-view-volume").oninput = e => {
   $("volume").dispatchEvent(new Event("input", { bubbles: true }));
 };
 $("play-view-love").onclick = () => lfmToggleLove(state.currentTrack, $("play-view-love"));
+$("play-view-favorite").onclick = () => toggleFavorite(state.currentTrack, $("play-view-favorite"));
 $("play-view-bookmark").onclick = e => {
   e.stopPropagation();
   if (state.currentTrack && !isJingle(state.currentTrack)) {
@@ -3850,10 +4253,13 @@ audio.onpause = () => {
   renderTracks();
 };
 audio.onended = async () => {
+  finishAdolar4UTrack("ended", true);
   if (radio.active) {
     if (radio.cfActive) return; // crossfade already handles the transition
     await radioNext();
-    if (radio.queue.length && !isJingle(state.currentTrack)) playTrack(0);
+    if (radio.queue.length && !isJingle(state.currentTrack)) {
+      radio.browsingLibrary ? playRadioTrack(radio.queue[0]) : playTrack(0);
+    }
   } else if (normalCrossfade.active) {
     return;
   } else if (listShuffle.active) {
@@ -3933,6 +4339,7 @@ $("btn-prev").onclick = () => {
   if (state.currentIdx > 0) playTrack(state.currentIdx - 1);
 };
 $("btn-next").onclick = async () => {
+  finishAdolar4UTrack("manual_next");
   if (radio.active) {
     clearTimeout(radio.cfTimer);
     radio.cfActive = false;
@@ -3948,10 +4355,15 @@ $("btn-next").onclick = async () => {
   if (next < state.tracks.length) playTrack(next);
 };
 
+window.addEventListener("pagehide", () => finishAdolar4UTrack("stop", false, true));
+
 $("btn-list-shuffle").onclick = startListShuffle;
 $("btn-crossfade").onclick = toggleNormalCrossfade;
 
-$("btn-radio").onclick = leaveRadioToLibrary;
+$("btn-radio").onclick = () => {
+  if (radio.active && radio.browsingLibrary) showCurrentRadioQueue();
+  else leaveRadioToLibrary();
+};
 updatePlaybackModeControls();
 
 // ── Radio station management ──────────────────────────────
@@ -4364,7 +4776,11 @@ function broadcastTrack(t) {
   if (!miniIsOpen()) return;
   const key = t && !isJingle(t) ? `${t.artist}||${t.title}` : null;
   const loved = key ? (lfm.lovedCache.get(key) || false) : false;
-  miniCh.postMessage({ type: "track", track: t, playing: !audio.paused, loved, lfmConnected: lfm.connected });
+  miniCh.postMessage({
+    type: "track", track: t, playing: !audio.paused, loved,
+    favorite: Boolean(t && _favoriteIds.has(Number(t.id))),
+    lfmConnected: lfm.connected,
+  });
 }
 
 function broadcastPlayState() {
@@ -4375,6 +4791,11 @@ function broadcastPlayState() {
 function broadcastLoved(loved) {
   if (!miniIsOpen()) return;
   miniCh.postMessage({ type: "loved", loved });
+}
+
+function broadcastFavorite(favorite) {
+  if (!miniIsOpen()) return;
+  miniCh.postMessage({ type: "favorite", favorite });
 }
 
 function broadcastProgress() {
@@ -4402,6 +4823,7 @@ miniCh.onmessage = e => {
   if (msg.cmd === "next")    $("btn-next").click();
   if (msg.cmd === "prev")    $("btn-prev").click();
   if (msg.cmd === "love")    lfmToggleLove(state.currentTrack, $("player-love"));
+  if (msg.cmd === "favorite") toggleFavorite(state.currentTrack, $("player-favorite"));
   if (msg.cmd === "seek" && audio.duration) audio.currentTime = (msg.value / 100) * audio.duration;
 };
 
@@ -4416,7 +4838,7 @@ function updateMiniPlayer(t) {
 }
 
 // ── Last.fm ────────────────────────────────────────────────
-const lfm = { connected: false, username: null, lovedCache: new Map() };
+const lfm = { connected: false, username: null, autoLoveFavorites: true, lovedCache: new Map() };
 
 async function lfmInit() {
   try {
@@ -4424,6 +4846,7 @@ async function lfmInit() {
     const data = await res.json();
     lfm.connected = data.connected;
     lfm.username  = data.username;
+    lfm.autoLoveFavorites = data.auto_love_favorites !== false;
   } catch { lfm.connected = false; }
   renderLfmStatus();
 }
@@ -4465,6 +4888,186 @@ function toggleWartung() {
   chevron.className = open ? "ti ti-chevron-down" : "ti ti-chevron-up";
 }
 
+let monitorPollTimer = null;
+
+function formatMonitorBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`;
+  return `${(value / 1024 ** 2).toFixed(0)} MB`;
+}
+
+function formatMonitorDate(timestamp) {
+  return new Date(Number(timestamp) * 1000).toLocaleString(
+    lang === "en" ? "en-GB" : "de-DE",
+    {dateStyle: "short", timeStyle: "medium"},
+  );
+}
+
+function monitorProductName(product) {
+  return ({
+    adolar_web: "Adolar Web",
+    companion: "Companion",
+    android: "Android",
+  })[product] || product;
+}
+
+function renderMonitorConnections(target, rows, isCurrent) {
+  if (!rows.length) {
+    target.innerHTML = `<div class="monitor-empty">${isCurrent ? "Keine aktive Verbindung." : "Noch keine Verbindung erfasst."}</div>`;
+    return;
+  }
+  target.innerHTML = `<table class="monitor-table">
+    <thead><tr><th>Benutzer</th><th>Produkt</th><th>Datum / Uhrzeit</th><th>IP-Adresse</th></tr></thead>
+    <tbody>${rows.map(row => `<tr>
+      <td>${isCurrent ? '<span class="monitor-live"></span>' : ''}${esc(row.username)}</td>
+      <td>${esc(monitorProductName(row.product))}</td>
+      <td>${esc(formatMonitorDate(row.connected_at))}</td>
+      <td>${esc(row.ip_address)}</td>
+    </tr>`).join("")}</tbody>
+  </table>`;
+}
+
+async function loadMonitor() {
+  if ($("monitor-modal").style.display !== "flex") return;
+  try {
+    const response = await fetch("/api/admin/monitor", {cache: "no-store"});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Monitor nicht erreichbar");
+    const system = data.system;
+    $("monitor-cpu-value").textContent = `${system.cpu_percent.toFixed(1)} %`;
+    $("monitor-cpu-bar").style.width = `${Math.min(100, system.cpu_percent)}%`;
+    $("monitor-cpu-detail").textContent = `${system.cpu_count} logische CPU${system.cpu_count === 1 ? "" : "s"}`;
+    $("monitor-ram-value").textContent = `${system.memory_percent.toFixed(1)} %`;
+    $("monitor-ram-bar").style.width = `${Math.min(100, system.memory_percent)}%`;
+    $("monitor-ram-detail").textContent = `${formatMonitorBytes(system.memory_used)} / ${formatMonitorBytes(system.memory_total)}`;
+    renderMonitorConnections($("monitor-current"), data.current_connections || [], true);
+    renderMonitorConnections($("monitor-recent"), data.recent_connections || [], false);
+    $("monitor-status").textContent = `Aktualisiert: ${formatMonitorDate(data.sampled_at)} · automatisch alle 3 Sekunden`;
+  } catch (error) {
+    $("monitor-status").textContent = error.message;
+  } finally {
+    if ($("monitor-modal").style.display === "flex") {
+      monitorPollTimer = setTimeout(loadMonitor, 3000);
+    }
+  }
+}
+
+function openMonitor() {
+  if (!_me || _me.role !== "admin") return;
+  $("monitor-modal").style.display = "flex";
+  $("monitor-status").textContent = "Monitor wird geladen…";
+  clearTimeout(monitorPollTimer);
+  loadMonitor();
+}
+
+function closeMonitor() {
+  $("monitor-modal").style.display = "none";
+  clearTimeout(monitorPollTimer);
+  monitorPollTimer = null;
+}
+
+let backupPollTimer = null;
+
+function formatBackupBytes(value) {
+  const bytes = Number(value || 0);
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
+async function toggleBackupPanel() {
+  const panel = $("backup-panel");
+  const open = panel.style.display === "block";
+  panel.style.display = open ? "none" : "block";
+  $("backup-chevron").className = open ? "ti ti-chevron-down" : "ti ti-chevron-up";
+  if (!open) await loadBackupState();
+  if (open && backupPollTimer) {
+    clearTimeout(backupPollTimer);
+    backupPollTimer = null;
+  }
+}
+
+function renderBackupState(data) {
+  const summary = $("backup-summary");
+  const status = data.status || {state: "idle"};
+  const schedule = data.automatic
+    ? `Automatisch täglich ab ${String(data.hour).padStart(2, "0")}:00 Uhr`
+    : "Automatische Sicherung deaktiviert";
+  if (status.state === "running") {
+    summary.innerHTML = `<i class="ti ti-loader"></i> Sicherung läuft…<br>${esc(schedule)}`;
+  } else if (status.state === "failed") {
+    summary.innerHTML = `<span style="color:#e58b8b">Letzte Sicherung fehlgeschlagen:</span><br>${esc(status.error || "Unbekannter Fehler")}`;
+  } else {
+    summary.textContent = `${schedule} · ${data.retention} Sicherungen werden aufbewahrt`;
+  }
+
+  const backups = data.backups || [];
+  $("backup-list").innerHTML = backups.length ? backups.map(item => {
+    const id = item.backup_id;
+    const date = new Date(item.created_at).toLocaleString("de-DE");
+    const jingleLink = item.radio_jingles?.count
+      ? `<a href="/api/admin/backups/${id}/jingles">Jingles (${item.radio_jingles.count})</a>`
+      : "";
+    return `<div class="backup-item">
+      <div class="backup-item-head">${esc(date)} · ${formatBackupBytes(item.size)}</div>
+      <div class="backup-item-actions">
+        <a href="/api/admin/backups/${id}/database">Datenbank</a>
+        ${jingleLink}
+        <a href="/api/admin/backups/${id}/manifest">Prüfdaten</a>
+        <button class="backup-delete" data-backup-id="${id}" title="Sicherung löschen"><i class="ti ti-trash"></i></button>
+      </div>
+    </div>`;
+  }).join("") : `<div>Noch keine Sicherung vorhanden.</div>`;
+
+  $("backup-list").querySelectorAll(".backup-delete").forEach(button => {
+    button.onclick = () => deleteBackup(button.dataset.backupId);
+  });
+  $("btn-backup-create").disabled = status.state === "running";
+  if (status.state === "running") {
+    backupPollTimer = setTimeout(loadBackupState, 2000);
+  }
+}
+
+async function loadBackupState() {
+  if ($("backup-panel").style.display !== "block") return;
+  try {
+    const response = await fetch("/api/admin/backups");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Backup-Ziel nicht erreichbar");
+    renderBackupState(data);
+  } catch (error) {
+    $("backup-summary").innerHTML = `<span style="color:#e58b8b">${esc(error.message)}</span>`;
+    $("backup-list").innerHTML = "";
+  }
+}
+
+async function startDatabaseBackup() {
+  const button = $("btn-backup-create");
+  button.disabled = true;
+  button.classList.add("running");
+  button.innerHTML = `<i class="ti ti-loader"></i><span>Sicherung wird gestartet…</span>`;
+  try {
+    const response = await fetch("/api/admin/backups", {method: "POST"});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Sicherung konnte nicht gestartet werden");
+    setTimeout(loadBackupState, 400);
+  } catch (error) {
+    $("backup-summary").innerHTML = `<span style="color:#e58b8b">${esc(error.message)}</span>`;
+  } finally {
+    button.classList.remove("running");
+    button.innerHTML = `<i class="ti ti-device-floppy"></i><span>Jetzt sichern</span>`;
+  }
+}
+
+async function deleteBackup(backupId) {
+  if (!confirm("Diese Datensicherung wirklich löschen?")) return;
+  const response = await fetch(`/api/admin/backups/${backupId}`, {method: "DELETE"});
+  if (response.ok) await loadBackupState();
+}
+
+$("btn-backup-toggle").onclick = toggleBackupPanel;
+$("btn-backup-create").onclick = startDatabaseBackup;
+
 async function lfmDisconnect() {
   await fetch(`${API}/api/lastfm/disconnect`, { method: "POST" });
   lfm.connected = false; lfm.username = null;
@@ -4472,7 +5075,36 @@ async function lfmDisconnect() {
   state.filters.loved = false;
   miniCh.postMessage({ type: "lfm", connected: false, loved: false });
   renderLfmStatus();
+  renderLastFmModal();
   renderTracks();
+}
+
+function openLastFmSettings() {
+  $("user-dropdown").classList.remove("open");
+  renderLastFmModal();
+  $("lastfm-modal").style.display = "flex";
+}
+
+function renderLastFmModal() {
+  const status = $("lastfm-modal-status");
+  if (!status) return;
+  status.textContent = lfm.connected
+    ? `Verbunden als ${lfm.username}. Scrobbles, Loved-Titel und Importe gehören nur zu diesem Adolar-Benutzer.`
+    : "Verbinde dein eigenes Last.fm-Konto, ohne dein Passwort in Adolar einzugeben.";
+  $("lastfm-auto-love-row").style.display = lfm.connected ? "flex" : "none";
+  $("lastfm-sync-actions").style.display = lfm.connected ? "flex" : "none";
+  $("lastfm-auto-love").checked = lfm.autoLoveFavorites;
+  $("lastfm-modal-connect").style.display = lfm.connected ? "none" : "inline-flex";
+  $("lastfm-modal-disconnect").style.display = lfm.connected ? "inline-flex" : "none";
+}
+
+async function saveLastFmSettings() {
+  const enabled = $("lastfm-auto-love").checked;
+  const r = await fetch("/api/lastfm/settings", {
+    method: "PATCH", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({auto_love_favorites: enabled}),
+  });
+  if (r.ok) lfm.autoLoveFavorites = enabled;
 }
 
 async function lfmScrobble(track) {
@@ -4512,21 +5144,42 @@ function updateLovedFilterButton() {
 
 function updateLovedSyncButton(running = false) {
   const btn = $("btn-loved-sync");
-  if (!btn) return;
-  btn.classList.toggle("running", running);
-  btn.disabled = running;
-  btn.innerHTML = running
-    ? `<i class="ti ti-loader"></i><span>${t().lfm_loved_syncing}</span>`
-    : `<i class="ti ti-refresh"></i><span>${t().lfm_loved_sync}</span>`;
+  if (btn) {
+    btn.classList.toggle("running", running);
+    btn.disabled = running;
+    btn.innerHTML = running
+      ? `<i class="ti ti-loader"></i><span>${t().lfm_loved_syncing}</span>`
+      : `<i class="ti ti-refresh"></i><span>${t().lfm_loved_sync}</span>`;
+  }
+  if ($("lastfm-modal-loved-sync")) $("lastfm-modal-loved-sync").disabled = running;
+}
+
+let _lovedPollTimer = null;
+
+async function pollLovedSync() {
+  try {
+    const response = await fetch(`${API}/api/lastfm/loved/status`);
+    const status = await response.json();
+    if (status.running) {
+      updateLovedSyncButton(true);
+      _lovedPollTimer = setTimeout(pollLovedSync, 1500);
+      return;
+    }
+    updateLovedSyncButton(false);
+    clearTimeout(_lovedPollTimer);
+    if (state.filters.loved) loadTracks(1, true);
+  } catch {
+    updateLovedSyncButton(false);
+  }
 }
 
 async function startLovedSync() {
   if (!lfm.connected) return;
   try {
     updateLovedSyncButton(true);
-    await fetch(`${API}/api/lastfm/loved/sync`, { method: "POST" });
-    updateLovedSyncButton(false);
-    if (state.filters.loved) loadTracks(1, true);
+    const response = await fetch(`${API}/api/lastfm/loved/sync`, { method: "POST" });
+    if (!response.ok && response.status !== 409) throw new Error("sync failed");
+    _lovedPollTimer = setTimeout(pollLovedSync, 500);
   } catch {
     updateLovedSyncButton(false);
   }
@@ -4578,7 +5231,7 @@ async function pollPcSync() {
   }
 }
 
-$("btn-pc-sync").onclick = async () => {
+async function startLastFmPlaycountSync() {
   if (!lfm.connected) return;
   try {
     const r = await fetch(`${API}/api/lastfm/playcount/sync`, { method: "POST" });
@@ -4586,7 +5239,9 @@ $("btn-pc-sync").onclick = async () => {
     updatePcSyncButton(true, 0, 0);
     _pcPollTimer = setTimeout(pollPcSync, 1000);
   } catch {}
-};
+}
+
+$("btn-pc-sync").onclick = () => startLastFmPlaycountSync();
 
 $("btn-pc-tags").onclick = async () => {
   const btn = $("btn-pc-tags");
@@ -4619,6 +5274,7 @@ function applyLovedState(btn, loved) {
 
 // Player love button
 $("player-love").onclick = () => lfmToggleLove(state.currentTrack, $("player-love"));
+$("player-favorite").onclick = () => toggleFavorite(state.currentTrack, $("player-favorite"));
 
 // ── Chip filters ───────────────────────────────────────────
 function setupChips(groupId, filterKey) {
@@ -4746,9 +5402,18 @@ $("sl-year-max").oninput = function() {
 
 // ── Search & Sort ──────────────────────────────────────────
 let searchTimer;
+let suppressLibrarySearchUntil = 0;
 $("search").oninput = e => {
+  if (Date.now() < suppressLibrarySearchUntil) {
+    e.target.value = "";
+    return;
+  }
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => { state.query = e.target.value.trim(); loadTracks(1); }, 500);
+  searchTimer = setTimeout(() => {
+    state.query = e.target.value.trim();
+    clearPlaylist();
+    loadTracks(1);
+  }, 500);
 };
 $("sort-select").onchange = e => { state.sort = e.target.value; clearPlaylist(); loadTracks(1); };
 
@@ -4892,20 +5557,67 @@ const SYSTEM_SORT_ICONS = {
 let _playlists = [];
 let _activePl  = null;
 let _trackMemberships = {}; // { track_id: [playlist_id, ...] }
+let _favoriteIds = new Set();
 
 // ── Bookmark helpers ──────────────────────────────────────
 async function fetchMemberships(tracks) {
   if (!_me || !tracks.length) return;
   const ids = tracks.map(tr => tr.id).join(",");
   try {
-    const r = await fetch(`/api/playlists/memberships?ids=${ids}`);
-    const data = await r.json();
-    _trackMemberships = data;
+    const [membershipResponse, favoriteResponse] = await Promise.all([
+      fetch(`/api/playlists/memberships?ids=${ids}`),
+      fetch(`/api/favorites?ids=${ids}`),
+    ]);
+    _trackMemberships = await membershipResponse.json();
+    const favorites = await favoriteResponse.json();
+    tracks.forEach(track => _favoriteIds.delete(Number(track.id)));
+    (favorites.track_ids || []).forEach(id => _favoriteIds.add(Number(id)));
     // Update all bookmark buttons already in the DOM
     document.querySelectorAll(".btn-bookmark, #play-view-bookmark").forEach(btn => {
       _applyBookmarkState(btn, Number(btn.dataset.trackId));
     });
+    document.querySelectorAll(".btn-favorite").forEach(btn => {
+      if (btn.dataset.trackId) {
+        applyFavoriteState(btn, _favoriteIds.has(Number(btn.dataset.trackId)));
+      }
+    });
   } catch {}
+}
+
+function applyFavoriteState(btn, favorite) {
+  if (!btn) return;
+  btn.classList.toggle("favorite", favorite);
+  btn.title = favorite ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen";
+  btn.innerHTML = favorite
+    ? `<i class="ti ti-star-filled"></i>`
+    : `<i class="ti ti-star"></i>`;
+}
+
+async function toggleFavorite(track, btn) {
+  if (!_me || !track || isJingle(track)) return;
+  const trackId = Number(track.id);
+  const favorite = !_favoriteIds.has(trackId);
+  const response = await fetch(`/api/favorites/${trackId}`, {
+    method: "PUT", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({favorite}),
+  });
+  if (!response.ok) return;
+  const result = await response.json();
+  if (favorite) _favoriteIds.add(trackId); else _favoriteIds.delete(trackId);
+  document.querySelectorAll(`.btn-favorite[data-track-id="${trackId}"]`).forEach(
+    item => applyFavoriteState(item, favorite)
+  );
+  applyFavoriteState(btn, favorite);
+  if (favorite && result.lastfm_synced) {
+    const key = `${track.artist}||${track.title}`;
+    lfm.lovedCache.set(key, true);
+    document.querySelectorAll(`.btn-love[data-key="${CSS.escape(key)}"]`).forEach(
+      item => applyLovedState(item, true)
+    );
+    if (state.currentTrack?.id === track.id) applyLovedState($("player-love"), true);
+  }
+  await loadPlaylists();
+  broadcastFavorite(favorite);
 }
 
 function _applyBookmarkState(btn, trackId) {
@@ -4934,7 +5646,7 @@ function _closeBookmarkDropdown() {
 
 function _openBookmarkDropdown(btn, trackId) {
   if (_bmDropdownOpen) { _closeBookmarkDropdown(); return; }
-  const userPlaylists = _playlists.filter(p => !p.is_system && p.type !== "static_radio");
+  const userPlaylists = _playlists.filter(p => !p.is_system && p.type === "static");
 
   const dd = document.createElement("div");
   dd.className = "bm-dropdown";
@@ -5005,6 +5717,7 @@ async function loadPlaylists() {
     _playlists = await r.json();
   } catch { return; }
   renderPlaylistSidebar();
+  updatePlaylistExportButton();
 }
 
 function renderPlaylistSidebar() {
@@ -5014,21 +5727,33 @@ function renderPlaylistSidebar() {
   userList.innerHTML = "";
 
   _playlists.forEach(pl => {
-    const icon = pl.is_system
+    const icon = pl.system_key === "favorites"
+      ? "ti-star-filled"
+      : pl.is_system
       ? (SYSTEM_SORT_ICONS[pl.sort] || "ti-list")
       : "ti-playlist";
     const item = document.createElement("div");
     item.className = "pl-item" + (_activePl === pl.id ? " active" : "");
     item.dataset.id = pl.id;
+    const personal = !pl.is_system;
     item.innerHTML = `
       <i class="ti ${icon}"></i>
-      <span class="pl-item-name">${esc(pl.name)}</span>
-      ${!pl.is_system && _me?.allow_playlists ? `<button class="pl-del" title="Löschen" data-id="${pl.id}"><i class="ti ti-x"></i></button>` : ""}
+      <span class="pl-item-copy">
+        <span class="pl-item-name">${esc(pl.name)}</span>
+        ${personal ? `<span class="pl-item-type">${pl.type === "smart" ? "Smart · Filter" : `Statisch · ${pl.track_count || 0} Tracks`}</span>` : ""}
+      </span>
+      ${personal && _me?.allow_playlists ? `
+        <button class="pl-action pl-edit" title="Im Editor bearbeiten" data-id="${pl.id}"><i class="ti ti-pencil"></i></button>
+        <button class="pl-action pl-del" title="Löschen" data-id="${pl.id}"><i class="ti ti-trash"></i></button>` : ""}
     `;
     item.addEventListener("click", e => {
-      if (e.target.closest(".pl-del")) return;
+      if (e.target.closest(".pl-action")) return;
       if (_activePl === pl.id) { clearPlaylist(); loadTracks(1, true); return; }
       applyPlaylist(pl);
+    });
+    item.querySelector(".pl-edit")?.addEventListener("click", e => {
+      e.stopPropagation();
+      openPlaylistEditor(pl);
     });
     const delBtn = item.querySelector(".pl-del");
     if (delBtn) {
@@ -5046,11 +5771,23 @@ function renderPlaylistSidebar() {
 
 async function applyPlaylist(pl) {
   if (listShuffle.active) stopListShuffle(false);
+  suppressLibrarySearchUntil = Date.now() + 1500;
+  clearTimeout(searchTimer);
+  state.query = "";
+  $("search").value = "";
+  ++_loadTracksRequest; // a preceding library request must not overwrite this playlist
+  _setSearching(false);
+  if (radio.active) {
+    radio.browsingLibrary = true;
+    updateRadioButton();
+  }
   _activePl = pl.id;
   renderPlaylistSidebar();
+  updatePlaylistExportButton();
 
-  // Static playlists: fetch tracks directly and display them
-  if (pl.type === "static") {
+  // Personal playlists are resolved server-side: static in saved order,
+  // smart by running the saved editor filter again.
+  if (pl.type === "static" || !pl.is_system) {
     _setSearching(true);
     try {
       const r = await fetch(`/api/playlists/${pl.id}/tracks`);
@@ -5062,6 +5799,7 @@ async function applyPlaylist(pl) {
       renderTracks(tracks);
       renderPagination();
       fetchMemberships(tracks);
+      $("result-count").textContent = `${pl.name} · ${tracks.length} Track${tracks.length === 1 ? "" : "s"}`;
     } catch {}
     _setSearching(false);
     return;
@@ -5089,6 +5827,7 @@ async function applyPlaylist(pl) {
 function clearPlaylist() {
   _activePl = null;
   renderPlaylistSidebar();
+  updatePlaylistExportButton();
 }
 
 function resetFilters() {
@@ -5149,8 +5888,441 @@ function _restoreFilterUI(filters) {
 
 function updateSavePlaylistBtn() { /* removed */ }
 
+// ── Playlist editor ──────────────────────────────────────────────────────────
+const PLE_FIELDS = {
+  title: "Titel", artist: "Interpret", album: "Album", genre: "Genre",
+  year: "Jahr", decade: "Jahrzehnt", playcount: "Playcount",
+};
+const PLE_TEXT_OPS = {contains: "enthält", not_contains: "enthält nicht"};
+const PLE_NUM_OPS = {eq: "ist", ne: "ist nicht", gt: "ist größer", lt: "ist kleiner"};
+let pleTracks = [];
+let pleResults = [];
+let pleEditing = null;
+let pleDragIndex = null;
+let pleSearchTimer = null;
+let pleDirty = false;
+let pleInputsBound = false;
+
+function pleOps(field) {
+  return ["title", "artist", "album", "genre"].includes(field) ? PLE_TEXT_OPS : PLE_NUM_OPS;
+}
+
+function pleSetStatus(message, error = false) {
+  const node = $("ple-status");
+  node.textContent = message || "";
+  node.style.color = error ? "#d58282" : "var(--accent)";
+}
+
+function pleAddRule(group, rule = {}) {
+  const wrap = $(group === "any" ? "ple-rules-any" : "ple-rules-all");
+  const row = document.createElement("div");
+  row.className = "ple-rule-row";
+  const field = PLE_FIELDS[rule.field] ? rule.field : "title";
+  const ops = pleOps(field);
+  const op = ops[rule.op] ? rule.op : Object.keys(ops)[0];
+  row.innerHTML = `
+    <select class="ple-select ple-rule-field">${Object.entries(PLE_FIELDS).map(([value,label]) =>
+      `<option value="${value}" ${value === field ? "selected" : ""}>${label}</option>`).join("")}</select>
+    <select class="ple-select ple-rule-op">${Object.entries(ops).map(([value,label]) =>
+      `<option value="${value}" ${value === op ? "selected" : ""}>${label}</option>`).join("")}</select>
+    <input class="ple-input ple-rule-value" placeholder="Wert">
+    <button class="ple-danger" type="button" title="Regel entfernen">×</button>`;
+  row.querySelector(".ple-rule-value").value = rule.value ?? "";
+  row.querySelector(".ple-rule-field").onchange = event => {
+    const opSelect = row.querySelector(".ple-rule-op");
+    opSelect.innerHTML = Object.entries(pleOps(event.target.value))
+      .map(([value,label]) => `<option value="${value}">${label}</option>`).join("");
+    pleDirty = true;
+  };
+  row.querySelector(".ple-rule-op").onchange = () => { pleDirty = true; };
+  row.querySelector(".ple-rule-value").oninput = () => { pleDirty = true; };
+  row.querySelector("button").onclick = () => { row.remove(); pleDirty = true; };
+  wrap.appendChild(row);
+  pleDirty = true;
+}
+
+function pleReadRules(group) {
+  return [...$(group === "any" ? "ple-rules-any" : "ple-rules-all")
+    .querySelectorAll(".ple-rule-row")].map(row => ({
+      field: row.querySelector(".ple-rule-field").value,
+      op: row.querySelector(".ple-rule-op").value,
+      value: row.querySelector(".ple-rule-value").value.trim(),
+    })).filter(rule => rule.value);
+}
+
+function pleCurrentFilter() {
+  const allRules = pleReadRules("all");
+  const anyRules = pleReadRules("any");
+  if (anyRules.length) allRules.push({mode: "any", rules: anyRules});
+  return {
+    editor_version: 1,
+    search: {
+      title: $("ple-search-title").value.trim(),
+      artist: $("ple-search-artist").value.trim(),
+      album: $("ple-search-album").value.trim(),
+    },
+    rules: {mode: "all", rules: allRules},
+  };
+}
+
+function pleRestoreFilter(saved) {
+  const search = saved?.search || {};
+  $("ple-search-title").value = search.title || "";
+  $("ple-search-artist").value = search.artist || "";
+  $("ple-search-album").value = search.album || "";
+  $("ple-rules-all").innerHTML = "";
+  $("ple-rules-any").innerHTML = "";
+  const root = saved?.rules || {mode: "all", rules: []};
+  (root.rules || []).forEach(rule => {
+    if (rule?.rules) {
+      (rule.rules || []).forEach(child => pleAddRule(rule.mode === "any" ? "any" : "all", child));
+    } else {
+      pleAddRule(root.mode === "any" ? "any" : "all", rule);
+    }
+  });
+  if (!$("ple-rules-all").children.length && !$("ple-rules-any").children.length) {
+    pleAddRule("all", {field:"artist", op:"contains", value:""});
+  }
+}
+
+function pleBindInputs() {
+  if (pleInputsBound) return;
+  pleInputsBound = true;
+  ["ple-search-title", "ple-search-artist", "ple-search-album"].forEach(id => {
+    $(id).addEventListener("input", () => {
+      pleDirty = true;
+      clearTimeout(pleSearchTimer);
+      pleSearchTimer = setTimeout(pleRunPreview, 320);
+    });
+  });
+  document.querySelectorAll('input[name="ple-save-type"]').forEach(input => {
+    input.addEventListener("change", () => {
+      $("ple-smart-note").style.display =
+        document.querySelector('input[name="ple-save-type"]:checked')?.value === "smart" ? "block" : "none";
+    });
+  });
+  $("ple-import-file").addEventListener("change", pleImportFile);
+}
+
+async function openPlaylistEditor(playlist = null) {
+  if (!_me?.allow_playlists) return;
+  pleBindInputs();
+  pleEditing = playlist && !playlist.is_system ? playlist : null;
+  pleTracks = [];
+  pleResults = [];
+  pleDirty = false;
+  pleSetStatus("");
+  $("ple-import-status").textContent = "";
+  $("ple-results").innerHTML = '<div class="ple-empty">Track-Suche oder Regeln verwenden.</div>';
+  $("ple-edit-label").textContent = pleEditing ? `Bearbeiten: ${pleEditing.name}` : "Neue Playlist";
+  let saved = {};
+  if (pleEditing) {
+    try { saved = JSON.parse(pleEditing.filters || "{}"); } catch {}
+  }
+  pleRestoreFilter(saved.editor_version === 1 ? saved : {});
+  if (pleEditing) {
+    pleSetStatus("Playlist wird geladen…");
+    const response = await fetch(`/api/playlists/${pleEditing.id}/tracks`);
+    pleTracks = response.ok ? await response.json() : [];
+    pleSetStatus("");
+  }
+  pleRenderTracks();
+  pleDirty = false;
+  $("playlist-editor-modal").style.display = "flex";
+}
+
+function closePlaylistEditor(force = false) {
+  if (!force && pleDirty && !confirm("Änderungen verwerfen und den Editor schließen?")) return;
+  $("ple-save-dialog").style.display = "none";
+  $("playlist-editor-modal").style.display = "none";
+}
+
+async function pleRunPreview() {
+  pleSetStatus("Filter wird angewendet…");
+  try {
+    const response = await fetch("/api/playlist-editor/preview", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({filter:pleCurrentFilter(), sort:pleEditing?.sort || "artist"}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Vorschau fehlgeschlagen");
+    pleResults = data.results || [];
+    pleRenderResults();
+    pleSetStatus(`${pleResults.length} passende Tracks gefunden`);
+  } catch (error) {
+    pleResults = [];
+    pleRenderResults();
+    pleSetStatus(error.message, true);
+  }
+}
+
+function pleRenderResults() {
+  const wrap = $("ple-results");
+  wrap.innerHTML = "";
+  if (!pleResults.length) {
+    wrap.innerHTML = '<div class="ple-empty">Keine Ergebnisse.</div>';
+  } else {
+    pleResults.forEach(track => {
+      const row = document.createElement("div");
+      row.className = "ple-result";
+      row.innerHTML = `<span class="ple-artist">${esc(track.artist || "")}</span>
+        <span class="ple-title">${esc(track.title || track.path || "—")}</span>
+        <span class="ple-year">${track.year || ""}</span><span style="color:var(--accent)">＋</span>`;
+      row.onclick = () => pleAddTrack(track);
+      wrap.appendChild(row);
+    });
+  }
+  const button = $("ple-add-all");
+  button.disabled = !pleResults.length;
+  button.textContent = pleResults.length
+    ? `+ Alle ${pleResults.length} gefilterten hinzufügen`
+    : "+ Alle gefilterten hinzufügen";
+}
+
+function pleAddTrack(track, render = true) {
+  if (pleTracks.some(item => Number(item.id) === Number(track.id))) return false;
+  pleTracks.push(track);
+  pleDirty = true;
+  if (render) pleRenderTracks();
+  return true;
+}
+
+function pleAddAll() {
+  let added = 0;
+  pleResults.forEach(track => { if (pleAddTrack(track, false)) added++; });
+  pleRenderTracks();
+  pleSetStatus(`${added} Tracks hinzugefügt`);
+}
+
+function pleRemoveTrack(index) {
+  pleTracks.splice(index, 1);
+  pleDirty = true;
+  pleRenderTracks();
+}
+
+function pleClear() {
+  if (pleTracks.length && !confirm("Alle Tracks aus der Zusammenstellung entfernen?")) return;
+  pleTracks = [];
+  pleDirty = true;
+  pleRenderTracks();
+}
+
+function pleShuffle() {
+  for (let index = pleTracks.length - 1; index > 0; index--) {
+    const other = Math.floor(Math.random() * (index + 1));
+    [pleTracks[index], pleTracks[other]] = [pleTracks[other], pleTracks[index]];
+  }
+  pleDirty = true;
+  pleRenderTracks();
+}
+
+function pleRenderTracks() {
+  const wrap = $("ple-tracks");
+  wrap.innerHTML = "";
+  $("ple-track-count").textContent = `Playlist (${pleTracks.length} Track${pleTracks.length === 1 ? "" : "s"})`;
+  if (!pleTracks.length) {
+    wrap.innerHTML = '<div class="ple-empty">Noch keine Tracks. Links suchen oder unten zufällig auffüllen.</div>';
+    return;
+  }
+  pleTracks.forEach((track, index) => {
+    const row = document.createElement("div");
+    row.className = "ple-track";
+    row.innerHTML = `<span class="ple-handle" draggable="true">⠿</span>
+      <span class="ple-pos">${index + 1}</span>
+      <span class="ple-artist">${esc(track.artist || "")}</span>
+      <span class="ple-title">${esc(track.title || track.path || "—")}</span>
+      <span class="ple-year">${track.year || ""}</span>
+      <button type="button" title="Entfernen">×</button>`;
+    row.querySelector("button").onclick = () => pleRemoveTrack(index);
+    const handle = row.querySelector(".ple-handle");
+    handle.addEventListener("dragstart", event => {
+      pleDragIndex = index;
+      event.dataTransfer.effectAllowed = "move";
+    });
+    handle.addEventListener("dragend", () => { pleDragIndex = null; });
+    row.addEventListener("dragover", event => { event.preventDefault(); row.classList.add("drag-over"); });
+    row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
+    row.addEventListener("drop", event => {
+      event.preventDefault();
+      row.classList.remove("drag-over");
+      if (pleDragIndex === null || pleDragIndex === index) return;
+      const moved = pleTracks.splice(pleDragIndex, 1)[0];
+      pleTracks.splice(index, 0, moved);
+      pleDirty = true;
+      pleRenderTracks();
+    });
+    wrap.appendChild(row);
+  });
+}
+
+async function pleFill() {
+  const button = $("ple-fill-button");
+  button.disabled = true;
+  pleSetStatus("Zufallstracks werden geladen…");
+  try {
+    const response = await fetch("/api/playlist-editor/fill", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        count:Number($("ple-fill-count").value || 50),
+        filter:pleCurrentFilter(),
+        exclude_ids:pleTracks.map(track => track.id),
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Auffüllen fehlgeschlagen");
+    let added = 0;
+    (data.results || []).forEach(track => { if (pleAddTrack(track, false)) added++; });
+    pleRenderTracks();
+    pleSetStatus(`${added} Tracks hinzugefügt`);
+  } catch (error) {
+    pleSetStatus(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+let pleImportMode = "replace";
+function pleChooseImport(mode) {
+  pleImportMode = mode;
+  $("ple-import-file").value = "";
+  $("ple-import-file").click();
+}
+
+async function pleImportFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    $("ple-import-status").textContent = "Die Datei ist größer als 5 MB.";
+    return;
+  }
+  try {
+    const payload = JSON.parse(await file.text());
+    const response = await fetch("/api/playlist-editor/import", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Import fehlgeschlagen");
+    if (pleImportMode === "replace") pleTracks = [];
+    (data.tracks || []).forEach(track => pleAddTrack(track, false));
+    pleDirty = true;
+    pleRenderTracks();
+    $("ple-import-status").textContent =
+      `${data.matched_count} von ${data.imported_count} Tracks gefunden` +
+      (data.unmatched_count ? ` · ${data.unmatched_count} nicht gefunden` : " · vollständig");
+  } catch (error) {
+    $("ple-import-status").textContent = error.message;
+  }
+}
+
+async function pleDownload(trackIds, name) {
+  const response = await fetch("/api/playlist-editor/export", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({track_ids:trackIds, name}),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || "Export fehlgeschlagen");
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function pleExportEditor() {
+  try {
+    await pleDownload(pleTracks.map(track => track.id), pleEditing?.name || "Adolar-Playlist");
+    pleSetStatus(`${pleTracks.length} Tracks exportiert`);
+  } catch (error) {
+    pleSetStatus(error.message, true);
+  }
+}
+
+function updatePlaylistExportButton() {
+  const playlist = _playlists.find(item => item.id === _activePl);
+  $("btn-playlist-export").style.display = playlist && !playlist.is_system ? "flex" : "none";
+}
+
+async function exportActivePlaylist() {
+  const playlist = _playlists.find(item => item.id === _activePl);
+  if (!playlist || playlist.is_system) return;
+  try {
+    const response = await fetch(`/api/playlists/${playlist.id}/tracks`);
+    const tracks = await response.json();
+    if (!response.ok) throw new Error(tracks.error || "Playlist konnte nicht geladen werden");
+    await pleDownload(tracks.map(track => track.id), playlist.name);
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function pleOpenSaveDialog() {
+  let name = pleEditing?.name || "";
+  if (!name) {
+    const response = await fetch("/api/playlist-editor/defaults");
+    if (response.ok) name = (await response.json()).name;
+  }
+  $("ple-save-name").value = name || "Neue Playlist";
+  const type = pleEditing?.type || "static";
+  const selected = document.querySelector(`input[name="ple-save-type"][value="${type}"]`);
+  if (selected) selected.checked = true;
+  $("ple-smart-note").style.display = type === "smart" ? "block" : "none";
+  $("ple-save-dialog").style.display = "flex";
+  $("ple-save-name").focus();
+  $("ple-save-name").select();
+}
+
+async function pleSave() {
+  const name = $("ple-save-name").value.trim();
+  const type = document.querySelector('input[name="ple-save-type"]:checked')?.value || "static";
+  if (!name) {
+    $("ple-save-name").focus();
+    return;
+  }
+  const button = $("ple-save-confirm");
+  button.disabled = true;
+  const payload = {
+    name, type, filters:pleCurrentFilter(),
+    sort:pleEditing?.sort || "artist",
+    track_ids:pleTracks.map(track => track.id),
+  };
+  try {
+    const response = await fetch(
+      pleEditing ? `/api/playlists/${pleEditing.id}` : "/api/playlists",
+      {method:pleEditing ? "PUT" : "POST", headers:{"Content-Type":"application/json"},
+       body:JSON.stringify(payload)},
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Speichern fehlgeschlagen");
+    pleDirty = false;
+    $("ple-save-dialog").style.display = "none";
+    closePlaylistEditor(true);
+    await loadPlaylists();
+    const saved = _playlists.find(item => item.id === data.id);
+    if (saved) await applyPlaylist(saved);
+  } catch (error) {
+    pleSetStatus(error.message, true);
+    $("ple-save-dialog").style.display = "none";
+  } finally {
+    button.disabled = false;
+  }
+}
+
 // ── Current user / auth ───────────────────────────────────────────────────────
 let _me = null;
+let _adolar4u = { collecting: false, global: {}, user: {} };
+
+async function loadAdolar4UStatus() {
+  if (!_me) return;
+  try {
+    const r = await fetch("/api/adolar4u/status", {cache: "no-store"});
+    if (r.ok) _adolar4u = await r.json();
+  } catch {}
+}
 
 async function loadMe() {
   try {
@@ -5167,20 +6339,15 @@ async function loadMe() {
   }
 
   $("user-menu-name").textContent = _me.username;
+  $("btn-playlist-editor").style.display = _me.allow_playlists ? "flex" : "none";
 
   if (_me.role === "admin") {
     $("btn-user-mgmt").style.display = "flex";
+    $("btn-monitor").style.display = "flex";
   }
 
-  // Hide Last.fm for non-admin
-  if (_me.role !== "admin") {
-    const lfmEl = document.getElementById("lastfm-status");
-    if (lfmEl) lfmEl.style.display = "none";
-    const loveBtn = document.getElementById("player-love");
-    if (loveBtn) loveBtn.style.display = "none";
-    const lovedFilter = document.getElementById("btn-loved-filter");
-    if (lovedFilter) lovedFilter.parentElement.style.display = "none";
-  }
+  await loadAdolar4UStatus();
+  $("btn-adolar4u").style.display = _adolar4u.global?.enabled ? "flex" : "none";
 
   // Show basket only if download is permitted
   if (_me.allow_download) {
@@ -5219,6 +6386,7 @@ async function openUserMgmt() {
   $("usermgmt-modal").style.display = "flex";
   await refreshUserList();
   await refreshAccessSettings();
+  await refreshAdolar4UAdminSettings();
   await refreshBlockedIps();
   await refreshAuditLog();
 }
@@ -5359,6 +6527,338 @@ async function saveAccessSettings() {
     })
   });
   if (!r.ok) alert("Zugriffseinstellungen konnten nicht gespeichert werden.");
+}
+
+async function refreshAdolar4UAdminSettings() {
+  const r = await fetch("/api/admin/adolar4u/settings");
+  if (!r.ok) return;
+  const settings = await r.json();
+  $("setting-adolar4u-enabled").checked = Boolean(settings.enabled);
+  $("setting-adolar4u-analysis").checked = Boolean(settings.audio_analysis);
+  $("setting-adolar4u-collaborative").checked = Boolean(settings.collaborative);
+}
+
+async function saveAdolar4UAdminSettings() {
+  const r = await fetch("/api/admin/adolar4u/settings", {
+    method: "PUT", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      enabled: $("setting-adolar4u-enabled").checked,
+      audio_analysis: $("setting-adolar4u-analysis").checked,
+      collaborative: $("setting-adolar4u-collaborative").checked,
+    })
+  });
+  if (!r.ok) {
+    alert("Adolar4U-Einstellungen konnten nicht gespeichert werden.");
+    return;
+  }
+  await loadAdolar4UStatus();
+}
+
+async function openAdolar4USettings() {
+  $("user-dropdown").classList.remove("open");
+  await loadAdolar4UStatus();
+  const available = Boolean(_adolar4u.global?.enabled);
+  $("adolar4u-available").textContent = available
+    ? "Adolar4U ist auf diesem Server verfügbar."
+    : "Adolar4U ist derzeit global deaktiviert. Es werden keine Hörsignale erfasst.";
+  $("adolar4u-enabled").checked = Boolean(_adolar4u.user?.enabled);
+  $("adolar4u-paused").checked = Boolean(_adolar4u.user?.learning_paused);
+  $("adolar4u-collaborative").checked = Boolean(_adolar4u.user?.collaborative_enabled);
+  $("adolar4u-collaborative").disabled = !_adolar4u.global?.collaborative;
+  $("adolar4u-discovery").value = Math.round(Number(_adolar4u.user?.discovery_level ?? .40) * 100);
+  $("adolar4u-discovery-value").textContent = `${$("adolar4u-discovery").value}%`;
+  $("adolar4u-modal").style.display = "flex";
+}
+
+async function saveAdolar4USettings() {
+  const r = await fetch("/api/adolar4u/settings", {
+    method: "PUT", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      enabled: $("adolar4u-enabled").checked,
+      learning_paused: $("adolar4u-paused").checked,
+      collaborative_enabled: $("adolar4u-collaborative").checked,
+      discovery_level: Number($("adolar4u-discovery").value) / 100,
+    })
+  });
+  if (!r.ok) {
+    alert("Adolar4U-Einstellungen konnten nicht gespeichert werden.");
+    return;
+  }
+  await loadAdolar4UStatus();
+  await loadRadioStations();
+  $("adolar4u-modal").style.display = "none";
+}
+
+let a4uOnboardingStation = null;
+const a4uOnboardingSelection = {artist: [], genre: []};
+const a4uOnboardingTimers = {};
+
+function renderAdolar4UOnboardingSelection(kind) {
+  const target = $(`a4u-onboarding-${kind}-selected`);
+  target.innerHTML = "";
+  a4uOnboardingSelection[kind].forEach(value => {
+    const chip = document.createElement("span");
+    chip.className = "a4u-onboarding-chip";
+    const label = document.createElement("span");
+    label.textContent = value;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "✕";
+    remove.title = `${value} entfernen`;
+    remove.onclick = () => {
+      a4uOnboardingSelection[kind] = a4uOnboardingSelection[kind].filter(item => item !== value);
+      renderAdolar4UOnboardingSelection(kind);
+    };
+    chip.append(label, remove);
+    target.appendChild(chip);
+  });
+  $(`a4u-onboarding-${kind}-count`).textContent = `${a4uOnboardingSelection[kind].length} / 5`;
+  $("a4u-onboarding-submit").disabled = !(
+    a4uOnboardingSelection.artist.length >= 3 && a4uOnboardingSelection.genre.length >= 3
+  );
+}
+
+function addAdolar4UOnboardingChoice(kind, value) {
+  const selected = a4uOnboardingSelection[kind];
+  if (selected.length >= 5 || selected.some(item => item.toLocaleLowerCase() === value.toLocaleLowerCase())) return;
+  selected.push(value);
+  renderAdolar4UOnboardingSelection(kind);
+  $(`a4u-onboarding-${kind}-results`).style.display = "none";
+  $(`a4u-onboarding-${kind}-search`).value = "";
+}
+
+async function searchAdolar4UOnboardingOptions(kind) {
+  const query = $(`a4u-onboarding-${kind}-search`).value.trim();
+  const results = $(`a4u-onboarding-${kind}-results`);
+  try {
+    const response = await fetch(`/api/adolar4u/onboarding/options?kind=${kind}&q=${encodeURIComponent(query)}&limit=12`);
+    if (!response.ok) throw new Error();
+    const options = await response.json();
+    results.innerHTML = "";
+    options.filter(option => !a4uOnboardingSelection[kind].some(
+      item => item.toLocaleLowerCase() === option.value.toLocaleLowerCase()
+    )).forEach(option => {
+      const button = document.createElement("button");
+      button.type = "button";
+      const name = document.createElement("span");
+      name.textContent = option.value;
+      const count = document.createElement("span");
+      count.style.color = "var(--text-tertiary)";
+      count.textContent = `${option.track_count} Titel · OK`;
+      button.append(name, count);
+      button.onclick = () => addAdolar4UOnboardingChoice(kind, option.value);
+      results.appendChild(button);
+    });
+    results.style.display = results.childElementCount ? "block" : "none";
+  } catch {
+    results.style.display = "none";
+  }
+}
+
+function queueAdolar4UOnboardingSearch(kind) {
+  clearTimeout(a4uOnboardingTimers[kind]);
+  a4uOnboardingTimers[kind] = setTimeout(() => searchAdolar4UOnboardingOptions(kind), 180);
+}
+
+function openAdolar4UOnboarding(station) {
+  a4uOnboardingStation = station;
+  a4uOnboardingSelection.artist = [...(_adolar4u.onboarding?.artists || [])].slice(0, 5);
+  a4uOnboardingSelection.genre = [...(_adolar4u.onboarding?.genres || [])].slice(0, 5);
+  $("a4u-onboarding-error").textContent = "";
+  $("a4u-onboarding-modal").style.display = "flex";
+  renderAdolar4UOnboardingSelection("artist");
+  renderAdolar4UOnboardingSelection("genre");
+}
+
+function closeAdolar4UOnboarding() {
+  $("a4u-onboarding-modal").style.display = "none";
+  a4uOnboardingStation = null;
+}
+
+async function completeAdolar4UOnboarding() {
+  const button = $("a4u-onboarding-submit");
+  if (button.disabled) return;
+  button.disabled = true;
+  $("a4u-onboarding-error").textContent = "Basisscore und erste Playlist werden erstellt…";
+  try {
+    const response = await fetch("/api/adolar4u/onboarding", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        artists: a4uOnboardingSelection.artist,
+        genres: a4uOnboardingSelection.genre,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Basisscore konnte nicht erstellt werden.");
+    _adolar4u.onboarding = data.onboarding;
+    _adolar4u.user.enabled = true;
+    const station = a4uOnboardingStation;
+    $("a4u-onboarding-modal").style.display = "none";
+    a4uOnboardingStation = null;
+    await startRadio(station, data.initial_playlist || []);
+  } catch (error) {
+    $("a4u-onboarding-error").textContent = error.message;
+    button.disabled = false;
+  }
+}
+
+async function deleteAdolar4UProfile() {
+  if (!confirm("Persönliche Adolar4U-Lerndaten wirklich löschen?")) return;
+  const r = await fetch("/api/adolar4u/profile", {method: "DELETE"});
+  if (r.ok) {
+    await loadAdolar4UStatus();
+    alert("Deine Adolar4U-Lerndaten wurden gelöscht.");
+  }
+}
+
+const A4U_DRIVER_LABELS = {
+  play_count: "Bisherige Wiedergaben",
+  explicit_favorite: "Favorit/Loved",
+  personal_playlist: "Persönliche Playlist",
+  completed_history: "Vollständig gehört",
+  same_hour: "Passende Tageszeit",
+  artist_affinity: "Künstler-Affinität",
+  genre_affinity: "Genre-Affinität",
+  average_completion: "Hohe Hördauer",
+  rediscovery: "Lange nicht gehört",
+  discovery: "Entdeckung",
+  random: "Kontrollierter Zufall",
+  early_skip: "Frühe Abbrüche",
+  skip_history: "Bisherige Abbrüche",
+  recency: "Wiederholungssperre",
+};
+const A4U_BUCKET_LABELS = {
+  anchor: "Favoriten-Anker", similar: "Ähnlich",
+  familiar: "Vertraut", discovery: "Entdeckung",
+};
+const A4U_OUTCOME_LABELS = {
+  completed: "Vollständig gehört", skipped: "Übersprungen",
+  started: "Gestartet", without_outcome: "Noch ohne Reaktion",
+};
+
+function a4uPercent(value) {
+  return value == null ? "–" : `${Math.round(Number(value) * 100)}%`;
+}
+
+function a4uDate(value) {
+  if (!value) return "–";
+  return new Date(Number(value) * 1000).toLocaleString("de-DE", {
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function a4uChangeList(items) {
+  const changed = (items || []).filter(item => Math.abs(Number(item.delta)) >= .005).slice(0, 8);
+  if (!changed.length) return `<span style="color:var(--text-tertiary)">Noch keine messbare Veränderung</span>`;
+  return changed.map(item => {
+    const delta = Number(item.delta);
+    return `<span style="display:inline-flex;gap:4px;padding:3px 7px;border-radius:99px;background:var(--bg-secondary);color:${delta >= 0 ? '#78b878' : '#d88787'}">
+      ${esc(item.name)} ${delta >= 0 ? "▲" : "▼"}${Math.abs(delta).toFixed(2)}
+    </span>`;
+  }).join(" ");
+}
+
+function a4uDriverList(items, negative = false) {
+  if (!(items || []).length) return `<span style="color:var(--text-tertiary)">Noch keine Daten</span>`;
+  return items.slice(0, 6).map(item => `
+    <div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0">
+      <span>${esc(A4U_DRIVER_LABELS[item.key] || item.key)}</span>
+      <strong style="color:${negative ? '#d88787' : '#78b878'}">${negative ? '−' : '+'}${Number(item.average).toFixed(2)}</strong>
+    </div>`).join("");
+}
+
+function renderAdolar4UHistory(data) {
+  const summary = data.summary || {};
+  const outcomes = summary.outcomes || {};
+  const profile = data.profile || {};
+  const latest = profile.latest || {};
+  $("adolar4u-history-summary").innerHTML = `
+    <div class="a4u-history-card"><strong>${Number(summary.recommendations || 0)}</strong><span>Vorschläge</span></div>
+    <div class="a4u-history-card"><strong>${Number(outcomes.completed || 0)}</strong><span>vollständig gehört</span></div>
+    <div class="a4u-history-card"><strong>${Number(outcomes.skipped || 0)}</strong><span>übersprungen</span></div>
+    <div class="a4u-history-card"><strong>${a4uPercent(summary.average_completion)}</strong><span>Ø Hördauer</span></div>
+    <div class="a4u-history-card"><strong>${Number(summary.early_skips || 0)}</strong><span>frühe Abbrüche</span></div>`;
+
+  $("adolar4u-history-buckets").innerHTML = (summary.buckets || []).map(bucket => `
+    <div style="display:grid;grid-template-columns:minmax(110px,1fr) 52px 58px 76px;gap:8px;padding:7px 0;border-bottom:.5px solid var(--border-subtle);align-items:center">
+      <span>${esc(A4U_BUCKET_LABELS[bucket.bucket] || bucket.bucket)}</span>
+      <strong>${Number(bucket.count || 0)}</strong>
+      <span>${a4uPercent(bucket.share)}</span>
+      <span title="Durchschnittliche Hördauer">${a4uPercent(bucket.average_completion)}</span>
+    </div>`).join("");
+
+  $("adolar4u-history-positive").innerHTML = a4uDriverList(summary.positive_drivers);
+  $("adolar4u-history-negative").innerHTML = a4uDriverList(summary.negative_drivers, true);
+  $("adolar4u-profile-artists").innerHTML = a4uChangeList(profile.artist_changes);
+  $("adolar4u-profile-genres").innerHTML = a4uChangeList(profile.genre_changes);
+  const topArtists = (latest.artists || []).slice(0, 8).map(item => esc(item.name)).join(" · ");
+  const topGenres = (latest.genres || []).slice(0, 8).map(item => esc(item.name)).join(" · ");
+  $("adolar4u-profile-current").innerHTML = `
+    <div><strong>Aktuelle Künstler:</strong> ${topArtists || "Noch keine"}</div>
+    <div style="margin-top:5px"><strong>Aktuelle Genres:</strong> ${topGenres || "Noch keine"}</div>
+    <div style="margin-top:5px;color:var(--text-tertiary)">Algorithmus: ${esc(profile.algorithm_version || "–")} · letzter Stand ${a4uDate(profile.latest_at)}</div>`;
+
+  const recommendations = data.recommendations || [];
+  $("adolar4u-history-empty").style.display = recommendations.length ? "none" : "block";
+  $("adolar4u-history-list").innerHTML = recommendations.map(item => {
+    const diagnostics = item.diagnostics || {};
+    const bonuses = Object.entries(diagnostics.bonuses || {}).map(([key, value]) =>
+      `<span>${esc(A4U_DRIVER_LABELS[key] || key)} <b style="color:#78b878">+${Number(value).toFixed(2)}</b></span>`
+    );
+    bonuses.push(`<span>Kontrollierter Zufall <b style="color:#78b878">+${Number(diagnostics.random_bonus || 0).toFixed(2)}</b></span>`);
+    const penalties = Object.entries(diagnostics.penalties || {}).map(([key, value]) =>
+      `<span>${esc(A4U_DRIVER_LABELS[key] || key)} <b style="color:#d88787">−${Number(value).toFixed(2)}</b></span>`
+    );
+    const facts = diagnostics.facts || {};
+    return `<details style="border-bottom:.5px solid var(--border-subtle);padding:9px 0">
+      <summary style="cursor:pointer;display:grid;grid-template-columns:minmax(160px,1fr) 110px 110px;gap:10px;align-items:center;list-style:none">
+        <span><strong>${esc(item.title || "Unbekannt")}</strong><br><small style="color:var(--text-tertiary)">${esc(item.artist || "")} · ${a4uDate(item.created_at)}</small></span>
+        <span><small>${esc(A4U_BUCKET_LABELS[item.bucket] || item.bucket)}</small><br>${esc(item.reason)}</span>
+        <span style="text-align:right"><small>${esc(A4U_OUTCOME_LABELS[item.outcome] || item.outcome)}</small><br><strong>${a4uPercent(item.completion_ratio)}</strong></span>
+      </summary>
+      <div style="margin-top:9px;padding:10px;background:var(--bg-secondary);border-radius:8px;font-size:12px;color:var(--text-secondary)">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:7px">
+          <strong>Score ${Number(item.score).toFixed(2)}</strong>
+          <span>Kandidatenrang ${Number(item.candidate_rank || 0)} / ${Number(item.candidate_count || 0)}</span>
+          <span>Discovery ${Math.round(Number(item.discovery_level || 0) * 100)}%</span>
+          <span>zuletzt gehört ${facts.hours_since_played == null ? "nie" : `${Number(facts.hours_since_played).toFixed(1)} h zuvor`}</span>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">${[...bonuses, ...penalties].join("")}</div>
+      </div>
+    </details>`;
+  }).join("");
+  $("adolar4u-history-retention").textContent = `Diagnosedaten werden automatisch nach ${data.retention_days || 60} Tagen entfernt und beim Löschen der Lerndaten mitgelöscht.`;
+}
+
+async function loadAdolar4UHistory() {
+  const days = Number($("adolar4u-history-days").value || 7);
+  $("adolar4u-history-loading").style.display = "block";
+  try {
+    const r = await fetch(`/api/adolar4u/history?days=${days}&limit=100`);
+    if (!r.ok) throw new Error("history unavailable");
+    renderAdolar4UHistory(await r.json());
+  } catch {
+    $("adolar4u-history-empty").textContent = "Die Lernhistorie konnte nicht geladen werden.";
+    $("adolar4u-history-empty").style.display = "block";
+  } finally {
+    $("adolar4u-history-loading").style.display = "none";
+  }
+}
+
+async function openAdolar4UHistory() {
+  $("adolar4u-modal").style.display = "none";
+  $("adolar4u-history-modal").style.display = "flex";
+  await loadAdolar4UHistory();
+}
+
+function exportAdolar4UHistory() {
+  const days = Number($("adolar4u-history-days").value || 60);
+  const link = document.createElement("a");
+  link.href = `/api/adolar4u/history/export?days=${days}`;
+  link.download = "";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 async function refreshBlockedIps() {
@@ -5548,6 +7048,16 @@ setInterval(checkDiscoBadge, 30000);
       </div>
     </div>
 
+    <div style="border-top:0.5px solid var(--border-subtle);padding:18px 0;margin-bottom:4px">
+      <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Adolar4U · Spezialmodul</div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:10px 16px;align-items:center;font-size:13px;color:var(--text-secondary)">
+        <label for="setting-adolar4u-enabled">Adolar4U global bereitstellen</label><input id="setting-adolar4u-enabled" type="checkbox" onchange="saveAdolar4UAdminSettings()">
+        <label for="setting-adolar4u-analysis">Lokale Audioanalyse erlauben (in Vorbereitung)</label><input id="setting-adolar4u-analysis" type="checkbox" onchange="saveAdolar4UAdminSettings()">
+        <label for="setting-adolar4u-collaborative">Aggregiertes Lernen aus anderen Plays erlauben (in Vorbereitung)</label><input id="setting-adolar4u-collaborative" type="checkbox" onchange="saveAdolar4UAdminSettings()">
+      </div>
+      <p style="font-size:11px;line-height:1.5;color:var(--text-tertiary);margin:10px 0 0">Standardmäßig aus. Jeder Benutzer muss das persönliche Lernen zusätzlich selbst aktivieren.</p>
+    </div>
+
     <!-- Blocked IPs -->
     <div id="usermgmt-blocks-wrap" style="margin-bottom:20px;display:none">
       <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Gesperrte IPs</div>
@@ -5574,12 +7084,285 @@ setInterval(checkDiscoBadge, 30000);
   </div>
 </div>
 
+<!-- ── Admin system monitor ── -->
+<div id="monitor-modal" class="modal-backdrop" style="z-index:10001" onclick="if(event.target===this)closeMonitor()">
+  <div class="modal-box" style="width:min(880px,96vw)">
+    <div class="modal-head">
+      <div class="modal-title"><i class="ti ti-activity-heartbeat" style="color:var(--accent)"></i> Systemmonitor</div>
+      <button class="modal-close" onclick="closeMonitor()" aria-label="Monitor schließen">✕</button>
+    </div>
+    <div class="monitor-metrics">
+      <div class="monitor-card">
+        <div class="monitor-card-head"><span class="monitor-card-label">CPU-Auslastung</span><span class="monitor-card-value" id="monitor-cpu-value">–</span></div>
+        <div class="monitor-bar"><span id="monitor-cpu-bar"></span></div>
+        <div id="monitor-cpu-detail" style="font-size:11px;color:var(--text-tertiary);margin-top:7px">–</div>
+      </div>
+      <div class="monitor-card">
+        <div class="monitor-card-head"><span class="monitor-card-label">Arbeitsspeicher</span><span class="monitor-card-value" id="monitor-ram-value">–</span></div>
+        <div class="monitor-bar"><span id="monitor-ram-bar"></span></div>
+        <div id="monitor-ram-detail" style="font-size:11px;color:var(--text-tertiary);margin-top:7px">–</div>
+      </div>
+    </div>
+    <div class="monitor-section-title">Aktuelle Verbindungen <span style="font-weight:400;text-transform:none;letter-spacing:0">(in den letzten 2 Minuten aktiv)</span></div>
+    <div id="monitor-current" class="monitor-table-wrap"><div class="monitor-empty">Wird geladen…</div></div>
+    <div class="monitor-section-title">Letzte 10 Verbindungen</div>
+    <div id="monitor-recent" class="monitor-table-wrap"><div class="monitor-empty">Wird geladen…</div></div>
+    <div id="monitor-status" style="margin-top:10px;font-size:11px;color:var(--text-tertiary)"></div>
+  </div>
+</div>
+
+<!-- ── Personal Adolar4U settings ── -->
+<div id="lastfm-modal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);align-items:center;justify-content:center" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:var(--bg-primary);border:0.5px solid var(--border-medium);border-radius:12px;padding:28px 32px;width:520px;max-width:94vw;position:relative">
+    <button onclick="$('lastfm-modal').style.display='none'" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer">✕</button>
+    <div style="font-size:17px;font-weight:700;color:var(--text-primary);margin-bottom:8px"><i class="ti ti-brand-lastfm" style="color:#d51007"></i> Persönliches Last.fm</div>
+    <p id="lastfm-modal-status" style="font-size:13px;line-height:1.5;color:var(--text-secondary)"></p>
+    <label id="lastfm-auto-love-row" style="display:none;align-items:center;justify-content:space-between;gap:16px;margin:18px 0;font-size:13px;color:var(--text-secondary)">
+      <span>Adolar-Favoriten automatisch auch bei Last.fm als Loved markieren</span>
+      <input id="lastfm-auto-love" type="checkbox" onchange="saveLastFmSettings()">
+    </label>
+    <div id="lastfm-sync-actions" style="display:none;gap:8px;flex-wrap:wrap;margin:12px 0">
+      <button id="lastfm-modal-loved-sync" class="radio-secondary-btn" onclick="startLovedSync()"><i class="ti ti-heart"></i> Loved-Titel synchronisieren</button>
+      <button class="radio-secondary-btn" onclick="startLastFmPlaycountSync()"><i class="ti ti-chart-bar"></i> Playcounts importieren</button>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
+      <button id="lastfm-modal-disconnect" class="radio-secondary-btn" style="display:none" onclick="lfmDisconnect()"><i class="ti ti-unlink"></i> Trennen</button>
+      <button id="lastfm-modal-connect" class="radio-primary-btn" onclick="location.href='/api/lastfm/auth'"><i class="ti ti-link"></i> Mit Last.fm verbinden</button>
+    </div>
+  </div>
+</div>
+
+<div id="a4u-onboarding-modal" style="display:none;position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,.68);align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)closeAdolar4UOnboarding()">
+  <div style="background:var(--bg-primary);border:.5px solid var(--border-medium);border-radius:12px;padding:26px 30px;width:620px;max-width:96vw;max-height:90vh;overflow-y:auto;position:relative">
+    <button onclick="closeAdolar4UOnboarding()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer">✕</button>
+    <div style="font-size:18px;font-weight:700;color:var(--text-primary);margin-bottom:8px"><i class="ti ti-sparkles" style="color:var(--accent)"></i> Dein Adolar4U-Start</div>
+    <p style="font-size:13px;line-height:1.55;color:var(--text-secondary);margin:0 20px 8px 0">Adolar4U ist dein persönlicher Radiosender. Er lernt aus deinem Hörverhalten und passt die Musikauswahl mit der Zeit immer besser an dich an. Für einen guten Start wählst du jetzt einige Favoriten aus deinem Katalog.</p>
+
+    <div class="a4u-onboarding-step">
+      <div class="a4u-onboarding-label"><span>Lieblingsinterpreten <small style="font-weight:400;color:var(--text-tertiary)">(mindestens 3)</small></span><span id="a4u-onboarding-artist-count">0 / 5</span></div>
+      <div class="a4u-onboarding-search">
+        <input id="a4u-onboarding-artist-search" type="search" placeholder="Interpret im Katalog suchen…" autocomplete="off" oninput="queueAdolar4UOnboardingSearch('artist')" onfocus="searchAdolar4UOnboardingOptions('artist')">
+      </div>
+      <div id="a4u-onboarding-artist-results" class="a4u-onboarding-results"></div>
+      <div id="a4u-onboarding-artist-selected" class="a4u-onboarding-selected"></div>
+    </div>
+
+    <div class="a4u-onboarding-step">
+      <div class="a4u-onboarding-label"><span>Lieblingsgenres <small style="font-weight:400;color:var(--text-tertiary)">(mindestens 3)</small></span><span id="a4u-onboarding-genre-count">0 / 5</span></div>
+      <div class="a4u-onboarding-search">
+        <input id="a4u-onboarding-genre-search" type="search" placeholder="Genre im Katalog suchen…" autocomplete="off" oninput="queueAdolar4UOnboardingSearch('genre')" onfocus="searchAdolar4UOnboardingOptions('genre')">
+      </div>
+      <div id="a4u-onboarding-genre-results" class="a4u-onboarding-results"></div>
+      <div id="a4u-onboarding-genre-selected" class="a4u-onboarding-selected"></div>
+    </div>
+
+    <div id="a4u-onboarding-error" style="min-height:18px;margin-top:13px;font-size:12px;color:var(--text-tertiary)"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:5px">
+      <button class="radio-secondary-btn" onclick="closeAdolar4UOnboarding()">Später</button>
+      <button id="a4u-onboarding-submit" class="radio-primary-btn" onclick="completeAdolar4UOnboarding()" disabled><i class="ti ti-wand"></i> Basisscore erstellen</button>
+    </div>
+  </div>
+</div>
+
+<div id="adolar4u-modal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);align-items:center;justify-content:center" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:var(--bg-primary);border:0.5px solid var(--border-medium);border-radius:12px;padding:28px 32px;width:520px;max-width:94vw;position:relative">
+    <button onclick="$('adolar4u-modal').style.display='none'" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer">✕</button>
+    <div style="font-size:17px;font-weight:700;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-sparkles" style="color:var(--accent)"></i> Adolar4U</div>
+    <p id="adolar4u-available" style="font-size:12px;line-height:1.5;color:var(--text-tertiary)"></p>
+    <div style="display:grid;grid-template-columns:1fr auto;gap:13px 16px;align-items:center;font-size:13px;color:var(--text-secondary);margin:18px 0">
+      <label for="adolar4u-enabled">Persönliches Lernen aktivieren</label><input id="adolar4u-enabled" type="checkbox">
+      <label for="adolar4u-paused">Lernen vorübergehend pausieren</label><input id="adolar4u-paused" type="checkbox">
+      <label for="adolar4u-collaborative">Aggregierte Signale anderer Benutzer verwenden (in Vorbereitung)</label><input id="adolar4u-collaborative" type="checkbox">
+    </div>
+    <label for="adolar4u-discovery" style="display:block;font-size:13px;color:var(--text-secondary);margin-bottom:7px">Überraschungsanteil: <strong id="adolar4u-discovery-value">40%</strong></label>
+    <input id="adolar4u-discovery" type="range" min="0" max="50" value="15" style="width:100%" oninput="$('adolar4u-discovery-value').textContent=this.value+'%'">
+    <div style="display:flex;justify-content:space-between;gap:8px;margin-top:22px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="radio-secondary-btn" onclick="openAdolar4UHistory()"><i class="ti ti-history"></i> Lernhistorie</button>
+        <button class="radio-secondary-btn" onclick="deleteAdolar4UProfile()"><i class="ti ti-trash"></i> Lerndaten löschen</button>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="radio-secondary-btn" onclick="$('adolar4u-modal').style.display='none'">Abbrechen</button>
+        <button class="radio-primary-btn" onclick="saveAdolar4USettings()"><i class="ti ti-device-floppy"></i> Speichern</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="adolar4u-history-modal" style="display:none;position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.68);align-items:center;justify-content:center" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:var(--bg-primary);border:.5px solid var(--border-medium);border-radius:12px;padding:24px 28px;width:920px;max-width:96vw;max-height:92vh;overflow:auto;position:relative">
+    <button onclick="$('adolar4u-history-modal').style.display='none'" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer">✕</button>
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;padding-right:24px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:17px;font-weight:700;color:var(--text-primary)"><i class="ti ti-history" style="color:var(--accent)"></i> Adolar4U-Lernhistorie</div>
+        <p style="font-size:12px;color:var(--text-tertiary);margin:5px 0 0">Warum Titel vorgeschlagen wurden und wie du darauf reagiert hast.</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--text-secondary)">Zeitraum
+          <select id="adolar4u-history-days" onchange="loadAdolar4UHistory()" style="margin-left:6px;background:var(--bg-secondary);color:var(--text-primary);border:.5px solid var(--border-medium);border-radius:6px;padding:5px 8px">
+            <option value="7">7 Tage</option><option value="14">14 Tage</option><option value="30">30 Tage</option><option value="60">60 Tage</option>
+          </select>
+        </label>
+        <button class="radio-secondary-btn" onclick="exportAdolar4UHistory()" title="Vollständige Lerndaten des gewählten Zeitraums herunterladen">
+          <i class="ti ti-file-export"></i> Analyse-Export
+        </button>
+      </div>
+    </div>
+    <div id="adolar4u-history-loading" style="padding:30px;text-align:center;color:var(--text-tertiary)">Lernhistorie wird geladen …</div>
+    <div id="adolar4u-history-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px;margin:20px 0"></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">
+      <section class="a4u-history-section">
+        <h3>Kandidatengruppen</h3>
+        <div style="display:grid;grid-template-columns:minmax(110px,1fr) 52px 58px 76px;gap:8px;font-size:10px;text-transform:uppercase;color:var(--text-tertiary);padding-bottom:4px"><span>Gruppe</span><span>Anzahl</span><span>Anteil</span><span>Ø gehört</span></div>
+        <div id="adolar4u-history-buckets"></div>
+      </section>
+      <section class="a4u-history-section">
+        <h3>Durchschnittliche positive Einflüsse</h3>
+        <div id="adolar4u-history-positive"></div>
+      </section>
+      <section class="a4u-history-section">
+        <h3>Durchschnittliche Abzüge</h3>
+        <div id="adolar4u-history-negative"></div>
+      </section>
+      <section class="a4u-history-section">
+        <h3>Aktuelles Geschmacksprofil</h3>
+        <div id="adolar4u-profile-current" style="font-size:12px;line-height:1.45;color:var(--text-secondary)"></div>
+      </section>
+    </div>
+    <section class="a4u-history-section" style="margin-top:14px">
+      <h3>Veränderung im gewählten Zeitraum</h3>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px"><strong>Künstler</strong><div id="adolar4u-profile-artists" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px"></div></div>
+      <div style="font-size:12px;color:var(--text-secondary)"><strong>Genres</strong><div id="adolar4u-profile-genres" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px"></div></div>
+    </section>
+    <section class="a4u-history-section" style="margin-top:14px">
+      <h3>Letzte Entscheidungen</h3>
+      <div id="adolar4u-history-empty" style="display:none;padding:18px 0;color:var(--text-tertiary)">Für diesen Zeitraum liegen noch keine Empfehlungen vor.</div>
+      <div id="adolar4u-history-list"></div>
+    </section>
+    <p id="adolar4u-history-retention" style="font-size:11px;color:var(--text-tertiary);margin:14px 0 0"></p>
+  </div>
+</div>
+
+<style>
+  .a4u-history-card,.a4u-history-section{background:var(--bg-card);border:.5px solid var(--border-subtle);border-radius:9px;padding:12px}
+  .a4u-history-card{display:flex;flex-direction:column;gap:3px}.a4u-history-card strong{font-size:19px;color:var(--text-primary)}.a4u-history-card span{font-size:11px;color:var(--text-tertiary)}
+  .a4u-history-section h3{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-tertiary);margin:0 0 10px}
+  @media(max-width:640px) { #adolar4u-history-modal>div{padding:20px 14px!important}.a4u-history-card{padding:9px}#adolar4u-history-list summary{grid-template-columns:1fr!important} }
+</style>
+
+<div id="playlist-editor-modal" role="dialog" aria-modal="true" aria-labelledby="ple-heading">
+  <div id="playlist-editor-shell" style="position:relative">
+    <header class="ple-header">
+      <strong id="ple-heading">PLAYLIST EDITOR</strong>
+      <span id="ple-edit-label" style="color:var(--text-tertiary);font-size:12px"></span>
+      <span class="ple-spacer"></span>
+      <button class="ple-secondary" type="button" onclick="closePlaylistEditor()">Schließen</button>
+    </header>
+    <div class="ple-body">
+      <section class="ple-left" aria-label="Bibliothek und Filter">
+        <div class="ple-tools">
+          <details class="ple-tool" open>
+            <summary>Track-Suche</summary>
+            <div class="ple-tool-content">
+              <div class="ple-field-stack">
+                <input class="ple-input" id="ple-search-title" placeholder="Track" autocomplete="off">
+                <input class="ple-input" id="ple-search-artist" placeholder="Künstler" autocomplete="off">
+                <input class="ple-input" id="ple-search-album" placeholder="Album" autocomplete="off">
+              </div>
+            </div>
+          </details>
+          <details class="ple-tool">
+            <summary>Regel-Playlist</summary>
+            <div class="ple-tool-content">
+              <div class="ple-rule-group">
+                <div class="ple-rule-head"><span>Alle der folgenden</span>
+                  <button class="ple-mini-btn" type="button" onclick="pleAddRule('all')">+ Regel</button></div>
+                <div id="ple-rules-all"></div>
+              </div>
+              <div class="ple-rule-group">
+                <div class="ple-rule-head"><span>Eines der folgenden</span>
+                  <button class="ple-mini-btn" type="button" onclick="pleAddRule('any')">+ Regel</button></div>
+                <div id="ple-rules-any"></div>
+              </div>
+              <button class="ple-primary ple-wide" type="button" onclick="pleRunPreview()">Regeln anwenden</button>
+            </div>
+          </details>
+          <details class="ple-tool">
+            <summary>Playlist-Import</summary>
+            <div class="ple-tool-content">
+              <div class="ple-note" style="margin-top:0">Portable <b>.adolarplaylist</b>-Dateien aus Adolar Web oder Adolar Disco importieren.</div>
+              <input id="ple-import-file" type="file" accept=".adolarplaylist,.json,application/json" hidden>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:9px">
+                <button class="ple-mini-btn" type="button" onclick="pleChooseImport('replace')">Ersetzen</button>
+                <button class="ple-mini-btn" type="button" onclick="pleChooseImport('append')">Anhängen</button>
+              </div>
+              <div id="ple-import-status" class="ple-note"></div>
+            </div>
+          </details>
+        </div>
+        <div class="ple-results" id="ple-results">
+          <div class="ple-empty">Track-Suche oder Regeln verwenden.</div>
+        </div>
+        <div class="ple-add-all">
+          <button class="ple-secondary" id="ple-add-all" type="button" onclick="pleAddAll()" disabled>+ Alle gefilterten hinzufügen</button>
+        </div>
+      </section>
+      <section class="ple-right" aria-label="Playlist-Zusammenstellung">
+        <div class="ple-playlist-head">
+          <span id="ple-track-count">Playlist (0 Tracks)</span>
+          <button class="ple-secondary" type="button" onclick="pleShuffle()">Mischen</button>
+          <button class="ple-danger" type="button" onclick="pleClear()">Leeren</button>
+        </div>
+        <div class="ple-tracks" id="ple-tracks">
+          <div class="ple-empty">Noch keine Tracks. Links suchen oder unten zufällig auffüllen.</div>
+        </div>
+        <div class="ple-fill">
+          <div class="ple-fill-row">
+            <span style="font-size:12px;color:var(--text-secondary)">Tracks auffüllen:</span>
+            <input class="ple-input" id="ple-fill-count" type="number" value="50" min="1" max="500">
+            <button class="ple-primary" id="ple-fill-button" type="button" onclick="pleFill()">Zufällig auffüllen</button>
+          </div>
+          <div class="ple-note">Verwendet die aktuelle Suche und die Regeln.</div>
+        </div>
+        <footer class="ple-actions">
+          <span id="ple-status"></span><span class="ple-spacer"></span>
+          <button class="ple-secondary" type="button" onclick="pleExportEditor()">Playlist exportieren</button>
+          <button class="ple-secondary" type="button" onclick="closePlaylistEditor()">Abbrechen</button>
+          <button class="ple-primary" type="button" onclick="pleOpenSaveDialog()">Speichern</button>
+        </footer>
+      </section>
+    </div>
+    <div id="ple-save-dialog">
+      <div class="ple-save-card">
+        <div style="font-weight:700;margin-bottom:10px">Playlist speichern</div>
+        <label for="ple-save-name" style="display:block;color:var(--text-secondary);font-size:12px;margin-bottom:5px">Name</label>
+        <input class="ple-input" id="ple-save-name" maxlength="120">
+        <div class="ple-type-options">
+          <label class="ple-type-option">
+            <input type="radio" name="ple-save-type" value="smart">
+            <span><b style="color:var(--text-primary)">Smart</b><br>Filter werden bei jedem Aufruf neu ausgeführt.</span>
+          </label>
+          <label class="ple-type-option">
+            <input type="radio" name="ple-save-type" value="static" checked>
+            <span><b style="color:var(--text-primary)">Statisch</b><br>Die aktuelle Trackliste bleibt unverändert gespeichert.</span>
+          </label>
+        </div>
+        <div id="ple-smart-note" class="ple-note">Bei Smart werden manuell gelöschte Titel und die Reihenfolge nicht gespeichert – entscheidend sind Suche und Regeln.</div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+          <button class="ple-secondary" type="button" onclick="$('ple-save-dialog').style.display='none'">Abbrechen</button>
+          <button class="ple-primary" id="ple-save-confirm" type="button" onclick="pleSave()">OK</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="about-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);align-items:center;justify-content:center" onclick="if(event.target===this)this.style.display='none'">
   <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:32px 40px;min-width:280px;text-align:center;position:relative">
     <button onclick="document.getElementById('about-modal').style.display='none'" style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer;line-height:1">✕</button>
     <img src="/static/logo.svg" width="48" height="48" alt="Adolar" style="margin-bottom:12px">
     <div style="font-family:'Orbitron',sans-serif;font-size:1.3rem;font-weight:700;color:var(--accent);margin-bottom:4px">Adolar</div>
-    <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:16px">Version v1.4.0</div>
+    <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:16px">Version v1.5.0</div>
     <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:8px">(c) PolzeSoft 2026</div>
     <a href="https://polze.net" target="_blank" style="color:var(--accent);font-size:var(--text-sm);display:block;margin-bottom:4px">https://polze.net</a>
     <a href="mailto:adolar@polze.net" style="color:var(--accent);font-size:var(--text-sm)">adolar@polze.net</a>

@@ -86,6 +86,8 @@
     #btn-love { color: var(--text-tertiary); }
     #btn-love:hover { color: #e03e3e; }
     #btn-love.loved { color: #e03e3e; }
+    #btn-favorite { color: var(--text-tertiary); }
+    #btn-favorite:hover, #btn-favorite.favorite { color: #e6b94f; }
 
     #progress-wrap {
       padding: 0 10px 6px;
@@ -130,6 +132,7 @@
   <button class="ctrl" id="btn-prev" title="Zurück"><i class="ti ti-player-skip-back"></i></button>
   <button class="ctrl" id="btn-play" title="Play/Pause"><i class="ti ti-player-play"></i></button>
   <button class="ctrl" id="btn-next" title="Weiter"><i class="ti ti-player-skip-forward"></i></button>
+  <button class="ctrl" id="btn-favorite" title="Zu Favoriten"><i class="ti ti-star"></i></button>
   <button class="ctrl" id="btn-love" title="Bei Last.fm liken"><i class="ti ti-heart"></i></button>
 </div>
 
@@ -155,7 +158,7 @@ function artistColor(name) {
   return `hsl(${h % 360}, 55%, 40%)`;
 }
 
-function setTrack(track, playing, loved) {
+function setTrack(track, playing, loved, favorite) {
   currentTrack = track;
   document.getElementById("not-playing").style.display = "none";
   document.getElementById("cover-wrap").style.display = "";
@@ -178,6 +181,7 @@ function setTrack(track, playing, loved) {
 
   setPlaying(playing);
   setLoved(loved);
+  setFavorite(favorite);
 }
 
 function makePh(track) {
@@ -204,12 +208,22 @@ function setLoved(loved) {
   btn.style.display = lfmConnected ? "" : "none";
 }
 
+function setFavorite(favorite) {
+  const btn = document.getElementById("btn-favorite");
+  btn.classList.toggle("favorite", favorite);
+  btn.title = favorite ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen";
+  btn.innerHTML = favorite
+    ? `<i class="ti ti-star-filled"></i>`
+    : `<i class="ti ti-star"></i>`;
+}
+
 // Receive messages from main window
 ch.onmessage = e => {
   const msg = e.data;
-  if (msg.type === "track")     { lfmConnected = msg.lfmConnected; setTrack(msg.track, msg.playing, msg.loved); }
+  if (msg.type === "track")     { lfmConnected = msg.lfmConnected; setTrack(msg.track, msg.playing, msg.loved, msg.favorite); }
   if (msg.type === "playstate") setPlaying(msg.playing);
   if (msg.type === "loved")     setLoved(msg.loved);
+  if (msg.type === "favorite")  setFavorite(msg.favorite);
   if (msg.type === "progress") {
     document.getElementById("progress").value = msg.pct;
     document.getElementById("time-cur").textContent = fmt(msg.cur);
@@ -223,6 +237,7 @@ document.getElementById("btn-prev").onclick  = () => ch.postMessage({ type: "cmd
 document.getElementById("btn-next").onclick  = () => ch.postMessage({ type: "cmd", cmd: "next" });
 document.getElementById("btn-play").onclick  = () => ch.postMessage({ type: "cmd", cmd: "toggle" });
 document.getElementById("btn-love").onclick  = () => ch.postMessage({ type: "cmd", cmd: "love" });
+document.getElementById("btn-favorite").onclick = () => ch.postMessage({ type: "cmd", cmd: "favorite" });
 document.getElementById("progress").oninput  = e => ch.postMessage({ type: "cmd", cmd: "seek", value: e.target.value });
 
 // Ask main window for current state on load

@@ -3,21 +3,31 @@ import html
 import hashlib
 import json
 import logging
-from flask import Flask, jsonify, request, send_file, abort, render_template, redirect, make_response, g
+import atexit
+import threading
+import ipaddress
+from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor
+from zoneinfo import ZoneInfo
+from flask import Flask, jsonify, request, send_file, abort, render_template, redirect, make_response, g, session as flask_session
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import db
 import scanner
 import lastfm
 import auth as _auth
+import errors
 import smart_shuffle
+import adolar4u
+import backup_service
+import psutil
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", os.urandom(32))
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 
 # Restrict CORS to origins defined via env var (space-separated).
 # Default: deny all cross-origin requests (safe for local NAS use).
@@ -25,6 +35,11 @@ _cors_origins = os.environ.get("CORS_ORIGINS", "")
 CORS(app, origins=_cors_origins.split() if _cors_origins else [])
 
 app.before_request(_auth.before_request)
+if _auth.DEV_ADMIN_ENABLED:
+    logging.getLogger(__name__).warning(
+        "ADOLAR_DEV_ADMIN is active: every request runs as 'dev-admin' without "
+        "authentication. Never enable this in production."
+    )
 
 MUSIC_ROOT = os.environ.get("MUSIC_ROOT", "/music")
 MAX_DOWNLOAD_IDS = int(os.environ.get("MAX_DOWNLOAD_IDS", 500))
@@ -32,6 +47,13 @@ DATA_ROOT = os.path.dirname(os.path.abspath(os.path.expanduser(
     os.environ.get("DB_PATH", "") or "~/.cache/adolar.db"
 )))
 JINGLE_ROOT = os.path.join(DATA_ROOT, "radio_jingles")
+BACKUP_ROOT = os.environ.get("BACKUP_PATH", "/backups")
+BACKUP_RETENTION = max(1, int(os.environ.get("BACKUP_RETENTION", "7")))
+BACKUP_HOUR = max(0, min(23, int(os.environ.get("BACKUP_HOUR", "3"))))
+BACKUP_TIMEZONE = os.environ.get("TZ", "Europe/Berlin")
+BACKUP_AUTO_ENABLED = os.environ.get("BACKUP_AUTO_ENABLED", "0").lower() in (
+    "1", "true", "yes", "on",
+)
 
 # ── Adolar Disco connection tracking ─────────────────────────────────────────
 import time as _time
@@ -41,6 +63,65 @@ _DISCO_TIMEOUT = 120          # seconds until considered disconnected
 def _touch_disco():
     global _disco_last_seen
     _disco_last_seen = _time.time()
+
+
+# Non-critical Last.fm telemetry must never hold a web request open during a
+# network timeout. The executor and queue are deliberately small per Gunicorn
+# worker so an outage cannot create an unbounded backlog.
+_lastfm_executor = None
+_lastfm_executor_lock = threading.Lock()
+_lastfm_task_slots = threading.BoundedSemaphore(12)
+
+
+def _get_lastfm_executor():
+    global _lastfm_executor
+    if _lastfm_executor is None:
+        with _lastfm_executor_lock:
+            if _lastfm_executor is None:
+                _lastfm_executor = ThreadPoolExecutor(
+                    max_workers=2, thread_name_prefix="adolar-lastfm",
+                )
+    return _lastfm_executor
+
+
+def _submit_lastfm_call(label: str, func, *args, retries: int = 0, **kwargs) -> bool:
+    if not _lastfm_task_slots.acquire(blocking=False):
+        logging.getLogger(__name__).warning(
+            "Last.fm %s skipped: background queue is full", label,
+        )
+        return False
+
+    def run():
+        try:
+            for attempt in range(max(0, int(retries)) + 1):
+                try:
+                    func(*args, **kwargs)
+                    return
+                except Exception as exc:
+                    if attempt >= retries:
+                        logging.getLogger(__name__).warning(
+                            "Last.fm %s failed (%s): %s",
+                            label, type(exc).__name__, exc,
+                        )
+                    else:
+                        _time.sleep(0.75)
+        finally:
+            _lastfm_task_slots.release()
+
+    try:
+        _get_lastfm_executor().submit(run)
+        return True
+    except RuntimeError:
+        _lastfm_task_slots.release()
+        return False
+
+
+def _shutdown_lastfm_executor():
+    if _lastfm_executor is not None:
+        _lastfm_executor.shutdown(wait=False, cancel_futures=True)
+
+
+atexit.register(_shutdown_lastfm_executor)
 
 def _disco_active() -> bool:
     return (_time.time() - _disco_last_seen) < _DISCO_TIMEOUT
@@ -63,6 +144,33 @@ def _safe_data_path(path: str, root: str) -> str | None:
     if not real.startswith(root_real + os.sep) and real != root_real:
         return None
     return real
+
+
+def _safe_next_url(raw) -> str:
+    """Normalize a post-login redirect target to a same-origin path.
+
+    Never validates and passes the raw value through -- it rebuilds the
+    target from the parsed path instead. This rejects absolute URLs,
+    protocol-relative "//host" targets (browsers collapse any number of
+    leading slashes), and backslash variants (CodeQL py/url-redirection).
+    """
+    parsed = urlparse(str(raw or "/").replace("\\", "/"))
+    if parsed.scheme or parsed.netloc:
+        return "/"
+    path = "/" + parsed.path.lstrip("/")
+    if parsed.query:
+        return f"{path}?{parsed.query}"
+    return path
+
+
+def _client_error(message: str, exc: Exception, status: int = 400):
+    """Log the technical exception, return only a stable message to the client.
+
+    Never put str(exc) into a response (CodeQL py/stack-trace-exposure):
+    exception text can contain file paths, SQL fragments, or library internals.
+    """
+    logging.getLogger(__name__).warning("%s (%s)", message, exc)
+    return jsonify({"error": message}), status
 
 
 def _int_arg(name: str, default: int, min_val: int = None, max_val: int = None) -> int:
@@ -105,7 +213,10 @@ def setup_post():
     # Admin doesn't need to change password on first login
     with db.db() as conn:
         conn.execute("UPDATE users SET must_change_password=0 WHERE id=?", (user_id,))
-    token = _auth.create_session(user_id, remember=False)
+    token = _auth.create_session(
+        user_id, remember=False, product="adolar_web",
+        ip_address=_auth._get_client_ip(),
+    )
     resp = make_response(redirect("/"))
     resp.set_cookie(_auth.SESSION_COOKIE, token, httponly=True, samesite="Lax", max_age=_auth.SESSION_TTL)
     return resp
@@ -136,9 +247,7 @@ def login_post():
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
     remember = bool(request.form.get("remember"))
-    next_url = request.form.get("next", "/") or "/"
-    if not next_url.startswith("/"):
-        next_url = "/"
+    next_url = _safe_next_url(request.form.get("next"))
 
     user = _auth.get_user_by_name(username)
     if not user or not user.get("is_active", 1) or not _auth.verify_password(user, password):
@@ -149,9 +258,17 @@ def login_post():
                                next=next_url, blocked=blocked2, blocked_seconds=secs2), 401
 
     _auth._bf_clear(ip)
-    token = _auth.create_session(user["id"], remember)
+    token = _auth.create_session(
+        user["id"], remember, product="adolar_web", ip_address=ip,
+    )
     max_age = _auth.SESSION_TTL_LONG if remember else _auth.SESSION_TTL
-    resp = make_response(redirect(next_url))
+    # _safe_next_url already guarantees a same-origin path; this guard
+    # restates the invariant in the exact form the CodeQL query help for
+    # py/url-redirection documents as safe, so the analysis can verify it.
+    if not urlparse(next_url).netloc and not urlparse(next_url).scheme:
+        resp = make_response(redirect(next_url))
+    else:
+        resp = make_response(redirect("/"))
     resp.set_cookie(_auth.SESSION_COOKIE, token, httponly=True, samesite="Lax", max_age=max_age)
     return resp
 
@@ -192,7 +309,12 @@ def api_radio_login():
         return jsonify({"error": "must_change_password"}), 403
 
     _auth._bf_clear(ip)
-    token = _auth.create_session(user["id"], remember)
+    product = str(request.headers.get("X-Adolar-Product", "companion")).lower()
+    if product not in ("companion", "android"):
+        product = "companion"
+    token = _auth.create_session(
+        user["id"], remember, product=product, ip_address=ip,
+    )
     max_age = _auth.SESSION_TTL_LONG if remember else _auth.SESSION_TTL
     resp = jsonify({
         "id": user["id"],
@@ -367,18 +489,55 @@ def api_me_optional():
     return jsonify(None)
 
 
+def _set_user_favorite(user_id: int, track_id: int, favorite: bool) -> tuple[dict, int]:
+    with db.db() as conn:
+        track = conn.execute(
+            "SELECT id, artist, title FROM tracks WHERE id=?", (int(track_id),)
+        ).fetchone()
+    if not track:
+        return {"error": "track not found"}, 404
+    db.set_favorite(user_id, track_id, favorite)
+    result = {"ok": True, "favorite": bool(favorite), "lastfm_synced": False}
+    account = db.get_lastfm_account(user_id)
+    if favorite and account and account["auto_love_favorites"]:
+        try:
+            lastfm.love(account["session_key"], track["artist"] or "", track["title"] or "")
+            db.set_lastfm_loved(user_id, track["artist"], track["title"], True)
+            result["lastfm_synced"] = True
+        except Exception:
+            logging.getLogger(__name__).exception("Favorite saved but Last.fm love failed")
+            result["lastfm_error"] = "Last.fm konnte nicht aktualisiert werden."
+    return result, 200
+
+
+@app.get("/api/favorites")
+def api_favorites_status():
+    ids_raw = request.args.get("ids", "")
+    track_ids = [int(value) for value in ids_raw.split(",") if value.strip().isdigit()]
+    favorites = db.get_favorite_track_ids(g.user["id"], track_ids or None)
+    return jsonify({"track_ids": sorted(favorites)})
+
+
+@app.put("/api/favorites/<int:track_id>")
+def api_favorite_set(track_id):
+    data = request.get_json(silent=True) or {}
+    favorite = data.get("favorite")
+    if not isinstance(favorite, bool):
+        return jsonify({"error": "favorite must be boolean"}), 400
+    result, status = _set_user_favorite(g.user["id"], track_id, favorite)
+    return jsonify(result), status
+
+
 @app.post("/api/radio/bookmark/<int:track_id>")
 def api_radio_bookmark(track_id):
     token = request.cookies.get(_auth.SESSION_COOKIE)
-    user  = _auth.get_user_by_token(token) if token else None
+    user = _auth.get_user_by_token(token) if token else None
     if not user:
         return jsonify({"error": "unauthorized"}), 401
-    with db.db() as conn:
-        if not conn.execute("SELECT 1 FROM tracks WHERE id=?", (track_id,)).fetchone():
-            abort(404)
-    pl_id = db.get_or_create_radio_favorites(user["id"])
-    db.add_track_to_playlist(pl_id, track_id)
-    return jsonify({"ok": True, "playlist_id": pl_id})
+    result, status = _set_user_favorite(user["id"], track_id, True)
+    if status == 200:
+        result["playlist_id"] = db.get_or_create_favorites(user["id"])
+    return jsonify(result), status
 
 
 @app.get("/api/playlists/memberships")
@@ -405,11 +564,13 @@ def api_playlist_add_track(playlist_id):
     pl = db.get_user_by_id(g.user["id"])  # just check user exists
     with db.db() as conn:
         row = conn.execute(
-            "SELECT id FROM playlists WHERE id=? AND owner_id=?",
+            "SELECT id, type FROM playlists WHERE id=? AND owner_id=?",
             (playlist_id, g.user["id"])
         ).fetchone()
     if not row:
         return jsonify({"error": "Playlist nicht gefunden."}), 404
+    if row["type"] != "static":
+        return jsonify({"error": "Tracks können nur statischen Playlists hinzugefügt werden."}), 409
     db.add_track_to_playlist(playlist_id, track_id)
     return jsonify({"ok": True})
 
@@ -426,11 +587,148 @@ def api_playlist_tracks(playlist_id):
 def api_playlists_list():
     return jsonify(db.get_playlists(g.user["id"] if g.user else 0))
 
+
+@app.get("/api/playlist-editor/defaults")
+def api_playlist_editor_defaults():
+    if not _auth.can(g.user, "create_playlists"):
+        return jsonify({"error": "forbidden"}), 403
+    return jsonify({"name": db.next_playlist_name(g.user["id"])})
+
+
+@app.post("/api/playlist-editor/preview")
+def api_playlist_editor_preview():
+    if not _auth.can(g.user, "create_playlists"):
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        tracks = db.get_playlist_filter_tracks(
+            data.get("filter") or {},
+            user_id=g.user["id"],
+            sort=data.get("sort") or "artist",
+            limit=500,
+        )
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    except ValueError as exc:
+        return _client_error("Ungültige Filterparameter.", exc)
+    return jsonify({"results": tracks, "total": len(tracks)})
+
+
+@app.post("/api/playlist-editor/fill")
+def api_playlist_editor_fill():
+    if not _auth.can(g.user, "create_playlists"):
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        count = max(1, min(int(data.get("count") or 50), 500))
+        tracks = db.get_playlist_filter_tracks(
+            data.get("filter") or {"editor_version": 1},
+            user_id=g.user["id"],
+            limit=count,
+            random_order=True,
+            exclude_ids=data.get("exclude_ids") or [],
+        )
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    except (TypeError, ValueError) as exc:
+        return _client_error("Ungültige Filterparameter.", exc)
+    return jsonify({"results": tracks, "total": len(tracks)})
+
+
+@app.post("/api/playlist-editor/import")
+def api_playlist_editor_import():
+    if not _auth.can(g.user, "create_playlists"):
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    if data.get("format") != "adolar-disco-playlist" or data.get("version") != 1:
+        return jsonify({"error": "Keine gültige Adolar-Playlist."}), 400
+    wanted_tracks = data.get("tracks")
+    if not isinstance(wanted_tracks, list) or len(wanted_tracks) > 5000:
+        return jsonify({"error": "Ungültige oder zu große Trackliste."}), 400
+    matched, unmatched = [], []
+    with db.db() as conn:
+        for wanted in wanted_tracks:
+            if not isinstance(wanted, dict) or not str(wanted.get("title") or "").strip():
+                return jsonify({"error": "Ein importierter Track hat keinen Titel."}), 400
+            title = str(wanted.get("title") or "").strip()
+            artist = str(wanted.get("artist") or "").strip()
+            rows = conn.execute(
+                """SELECT id, path, title, artist, album, genre, year, duration,
+                          bitrate, cover_hash, bpm
+                   FROM tracks
+                   WHERE LOWER(TRIM(COALESCE(title,'')))=LOWER(TRIM(?))
+                     AND (?='' OR LOWER(TRIM(COALESCE(artist,'')))=LOWER(TRIM(?)))
+                   LIMIT 50""",
+                (title, artist, artist),
+            ).fetchall()
+            if not rows:
+                unmatched.append(wanted)
+                continue
+            wanted_album = str(wanted.get("album") or "").strip().casefold()
+            try:
+                wanted_duration = int(wanted.get("duration") or 0)
+            except (TypeError, ValueError):
+                wanted_duration = 0
+            best = max(rows, key=lambda row: (
+                20 if wanted_album and (row["album"] or "").strip().casefold() == wanted_album else 0,
+                10 if wanted_duration and abs(int(row["duration"] or 0) - wanted_duration) <= 3 else 0,
+            ))
+            track = dict(best)
+            track["has_cover"] = bool(track.get("cover_hash"))
+            matched.append(track)
+    return jsonify({
+        "tracks": matched,
+        "imported_count": len(wanted_tracks),
+        "matched_count": len(matched),
+        "unmatched_count": len(unmatched),
+        "unmatched": unmatched[:100],
+    })
+
+
+@app.post("/api/playlist-editor/export")
+def api_playlist_editor_export():
+    if not g.user:
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    raw_ids = data.get("track_ids") or []
+    try:
+        track_ids = [int(value) for value in raw_ids][:5000]
+    except (TypeError, ValueError):
+        return jsonify({"error": "Ungültige Trackliste."}), 400
+    if not track_ids:
+        return jsonify({"error": "Die Playlist ist leer."}), 400
+    with db.db() as conn:
+        placeholders = ",".join("?" * len(track_ids))
+        rows = conn.execute(
+            f"""SELECT id, title, artist, album, duration, year
+                FROM tracks WHERE id IN ({placeholders})""",
+            track_ids,
+        ).fetchall()
+    by_id = {int(row["id"]): dict(row) for row in rows}
+    from datetime import datetime, timezone
+    import io
+    payload = {
+        "format": "adolar-disco-playlist",
+        "version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "tracks": [
+            {key: by_id[track_id].get(key)
+             for key in ("title", "artist", "album", "duration", "year")}
+            for track_id in track_ids if track_id in by_id
+        ],
+    }
+    stream = io.BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+    safe_name = secure_filename(str(data.get("name") or "Adolar-Playlist")) or "Adolar-Playlist"
+    return send_file(
+        stream, mimetype="application/json", as_attachment=True,
+        download_name=f"{safe_name}.adolarplaylist",
+    )
+
+
 @app.post("/api/playlists")
 def api_playlists_create():
     if not _auth.can(g.user, "create_playlists"):
         return jsonify({"error": "forbidden"}), 403
-    import json
     data    = request.get_json(silent=True) or {}
     name    = (data.get("name") or "").strip()
     type_   = data.get("type", "smart")
@@ -438,8 +736,40 @@ def api_playlists_create():
     sort    = data.get("sort", "artist")
     if not name:
         return jsonify({"error": "Name fehlt."}), 400
-    pid = db.create_playlist(g.user["id"], name, json.dumps(filters), sort, type_)
+    try:
+        pid = db.save_personal_playlist(
+            g.user["id"], name, type_, json.dumps(filters), sort,
+            data.get("track_ids") or [],
+        )
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    except (TypeError, ValueError) as exc:
+        return _client_error("Ungültige Playlist-Daten.", exc)
     return jsonify({"ok": True, "id": pid}), 201
+
+
+@app.put("/api/playlists/<int:playlist_id>")
+def api_playlists_update(playlist_id):
+    if not _auth.can(g.user, "create_playlists"):
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "Name fehlt."}), 400
+    try:
+        saved_id = db.save_personal_playlist(
+            g.user["id"], name, data.get("type") or "static",
+            json.dumps(data.get("filters") or {}),
+            data.get("sort") or "artist", data.get("track_ids") or [],
+            playlist_id=playlist_id,
+        )
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    except (TypeError, ValueError) as exc:
+        return _client_error("Ungültige Playlist-Daten.", exc)
+    if saved_id is None:
+        return jsonify({"error": "Nicht gefunden oder keine Berechtigung."}), 404
+    return jsonify({"ok": True, "id": saved_id})
 
 @app.delete("/api/playlists/<int:playlist_id>")
 def api_playlists_delete(playlist_id):
@@ -504,10 +834,382 @@ def api_access_settings_put():
     return api_access_settings_get()
 
 
+# ── Adolar4U optional personalization module ─────────────────────────────────
+
+@app.get("/api/adolar4u/status")
+@_auth.login_required
+def api_adolar4u_status():
+    global_settings = adolar4u.get_global_settings()
+    user_settings = adolar4u.get_user_settings(g.user["id"])
+    response = jsonify({
+        "global": global_settings,
+        "user": user_settings,
+        "onboarding": adolar4u.get_onboarding_state(g.user["id"]),
+        "collecting": bool(
+            global_settings["enabled"]
+            and user_settings["enabled"]
+            and not user_settings["learning_paused"]
+        ),
+    })
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/api/adolar4u/onboarding/options")
+@_auth.login_required
+def api_adolar4u_onboarding_options():
+    kind = str(request.args.get("kind") or "").strip().lower()
+    try:
+        options = adolar4u.search_onboarding_options(
+            kind, request.args.get("q", ""), _int_arg("limit", 12, 1, 30),
+        )
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    except ValueError as exc:
+        return _client_error("Ungültige Onboarding-Anfrage.", exc)
+    return jsonify(options)
+
+
+@app.post("/api/adolar4u/onboarding")
+@_auth.login_required
+def api_adolar4u_onboarding_complete():
+    data = request.get_json(silent=True) or {}
+    try:
+        onboarding = adolar4u.complete_onboarding(
+            g.user["id"], data.get("artists"), data.get("genres"),
+        )
+        initial_playlist = adolar4u.recommend_tracks(g.user["id"], count=25) or []
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    except ValueError as exc:
+        return _client_error("Ungültige Onboarding-Auswahl.", exc)
+    return jsonify({
+        "onboarding": onboarding,
+        "initial_playlist": initial_playlist,
+    }), 201
+
+
+@app.put("/api/adolar4u/settings")
+@_auth.login_required
+def api_adolar4u_user_settings_put():
+    data = request.get_json(silent=True) or {}
+    allowed = {"enabled", "learning_paused", "collaborative_enabled", "discovery_level"}
+    boolean_fields = {"enabled", "learning_paused", "collaborative_enabled"}
+    if any(key not in allowed for key in data):
+        return jsonify({"error": "unknown setting"}), 400
+    if any(key in data and not isinstance(data[key], bool) for key in boolean_fields):
+        return jsonify({"error": "settings must be boolean"}), 400
+    try:
+        settings = adolar4u.update_user_settings(g.user["id"], data)
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    except ValueError as exc:
+        return _client_error("Ungültige Adolar4U-Einstellungen.", exc)
+    return jsonify(settings)
+
+
+@app.delete("/api/adolar4u/profile")
+@_auth.login_required
+def api_adolar4u_profile_delete():
+    deleted = adolar4u.delete_profile(g.user["id"])
+    return jsonify({"ok": True, "deleted_events": deleted})
+
+
+@app.post("/api/adolar4u/events/<int:track_id>")
+@_auth.login_required
+def api_adolar4u_event(track_id):
+    try:
+        result = adolar4u.record_event(
+            g.user["id"], track_id, request.get_json(silent=True) or {},
+        )
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    except ValueError as exc:
+        return _client_error("Ungültiges Hörereignis.", exc)
+    except LookupError:
+        abort(404)
+    return jsonify(result), 202 if result.get("accepted") else 200
+
+
+@app.get("/api/adolar4u/history")
+@_auth.login_required
+def api_adolar4u_history():
+    days = _int_arg("days", 7, min_val=1, max_val=60)
+    limit = _int_arg("limit", 100, min_val=1, max_val=200)
+    return jsonify(adolar4u.get_learning_history(g.user["id"], days, limit))
+
+
+@app.get("/api/adolar4u/history/export")
+@_auth.login_required
+def api_adolar4u_history_export():
+    days = _int_arg("days", 60, min_val=1, max_val=60)
+    archive, filename = adolar4u.build_learning_export(
+        g.user["id"], days, APP_VERSION,
+    )
+    response = send_file(
+        archive, mimetype="application/zip", as_attachment=True,
+        download_name=filename,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/api/admin/adolar4u/settings")
+@_auth.admin_required
+def api_adolar4u_admin_settings_get():
+    return jsonify(adolar4u.get_global_settings())
+
+
+@app.put("/api/admin/adolar4u/settings")
+@_auth.admin_required
+def api_adolar4u_admin_settings_put():
+    data = request.get_json(silent=True) or {}
+    allowed = {"enabled", "audio_analysis", "collaborative"}
+    if any(key not in allowed for key in data):
+        return jsonify({"error": "unknown setting"}), 400
+    if any(not isinstance(value, bool) for value in data.values()):
+        return jsonify({"error": "settings must be boolean"}), 400
+    settings = adolar4u.update_global_settings(data)
+    db.log_audit(g.user["id"], "adolar4u.settings_updated", "system")
+    return jsonify(settings)
+
+
 @app.get("/api/admin/audit-log")
 @_auth.admin_required
 def api_audit_log():
     return jsonify(db.get_audit_log(_int_arg("limit", 100, 1, 500)))
+
+
+def _mask_ip_address(value: str) -> str:
+    """Return a display-only IP address that never exposes the full address."""
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return "xxx.xxx.xxx.xxx"
+    if address.version == 4:
+        parts = str(address).split(".")
+        return f"{parts[0]}.xxx.xxx.{parts[3]}"
+    parts = address.exploded.split(":")
+    return f"{parts[0]}:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:{parts[-1]}"
+
+
+def _monitor_connections():
+    now = _time.time()
+    with db.db() as conn:
+        current = conn.execute(
+            """SELECT c.username, c.product, c.ip_address, c.connected_at,
+                      c.last_seen_at
+               FROM connection_log c
+               WHERE c.last_seen_at>?
+                 AND (c.client_key IS NOT NULL OR EXISTS(
+                     SELECT 1 FROM sessions s
+                     WHERE s.connection_id=c.id AND s.expires_at>?
+                 ))
+               ORDER BY c.last_seen_at DESC""",
+            (now - 120, now),
+        ).fetchall()
+        recent = conn.execute(
+            """SELECT username, product, ip_address, connected_at, last_seen_at
+               FROM connection_log ORDER BY connected_at DESC LIMIT 10"""
+        ).fetchall()
+
+    def serialize(row):
+        item = dict(row)
+        item["ip_address"] = _mask_ip_address(item["ip_address"])
+        return item
+
+    return [serialize(row) for row in current], [serialize(row) for row in recent]
+
+
+def _record_client_heartbeat(product: str, client_key: str) -> None:
+    now = _time.time()
+    ip = _auth._get_client_ip()
+    token = request.cookies.get(_auth.SESSION_COOKIE)
+    username = g.user["username"] if g.user else "Gast"
+    user_id = g.user["id"] if g.user else None
+    with db.db() as conn:
+        client_row = conn.execute(
+            "SELECT id FROM connection_log WHERE client_key=?", (client_key,)
+        ).fetchone()
+        session_row = conn.execute(
+            "SELECT connection_id FROM sessions WHERE token=?", (token,)
+        ).fetchone() if token and g.user else None
+        session_connection_id = (
+            int(session_row["connection_id"])
+            if session_row and session_row["connection_id"] is not None else None
+        )
+
+        if client_row:
+            connection_id = int(client_row["id"])
+            if session_connection_id and session_connection_id != connection_id:
+                conn.execute(
+                    "UPDATE sessions SET connection_id=? WHERE token=?",
+                    (connection_id, token),
+                )
+                conn.execute(
+                    "DELETE FROM connection_log WHERE id=?", (session_connection_id,)
+                )
+        elif session_connection_id:
+            connection_id = session_connection_id
+        else:
+            cur = conn.execute("""
+                INSERT INTO connection_log
+                    (user_id, username, product, ip_address, connected_at,
+                     last_seen_at, client_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, username, product, ip, now, now, client_key))
+            connection_id = int(cur.lastrowid)
+
+        conn.execute("""
+            UPDATE connection_log
+            SET user_id=?, username=?, product=?, ip_address=?,
+                last_seen_at=?, client_key=?
+            WHERE id=?
+        """, (user_id, username, product, ip, now, client_key, connection_id))
+        if token and g.user:
+            conn.execute(
+                "UPDATE sessions SET connection_id=? WHERE token=?",
+                (connection_id, token),
+            )
+
+
+@app.post("/api/client/heartbeat")
+def api_client_heartbeat():
+    data = request.get_json(silent=True) or {}
+    product = str(data.get("product") or "").strip().lower()
+    client_key = str(data.get("client_id") or "").strip()
+    if product not in ("adolar_web", "companion", "android"):
+        return jsonify({"error": "invalid product"}), 400
+    if not 8 <= len(client_key) <= 100 or not all(
+        char.isalnum() or char in "-_" for char in client_key
+    ):
+        return jsonify({"error": "invalid client_id"}), 400
+    _record_client_heartbeat(product, client_key)
+    return jsonify({"ok": True})
+
+
+@app.get("/api/admin/monitor")
+@_auth.admin_required
+def api_admin_monitor():
+    memory = psutil.virtual_memory()
+    current, recent = _monitor_connections()
+    return jsonify({
+        "system": {
+            "cpu_percent": round(psutil.cpu_percent(interval=None), 1),
+            "cpu_count": psutil.cpu_count() or 1,
+            "memory_percent": round(memory.percent, 1),
+            "memory_used": memory.used,
+            "memory_total": memory.total,
+            "boot_time": psutil.boot_time(),
+        },
+        "current_connections": current,
+        "recent_connections": recent,
+        "active_window_seconds": 120,
+        "sampled_at": _time.time(),
+    })
+
+
+# ── Database backups (admin only) ────────────────────────────────────────────
+
+def _run_backup_job(source: str, actor_id: int | None = None):
+    try:
+        result = backup_service.create_backup(
+            db.DB_PATH,
+            BACKUP_ROOT,
+            jingle_root=JINGLE_ROOT,
+            app_version=APP_VERSION,
+            source=source,
+            retention=BACKUP_RETENTION,
+        )
+        db.log_audit(
+            actor_id, "backup.created", result["backup_id"],
+            json.dumps({"source": source, "size": result["database"]["size"]}),
+        )
+    except backup_service.BackupInProgress:
+        return
+    except Exception:
+        logging.getLogger(__name__).exception("Database backup failed")
+
+
+def _start_backup_job(source: str, actor_id: int | None = None) -> bool:
+    if backup_service.is_backup_running(BACKUP_ROOT):
+        return False
+    threading.Thread(
+        target=_run_backup_job,
+        args=(source, actor_id),
+        daemon=True,
+        name=f"adolar-backup-{source}",
+    ).start()
+    return True
+
+
+@app.get("/api/admin/backups")
+@_auth.admin_required
+def api_backups_list():
+    try:
+        backups = backup_service.list_backups(BACKUP_ROOT)
+        status = backup_service.read_status(BACKUP_ROOT)
+        if status.get("state") == "running" and not backup_service.is_backup_running(BACKUP_ROOT):
+            status = {
+                "state": "failed",
+                "error": "Die letzte Sicherung wurde unterbrochen. Sie kann erneut gestartet werden.",
+            }
+    except OSError as exc:
+        logging.getLogger(__name__).warning("Backup-Ziel nicht verfügbar (%s)", exc)
+        return jsonify({
+            "error": "Backup-Ziel nicht verfügbar.",
+            "configured_path": BACKUP_ROOT,
+        }), 503
+    return jsonify({
+        "backups": backups,
+        "status": status,
+        "configured_path": BACKUP_ROOT,
+        "automatic": BACKUP_AUTO_ENABLED,
+        "hour": BACKUP_HOUR,
+        "retention": BACKUP_RETENTION,
+    })
+
+
+@app.post("/api/admin/backups")
+@_auth.admin_required
+def api_backups_create():
+    try:
+        backup_service.ensure_backup_root(BACKUP_ROOT)
+    except OSError as exc:
+        return _client_error("Backup-Ziel nicht beschreibbar.", exc, 503)
+    if not _start_backup_job("manual", g.user["id"]):
+        return jsonify({"error": "Eine Datensicherung läuft bereits."}), 409
+    return jsonify({"status": "started"}), 202
+
+
+@app.get("/api/admin/backups/<backup_id>/<kind>")
+@_auth.admin_required
+def api_backups_download(backup_id, kind):
+    try:
+        path = backup_service.get_backup_file(BACKUP_ROOT, backup_id, kind)
+    except FileNotFoundError:
+        abort(404)
+    suffixes = {
+        "database": ".db", "jingles": "-radio-jingles.tar.gz",
+        "manifest": "-manifest.json",
+    }
+    if kind not in suffixes:
+        abort(404)
+    return send_file(
+        path, as_attachment=True,
+        download_name=f"{backup_id}{suffixes[kind]}", conditional=True,
+    )
+
+
+@app.delete("/api/admin/backups/<backup_id>")
+@_auth.admin_required
+def api_backups_delete(backup_id):
+    try:
+        backup_service.delete_backup(BACKUP_ROOT, backup_id)
+    except FileNotFoundError:
+        abort(404)
+    db.log_audit(g.user["id"], "backup.deleted", backup_id)
+    return jsonify({"ok": True})
 
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
@@ -593,7 +1295,7 @@ def api_search():
         year_min=year_min, year_max=year_max,
         bpm_min=bpm_min, bpm_max=bpm_max,
         page=page, per_page=per_page, sort=sort, count=do_count,
-        loved_only=loved, include_loved=bool(db.get_setting("lastfm_session_key")),
+        loved_only=loved, include_loved=bool(user_id and db.get_lastfm_account(user_id)),
         user_id=user_id,
     )
     return jsonify({
@@ -1038,7 +1740,7 @@ def api_shuffle():
                 bpm_min=parsed["bpm_min"], bpm_max=parsed["bpm_max"],
                 page=1, per_page=2500, sort=raw["sort"], count=need_stats,
                 loved_only=raw["loved"],
-                include_loved=bool(db.get_setting("lastfm_session_key")),
+                include_loved=bool(user_id and db.get_lastfm_account(user_id)),
                 user_id=user_id, random_order=True,
             )
             if not need_stats:
@@ -1055,12 +1757,18 @@ def api_shuffle():
                  (track.get("album") or "").strip().casefold())
                 for track in candidates if (track.get("album") or "").strip()
             })
+            shuffle_state.unique_genres = len({
+                (track.get("genre") or "").strip().casefold()
+                for track in candidates if (track.get("genre") or "").strip()
+            })
 
         selected = smart_shuffle.select_tracks(
             candidates, count, shuffle_state,
             shuffle_state.total_tracks or 0,
             shuffle_state.unique_artists or 0,
             shuffle_state.unique_albums or 0,
+            unique_genres=shuffle_state.unique_genres or 0,
+            use_genre_spacing=not bool(raw["genre"]),
         )
 
     response = jsonify(selected)
@@ -1076,7 +1784,19 @@ def api_radio_stations_list():
         user and user.get("role") == "admin" and request.args.get("admin") == "1"
     )
     user_id = user["id"] if user else None
-    return jsonify(db.list_radio_stations(user_id=user_id, include_all_private=include_all_private))
+    stations = db.list_radio_stations(
+        user_id=user_id, include_all_private=include_all_private,
+    )
+    a4u_available = False
+    if user:
+        global_settings = adolar4u.get_global_settings()
+        user_settings = adolar4u.get_user_settings(user["id"])
+        a4u_available = global_settings["enabled"] and user_settings["enabled"]
+    stations = [
+        station for station in stations
+        if station.get("engine") != "adolar4u" or a4u_available
+    ]
+    return jsonify(stations)
 
 
 @app.post("/api/radio-stations")
@@ -1100,8 +1820,10 @@ def api_radio_stations_create():
             user_id=g.user["id"],
             scope=requested_scope,
         )
+    except errors.ValidationError as e:
+        return _client_error(e.user_message, e)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _client_error("Ungültige Senderdefinition.", e)
     except Exception as e:
         if "UNIQUE" in str(e).upper():
             return jsonify({"error": "name already exists"}), 409
@@ -1127,8 +1849,10 @@ def api_radio_stations_update(station_id):
             is_admin=g.user["role"] == "admin",
             scope=data.get("scope"),
         )
+    except errors.ValidationError as e:
+        return _client_error(e.user_message, e)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _client_error("Ungültige Senderdefinition.", e)
     except Exception as e:
         if "UNIQUE" in str(e).upper():
             return jsonify({"error": "name already exists"}), 409
@@ -1159,8 +1883,10 @@ def api_radio_stations_test():
             exclude_ids=[],
             user_id=g.user["id"],
         )
+    except errors.ValidationError as e:
+        return _client_error(e.user_message, e)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _client_error("Ungültige Senderdefinition.", e)
     return jsonify({"results": tracks, "total": len(tracks)})
 
 
@@ -1248,13 +1974,18 @@ def api_radio_station_tracks(station_id):
     count = min(_int_arg("count", 25, min_val=1, max_val=100), 100)
     exclude = [int(x) for x in request.args.getlist("exclude") if x.isdigit()]
     user_id = g.user["id"] if g.user else None
+    station = db.get_radio_station(station_id)
+    if (station and station.get("engine") == "adolar4u" and user_id
+            and adolar4u.get_onboarding_state(user_id)["required"]):
+        return jsonify({"error": "onboarding_required"}), 428
     token, shuffle_state = smart_shuffle.get_session(
         request.args.get("shuffle_session"),
         f"radio:{station_id}:user:{user_id or 0}",
     )
     with shuffle_state.lock:
         tracks = db.get_radio_station_tracks(
-            station_id, count, exclude, user_id=user_id, shuffle_state=shuffle_state
+            station_id, count, exclude, user_id=user_id, shuffle_state=shuffle_state,
+            recommendation_session_id=token,
         )
     if tracks is None:
         return jsonify({"error": "station not found"}), 404
@@ -1265,24 +1996,34 @@ def api_radio_station_tracks(station_id):
 
 # ── Last.fm ───────────────────────────────────────────────────────────────────
 
-def _require_admin_or_401():
-    if not g.user:
-        return jsonify({"error": "unauthorized"}), 401
-    if g.user["role"] != "admin":
-        return jsonify({"error": "forbidden"}), 403
-    return None
+def _lastfm_account():
+    return db.get_lastfm_account(g.user["id"]) if g.user else None
+
+
+def _lastfm_sync_state(user_id: int, job_type: str) -> dict:
+    return db.get_lastfm_sync_state(user_id, job_type)
+
+
+def _update_lastfm_sync_state(user_id: int, job_type: str, **values) -> dict:
+    if "count" in values:
+        values["result_count"] = values.pop("count")
+    if "updated" in values:
+        values["updated_count"] = values.pop("updated")
+    return db.update_lastfm_sync_state(user_id, job_type, **values)
 
 @app.get("/api/lastfm/status")
 def api_lastfm_status():
-    sk       = db.get_setting("lastfm_session_key")
-    username = db.get_setting("lastfm_username")
-    return jsonify({"connected": bool(sk), "username": username})
+    account = _lastfm_account()
+    return jsonify({
+        "connected": bool(account),
+        "username": account["username"] if account else None,
+        "auto_love_favorites": bool(account and account["auto_love_favorites"]),
+    })
 
 
 @app.get("/api/lastfm/auth")
 def api_lastfm_auth():
-    err = _require_admin_or_401()
-    if err: return err
+    flask_session["lastfm_auth_user_id"] = g.user["id"]
     callback = request.host_url.rstrip("/") + "/api/lastfm/callback"
     url = lastfm.get_auth_url(callback)
     return redirect(url)
@@ -1290,17 +2031,20 @@ def api_lastfm_auth():
 
 @app.get("/api/lastfm/callback")
 def api_lastfm_callback():
+    pending_user_id = flask_session.pop("lastfm_auth_user_id", None)
+    if not g.user or pending_user_id != g.user["id"]:
+        return "Last.fm Auth-Sitzung ist abgelaufen. Bitte erneut verbinden.", 400
     token = request.args.get("token")
     if not token:
         return "Kein Token erhalten.", 400
     try:
         session = lastfm.get_session(token)
-        db.set_setting("lastfm_session_key", session["key"])
-        db.set_setting("lastfm_username",    session["name"])
+        db.set_lastfm_account(g.user["id"], session["name"], session["key"])
     except Exception as e:
-        return f"Last.fm Auth fehlgeschlagen: {html.escape(str(e))}", 500
+        logging.getLogger(__name__).warning("Last.fm Auth fehlgeschlagen (%s)", e)
+        return "Last.fm Auth fehlgeschlagen. Bitte erneut verbinden.", 500
 
-    username = html.escape(db.get_setting("lastfm_username") or "")
+    username = html.escape(session.get("name") or "")
     return f"""<html><body style="font-family:sans-serif;padding:40px;background:#30302E;color:#ECECEC">
         <h2 style="color:#7F77DD">&#10003; Last.fm verbunden!</h2>
         <p>Du bist als <strong>{username}</strong> eingeloggt.</p>
@@ -1310,84 +2054,76 @@ def api_lastfm_callback():
 
 @app.post("/api/lastfm/disconnect")
 def api_lastfm_disconnect():
-    err = _require_admin_or_401()
-    if err: return err
-    db.del_setting("lastfm_session_key")
-    db.del_setting("lastfm_username")
+    db.disconnect_lastfm_account(g.user["id"])
     return jsonify({"ok": True})
 
 
-_lastfm_loved_sync = {"running": False, "error": None, "count": 0, "finished_at": None}
-_lastfm_pc_sync    = {"running": False, "error": None, "done": 0, "total": 0, "finished_at": None}
-
-
-def _sync_lastfm_loved_tracks():
-    global _lastfm_loved_sync
-    username = db.get_setting("lastfm_username")
-    if not username:
-        _lastfm_loved_sync.update(running=False, error="not connected")
+def _sync_lastfm_loved_tracks(user_id: int):
+    account = db.get_lastfm_account(user_id)
+    if not account:
+        _update_lastfm_sync_state(user_id, "loved", running=False, error="not connected")
         return
     try:
-        items = lastfm.get_loved_tracks(username)
-        count = db.replace_lastfm_loved_tracks(items)
-
-        # Write LOVE RATING tag to files that don't have it yet
-        tagged = 0
-        for track in db.get_loved_tracks_for_tag_write():
-            try:
-                scanner.write_love_tag(track["path"], True)
-                tagged += 1
-            except Exception:
-                logging.getLogger(__name__).warning("Could not write love tag to %s", track["path"])
-
-        _lastfm_loved_sync.update(running=False, error=None, count=count,
-                                  tagged=tagged, finished_at=_time.time())
+        items = lastfm.get_loved_tracks(account["username"])
+        count = db.replace_lastfm_loved_tracks(user_id, items)
+        _update_lastfm_sync_state(
+            user_id, "loved", running=False, error=None, count=count,
+            finished_at=_time.time(),
+        )
     except Exception as e:
         logging.getLogger(__name__).exception("Last.fm loved sync failed")
-        _lastfm_loved_sync.update(running=False, error=str(e), finished_at=_time.time())
+        _update_lastfm_sync_state(
+            user_id, "loved", running=False, error=str(e), finished_at=_time.time(),
+        )
 
 
 @app.get("/api/lastfm/loved/status")
 def api_lastfm_loved_status():
-    status = db.get_lastfm_loved_status()
-    status.update(_lastfm_loved_sync)
-    status["connected"] = bool(db.get_setting("lastfm_session_key"))
+    status = db.get_lastfm_loved_status(g.user["id"])
+    status.update(_lastfm_sync_state(g.user["id"], "loved"))
+    status["connected"] = bool(_lastfm_account())
     return jsonify(status)
 
 
 @app.post("/api/lastfm/loved/sync")
 def api_lastfm_loved_sync():
-    err = _require_admin_or_401()
-    if err: return err
-    if not db.get_setting("lastfm_session_key"):
+    account = _lastfm_account()
+    if not account:
         return jsonify({"error": "not connected"}), 401
-    _lastfm_loved_sync.update(running=True, error=None)
-    _sync_lastfm_loved_tracks()
-    status = db.get_lastfm_loved_status()
-    status.update(_lastfm_loved_sync)
-    return jsonify(status)
+    if not db.claim_lastfm_sync_job(g.user["id"], "loved"):
+        return jsonify({"error": "already running"}), 409
+    import threading
+    threading.Thread(
+        target=_sync_lastfm_loved_tracks, args=(g.user["id"],), daemon=True,
+    ).start()
+    return jsonify({"ok": True, "message": "sync started"}), 202
 
 
 def _sync_lastfm_playcounts(user_id: int):
-    global _lastfm_pc_sync
-    username = db.get_setting("lastfm_username")
-    sk       = db.get_setting("lastfm_session_key")
-    if not username or not sk:
-        _lastfm_pc_sync.update(running=False, error="not connected")
+    account = db.get_lastfm_account(user_id)
+    if not account:
+        _update_lastfm_sync_state(user_id, "playcounts", running=False, error="not connected")
         return
     log = logging.getLogger(__name__)
     try:
+        user = _auth.get_user_by_id(user_id)
+        contributes_archive = bool(
+            user and (user.get("role") == "admin" or user.get("contributes_playcount"))
+        )
         with db.db() as conn:
             tracks = conn.execute(
                 "SELECT id, path, artist, title FROM tracks WHERE artist IS NOT NULL AND title IS NOT NULL"
             ).fetchall()
         total = len(tracks)
-        _lastfm_pc_sync.update(total=total, done=0)
+        _update_lastfm_sync_state(user_id, "playcounts", total=total, done=0)
         updated = 0
         for i, row in enumerate(tracks):
-            _lastfm_pc_sync["done"] = i + 1
+            if i == 0 or (i + 1) % 25 == 0 or i + 1 == total:
+                _update_lastfm_sync_state(user_id, "playcounts", done=i + 1)
             try:
-                pc = lastfm.get_user_track_playcount(username, row["artist"], row["title"])
+                pc = lastfm.get_user_track_playcount(
+                    account["username"], row["artist"], row["title"]
+                )
                 if pc and pc > 0:
                     # Last.fm may raise personal and archive counts, never lower either.
                     with db.db() as conn:
@@ -1397,33 +2133,38 @@ def _sync_lastfm_playcounts(user_id: int):
                             ON CONFLICT(user_id, track_id) DO UPDATE SET
                                 count = MAX(count, excluded.count)
                         """, (user_id, row["id"], pc))
-                    if db.merge_archive_play_count(row["id"], pc):
+                    if contributes_archive and db.merge_archive_play_count(row["id"], pc):
                         updated += 1
             except Exception:
                 log.debug("Playcount sync failed for %s - %s", row["artist"], row["title"])
-        _lastfm_pc_sync.update(running=False, error=None, done=total,
-                               updated=updated, finished_at=_time.time())
+        _update_lastfm_sync_state(
+            user_id, "playcounts", running=False, error=None, done=total,
+            updated=updated, finished_at=_time.time(),
+        )
+        with db.db() as conn:
+            conn.execute(
+                "UPDATE user_lastfm_accounts SET playcounts_synced_at=? WHERE user_id=?",
+                (_time.time(), int(user_id)),
+            )
     except Exception as e:
         log.exception("Last.fm playcount sync failed")
-        _lastfm_pc_sync.update(running=False, error=str(e), finished_at=_time.time())
+        _update_lastfm_sync_state(
+            user_id, "playcounts", running=False, error=str(e),
+            finished_at=_time.time(),
+        )
 
 
 @app.get("/api/lastfm/playcount/status")
 def api_lastfm_pc_status():
-    err = _require_admin_or_401()
-    if err: return err
-    return jsonify(_lastfm_pc_sync)
+    return jsonify(_lastfm_sync_state(g.user["id"], "playcounts"))
 
 
 @app.post("/api/lastfm/playcount/sync")
 def api_lastfm_pc_sync():
-    err = _require_admin_or_401()
-    if err: return err
-    if not db.get_setting("lastfm_session_key"):
+    if not _lastfm_account():
         return jsonify({"error": "not connected"}), 401
-    if _lastfm_pc_sync.get("running"):
+    if not db.claim_lastfm_sync_job(g.user["id"], "playcounts"):
         return jsonify({"error": "already running"}), 409
-    _lastfm_pc_sync.update(running=True, error=None, done=0, total=0)
     import threading
     threading.Thread(
         target=_sync_lastfm_playcounts, args=(g.user["id"],), daemon=True
@@ -1433,46 +2174,42 @@ def api_lastfm_pc_sync():
 
 @app.post("/api/lastfm/nowplaying")
 def api_lastfm_nowplaying():
-    sk = db.get_setting("lastfm_session_key")
-    if not sk:
+    account = _lastfm_account()
+    if not account:
         return jsonify({"error": "not connected"}), 401
     body   = request.json or {}
     artist = body.get("artist", "")
     title  = body.get("title", "")
     if not artist or not title:
         return jsonify({"error": "missing artist/title"}), 400
-    try:
-        lastfm.now_playing(sk, artist, title, duration=body.get("duration"))
-        return jsonify({"ok": True})
-    except Exception:
-        logging.getLogger(__name__).exception("Last.fm now_playing failed")
-        return jsonify({"error": "Last.fm request failed"}), 500
+    queued = _submit_lastfm_call(
+        "now_playing", lastfm.now_playing,
+        account["session_key"], artist, title, duration=body.get("duration"),
+    )
+    return jsonify({"ok": True, "queued": queued}), 202
 
 
 @app.post("/api/lastfm/scrobble")
 def api_lastfm_scrobble():
-    sk = db.get_setting("lastfm_session_key")
-    if not sk:
+    account = _lastfm_account()
+    if not account:
         return jsonify({"error": "not connected"}), 401
     body   = request.json or {}
     artist = body.get("artist", "")
     title  = body.get("title", "")
     if not artist or not title:
         return jsonify({"error": "missing artist/title"}), 400
-    try:
-        lastfm.scrobble(sk, artist, title)
-        return jsonify({"ok": True})
-    except Exception:
-        logging.getLogger(__name__).exception("Last.fm scrobble failed")
-        return jsonify({"error": "Last.fm request failed"}), 500
+    queued = _submit_lastfm_call(
+        "scrobble", lastfm.scrobble, account["session_key"], artist, title,
+        retries=1,
+    )
+    return jsonify({"ok": True, "queued": queued}), 202
 
 
 @app.post("/api/lastfm/love")
 def api_lastfm_love():
-    err = _require_admin_or_401()
-    if err: return err
-    sk = db.get_setting("lastfm_session_key")
-    if not sk:
+    account = _lastfm_account()
+    if not account:
         return jsonify({"error": "not connected"}), 401
     body   = request.json or {}
     action = body.get("action", "love")
@@ -1482,11 +2219,11 @@ def api_lastfm_love():
         return jsonify({"error": "missing artist/title"}), 400
     try:
         if action == "love":
-            lastfm.love(sk, artist, title)
-            db.set_lastfm_loved(artist, title, True)
+            lastfm.love(account["session_key"], artist, title)
+            db.set_lastfm_loved(g.user["id"], artist, title, True)
         else:
-            lastfm.unlove(sk, artist, title)
-            db.set_lastfm_loved(artist, title, False)
+            lastfm.unlove(account["session_key"], artist, title)
+            db.set_lastfm_loved(g.user["id"], artist, title, False)
         return jsonify({"ok": True, "loved": action == "love"})
     except Exception:
         logging.getLogger(__name__).exception("Last.fm love/unlove failed")
@@ -1495,17 +2232,30 @@ def api_lastfm_love():
 
 @app.get("/api/lastfm/loved")
 def api_lastfm_loved():
-    sk = db.get_setting("lastfm_session_key")
-    if not sk:
+    account = _lastfm_account()
+    if not account:
         return jsonify({"loved": False})
     artist = request.args.get("artist", "")
     title  = request.args.get("title", "")
     try:
-        info = lastfm.get_track_info(sk, artist, title)
+        info = lastfm.get_track_info(account["session_key"], artist, title)
         loved = str(info.get("userloved", "0")) == "1"
         return jsonify({"loved": loved})
     except Exception:
         return jsonify({"loved": False})
+
+
+@app.patch("/api/lastfm/settings")
+def api_lastfm_settings():
+    data = request.get_json(silent=True) or {}
+    if set(data) - {"auto_love_favorites"}:
+        return jsonify({"error": "invalid setting"}), 400
+    enabled = data.get("auto_love_favorites")
+    if not isinstance(enabled, bool):
+        return jsonify({"error": "auto_love_favorites must be boolean"}), 400
+    if not db.set_lastfm_auto_love(g.user["id"], enabled):
+        return jsonify({"error": "not connected"}), 404
+    return jsonify({"ok": True, "auto_love_favorites": enabled})
 
 
 # ── Scanner ───────────────────────────────────────────────────────────────────
@@ -1587,6 +2337,25 @@ def _play_count_tag_scheduler():
 
 import threading as _threading
 _threading.Thread(target=_play_count_tag_scheduler, daemon=True).start()
+
+
+def _database_backup_scheduler():
+    """Create one verified snapshot per local day after the configured hour."""
+    while True:
+        now = __import__("datetime").datetime.now(ZoneInfo(BACKUP_TIMEZONE))
+        if now.hour >= BACKUP_HOUR:
+            job_key = f"database_backup_job:{now.date().isoformat()}"
+            if db.claim_once(job_key):
+                _run_backup_job("automatic")
+        _time.sleep(300)
+
+
+if BACKUP_AUTO_ENABLED:
+    _threading.Thread(
+        target=_database_backup_scheduler,
+        daemon=True,
+        name="adolar-backup-scheduler",
+    ).start()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)

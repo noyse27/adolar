@@ -1,0 +1,13 @@
+<resources>
+    <color name="accent">#7F77DD</color>
+    <color name="accent_light">#AFA9EC</color>
+    <color name="accent_deep">#534AB7</color>
+    <color name="bg_primary">#30302E</color>
+    <color name="bg_secondary">#3A3A38</color>
+    <color name="bg_tertiary">#1E1E1C</color>
+    <color name="text_primary">#ECECEC</color>
+    <color name="text_secondary">#9A9A96</color>
+    <color name="border_subtle">#3E3E3C</color>
+    <color name="border_medium">#50504D</color>
+    <color name="launcher_bg">#30302E</color>
+</resources>

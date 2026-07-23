@@ -1,15 +1,17 @@
 import random
 import unittest
+from itertools import groupby
 
 import smart_shuffle
 
 
-def track(track_id, artist, album, bpm=120):
+def track(track_id, artist, album, bpm=120, genre=""):
     return {
         "id": track_id,
         "artist": artist,
         "album": album,
         "bpm": bpm,
+        "genre": genre,
     }
 
 
@@ -84,6 +86,42 @@ class SmartShuffleTests(unittest.TestCase):
         )
         self.assertEqual(selected[0]["id"], 1)
         self.assertIsNone(state.last_bpm)
+
+    def test_genre_spacing_avoids_long_same_genre_runs(self):
+        rows = [
+            track(i, f"Metal Artist {i}", f"Metal Album {i}", genre="Metal")
+            for i in range(1, 31)
+        ] + [
+            track(31, "Jazz Artist", "Jazz Album", genre="Jazz"),
+            track(32, "Pop Artist", "Pop Album", genre="Pop"),
+        ]
+        state = smart_shuffle.ShuffleState(context="test")
+        selected = smart_shuffle.select_tracks(
+            rows, len(rows), state, len(rows), len(rows), len(rows),
+            unique_genres=3, rng=random.Random(6),
+        )
+        genres = [row["genre"] for row in selected]
+        longest_metal_run = max(
+            sum(1 for _ in run)
+            for genre, run in groupby(genres)
+            if genre == "Metal"
+        )
+        self.assertLessEqual(longest_metal_run, 10)
+
+    def test_genre_spacing_can_be_disabled_for_genre_filters(self):
+        rows = [
+            track(1, "A", "One", genre="Metal"),
+            track(2, "B", "Two", genre="Jazz"),
+        ]
+        state = smart_shuffle.ShuffleState(context="test")
+        state.last_genre = "metal"
+        state.genre_run = 1
+        state.sequence_index = 1
+        selected = smart_shuffle.select_tracks(
+            rows, 1, state, 2, 2, 2, unique_genres=2,
+            use_genre_spacing=False, rng=random.Random(1),
+        )
+        self.assertEqual(selected[0]["id"], 1)
 
 
 if __name__ == "__main__":

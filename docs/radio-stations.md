@@ -26,6 +26,10 @@ Admins can still upload, configure, and remove a jingle for the default station.
 - Normal users can create and edit only their own private stations.
 - Anonymous companion users see only global stations.
 - The companion `/radio` page uses the same station list and track endpoint.
+- In the main Web UI, opening a playlist or library result does not stop an
+  active station. While browsing, the active station button changes to a return
+  action and restores the current queue; pressing it again from the queue stops
+  the radio. Background queue refills must never replace the browsed list.
 
 ## API
 
@@ -78,14 +82,18 @@ Allowed numeric operators: `eq`, `ne`, `gt`, `lt`.
 
 Station playback loads a small initial queue, plays immediately, and refills in
 the background. The server returns an `X-Shuffle-Session` header; passing that
-value back as `shuffle_session` preserves the planned track, artist, album, and
-BPM history across queue refills.
+value back as `shuffle_session` preserves the planned track, artist, album,
+genre-run, and BPM history across queue refills.
 
 Smart Shuffle blocks an exact track for 80 percent of the available station
 pool. Artist and album cooldowns adapt to the number of tracks and distinct
-values. Eligible candidates are scored by recent artist/album occurrence, BPM
-distance from the previous planned track, and a small random tie-breaker.
+values. Genres are distributed proportionally to their occurrence in the
+candidate pool, so a dominant genre can still occur more often without forming
+avoidable long runs. This genre distribution is disabled when the station has
+an explicit genre rule, including a nested rule. Eligible candidates are scored
+by recent artist/album occurrence, BPM distance from the previous planned
+track, and a small random tie-breaker.
 
-Jingles are represented as non-track queue items. They can be inserted every N
-tracks per station and do not affect play counts, scrobbling, bookmarks, or
-recently played history.
+Jingles are represented as non-track queue items. An enabled station jingle is
+played once when the station starts and then again every N tracks. Jingles do
+not affect play counts, scrobbling, bookmarks, or recently played history.

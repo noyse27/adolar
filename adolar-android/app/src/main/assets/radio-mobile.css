@@ -1,0 +1,130 @@
+@media (max-width: 600px) {
+  body {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  #titlebar {
+    height: 52px;
+    padding: 0 18px;
+    gap: 10px;
+  }
+
+  #titlebar img { width: 22px; height: 22px; }
+  #titlebar span { font-size: 14px; }
+  #titlebar-sub { font-size: 12px; }
+  #btn-settings {
+    width: 48px;
+    height: 48px;
+    padding: 8px !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #btn-settings i { font-size: 32px !important; }
+
+  #user-badge, #btn-radio-login {
+    min-height: 44px;
+    padding: 10px 12px !important;
+    font-size: 16px;
+  }
+
+  #cover-wrap {
+    display: flex;
+    flex-direction: column;
+    padding: 18px 16px 12px;
+    background:
+      radial-gradient(circle at 50% 15%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 48%),
+      var(--bg-tertiary);
+  }
+
+  #cover-inner {
+    position: relative;
+    inset: auto;
+    width: min(100%, calc(100dvh - 300px));
+    aspect-ratio: 1;
+    flex: 0 1 auto;
+    margin: 0 auto;
+    border-radius: 18px;
+    overflow: hidden;
+    background: var(--bg-primary);
+    box-shadow: 0 18px 45px rgba(0, 0, 0, .38);
+  }
+
+  #cover-wrap img { object-fit: cover; }
+  #cover-overlay { display: none; }
+
+  #radio-badge {
+    top: 28px;
+    left: 26px;
+    padding: 5px 10px;
+    font-size: 11px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .28);
+  }
+
+  #station-select {
+    max-width: 210px;
+    font-size: 11px;
+  }
+
+  #track-info {
+    position: static;
+    margin-top: auto;
+    padding: 20px 4px 4px;
+    flex-shrink: 0;
+  }
+
+  #track-title { font-size: 22px; line-height: 1.2; }
+  #track-artist { font-size: 14px; margin-top: 6px; }
+
+  #track-reason {
+    font-size: 12px;
+    color: var(--accent-border);
+    margin-top: 7px;
+  }
+
+  #not-playing { min-height: 100px; }
+
+  #progress-wrap {
+    padding: 12px 20px 6px;
+    gap: 10px;
+  }
+
+  .time { font-size: 11px; }
+  #progress { height: 5px; }
+
+  #controls {
+    justify-content: center;
+    padding: 8px 18px 18px;
+    gap: clamp(14px, 6vw, 30px);
+  }
+
+  .ctrl {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px;
+    border-radius: 50%;
+  }
+
+  .ctrl i { font-size: 26px; }
+
+  #btn-play {
+    width: 58px;
+    height: 58px;
+    background: var(--text-primary);
+    color: var(--bg-tertiary);
+  }
+
+  #btn-play i { font-size: 32px; color: var(--bg-tertiary); }
+  #volume-wrap { display: none; }
+}
+
+@media (max-width: 600px) and (max-height: 620px) {
+  #titlebar { height: 44px; }
+  #cover-wrap { padding-top: 10px; }
+  #cover-inner { width: min(58vh, 72vw); }
+  #track-info { padding-top: 10px; }
+  #track-title { font-size: 18px; }
+  #controls { padding-bottom: 8px; }
+}

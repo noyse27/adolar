@@ -1,7 +1,8 @@
-"""Stateful smart shuffle with track, artist, album, and BPM spacing."""
+"""Stateful smart shuffle with track, artist, album, genre, and BPM spacing."""
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 import math
 import random
@@ -25,6 +26,14 @@ def _album_key(row) -> str:
     return f"{_key(row['artist'])}\x1f{album}"
 
 
+def _row_value(row, key):
+    """Read mappings and sqlite rows without requiring a ``get`` method."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
+
+
 def _bpm(value) -> float | None:
     try:
         result = float(value)
@@ -39,11 +48,15 @@ class ShuffleState:
     track_history: list[int] = field(default_factory=list)
     artist_last_seen: dict[str, int] = field(default_factory=dict)
     album_last_seen: dict[str, int] = field(default_factory=dict)
+    last_genre: str = ""
+    genre_run: int = 0
     sequence_index: int = 0
     last_bpm: float | None = None
     total_tracks: int | None = None
     unique_artists: int | None = None
     unique_albums: int | None = None
+    unique_genres: int | None = None
+    adolar4u_bucket_counts: dict[str, int] = field(default_factory=dict)
     touched_at: float = field(default_factory=time.time)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -52,11 +65,15 @@ class ShuffleState:
         self.track_history.clear()
         self.artist_last_seen.clear()
         self.album_last_seen.clear()
+        self.last_genre = ""
+        self.genre_run = 0
         self.sequence_index = 0
         self.last_bpm = None
         self.total_tracks = None
         self.unique_artists = None
         self.unique_albums = None
+        self.unique_genres = None
+        self.adolar4u_bucket_counts.clear()
 
 
 _sessions: dict[str, ShuffleState] = {}
@@ -141,13 +158,18 @@ def select_tracks(
     unique_albums: int,
     exclude_ids=None,
     rng=None,
+    unique_genres: int = 0,
+    use_genre_spacing: bool = True,
+    candidate_penalties: dict[int, float] | None = None,
 ) -> list:
     """Order up to count candidates and update state for the planned play order."""
     count = max(0, int(count))
     rng = rng or random
+    candidate_penalties = candidate_penalties or {}
     w_track, w_artist, w_album = cooldown_windows(
         total_tracks, unique_artists, unique_albums
     )
+    spread_genres = use_genre_spacing and unique_genres > 1
     state.track_history = state.track_history[-w_track:]
     if w_artist:
         artist_cutoff = state.sequence_index - w_artist + 1
@@ -165,6 +187,9 @@ def select_tracks(
         }
     else:
         state.album_last_seen.clear()
+    if not spread_genres:
+        state.last_genre = ""
+        state.genre_run = 0
 
     blocked = set(state.track_history)
     explicit_excludes = {int(value) for value in (exclude_ids or [])}
@@ -179,11 +204,34 @@ def select_tracks(
 
     selected = []
     while remaining and len(selected) < count:
+        preferred_genres = None
+        if spread_genres:
+            genre_counts = Counter(
+                _key(_row_value(row, "genre")) for row in remaining
+                if _key(_row_value(row, "genre"))
+            )
+            eligible_genres = set(genre_counts)
+            if state.last_genre in eligible_genres and len(eligible_genres) > 1:
+                current_total = genre_counts[state.last_genre] + state.genre_run
+                alternatives = sum(genre_counts.values()) - genre_counts[state.last_genre]
+                proportional_run = max(1, math.ceil(current_total / (alternatives + 1)))
+                if state.genre_run >= proportional_run:
+                    eligible_genres.remove(state.last_genre)
+            if eligible_genres:
+                largest_group = max(genre_counts[genre] for genre in eligible_genres)
+                preferred_genres = {
+                    genre for genre in eligible_genres
+                    if genre_counts[genre] == largest_group
+                }
+
         best_index = 0
         best_score = float("inf")
         for index, row in enumerate(remaining):
             artist = _key(row["artist"])
             album = _album_key(row)
+            genre = _key(_row_value(row, "genre"))
+            if preferred_genres and genre and genre not in preferred_genres:
+                continue
             score = (
                 _history_penalty(
                     artist, state.artist_last_seen, state.sequence_index,
@@ -194,6 +242,7 @@ def select_tracks(
                     w_album, 75.0,
                 )
                 + bpm_penalty(state.last_bpm, row["bpm"])
+                + max(0.0, float(candidate_penalties.get(int(row["id"]), 0.0)))
                 + rng.uniform(0, 15)
             )
             if score < best_score:
@@ -205,11 +254,21 @@ def select_tracks(
         state.track_history.append(int(chosen["id"]))
         artist = _key(chosen["artist"])
         album = _album_key(chosen)
+        genre = _key(_row_value(chosen, "genre"))
         state.sequence_index += 1
         if artist:
             state.artist_last_seen[artist] = state.sequence_index
         if album:
             state.album_last_seen[album] = state.sequence_index
+        if spread_genres and genre:
+            if genre == state.last_genre:
+                state.genre_run += 1
+            else:
+                state.last_genre = genre
+                state.genre_run = 1
+        elif spread_genres:
+            state.last_genre = ""
+            state.genre_run = 0
         chosen_bpm = _bpm(chosen["bpm"])
         state.last_bpm = chosen_bpm
 

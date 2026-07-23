@@ -2,7 +2,9 @@ import sqlite3
 import os
 import json
 from contextlib import contextmanager
+import errors
 import smart_shuffle
+import adolar4u
 
 DB_PATH = os.environ.get("DB_PATH", "/data/adolar.db")
 
@@ -98,16 +100,6 @@ def init_db():
                 value TEXT
             );
 
-            CREATE TABLE IF NOT EXISTS lastfm_loved_tracks (
-                artist_norm TEXT NOT NULL,
-                title_norm  TEXT NOT NULL,
-                artist      TEXT,
-                title       TEXT,
-                loved_at    INTEGER,
-                synced_at   REAL DEFAULT (unixepoch()),
-                PRIMARY KEY (artist_norm, title_norm)
-            );
-
             CREATE TABLE IF NOT EXISTS users (
                 id                   INTEGER PRIMARY KEY AUTOINCREMENT,
                 username             TEXT    NOT NULL UNIQUE,
@@ -122,11 +114,61 @@ def init_db():
                 created_at           TEXT    DEFAULT (datetime('now'))
             );
 
+            CREATE TABLE IF NOT EXISTS user_lastfm_accounts (
+                user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                username      TEXT NOT NULL,
+                session_key   TEXT NOT NULL,
+                auto_love_favorites INTEGER NOT NULL DEFAULT 1,
+                connected_at  REAL NOT NULL DEFAULT (unixepoch()),
+                loved_synced_at REAL,
+                playcounts_synced_at REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS lastfm_loved_tracks (
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                artist_norm TEXT NOT NULL,
+                title_norm  TEXT NOT NULL,
+                artist      TEXT,
+                title       TEXT,
+                loved_at    INTEGER,
+                synced_at   REAL DEFAULT (unixepoch()),
+                PRIMARY KEY (user_id, artist_norm, title_norm)
+            );
+
+            CREATE TABLE IF NOT EXISTS user_lastfm_sync_jobs (
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                job_type    TEXT NOT NULL CHECK(job_type IN ('loved','playcounts')),
+                running     INTEGER NOT NULL DEFAULT 0,
+                error       TEXT,
+                done        INTEGER NOT NULL DEFAULT 0,
+                total       INTEGER NOT NULL DEFAULT 0,
+                result_count INTEGER NOT NULL DEFAULT 0,
+                updated_count INTEGER NOT NULL DEFAULT 0,
+                finished_at REAL,
+                PRIMARY KEY (user_id, job_type)
+            );
+
             CREATE TABLE IF NOT EXISTS sessions (
                 token      TEXT    PRIMARY KEY,
                 user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                expires_at REAL    NOT NULL
+                expires_at REAL    NOT NULL,
+                connection_id INTEGER
             );
+
+            CREATE TABLE IF NOT EXISTS connection_log (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                username     TEXT    NOT NULL,
+                product      TEXT    NOT NULL,
+                ip_address   TEXT    NOT NULL,
+                connected_at REAL    NOT NULL,
+                last_seen_at REAL    NOT NULL,
+                client_key   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_connection_log_connected
+            ON connection_log(connected_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_connection_log_active
+            ON connection_log(last_seen_at DESC);
 
             CREATE TABLE IF NOT EXISTS login_blocks (
                 ip           TEXT PRIMARY KEY,
@@ -161,6 +203,7 @@ def init_db():
                 filters    TEXT    NOT NULL DEFAULT '{}',
                 sort       TEXT    NOT NULL DEFAULT 'artist',
                 is_system  INTEGER NOT NULL DEFAULT 0,
+                system_key TEXT,
                 created_at TEXT    DEFAULT (datetime('now'))
             );
 
@@ -186,6 +229,7 @@ def init_db():
                 created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
                 created_at  TEXT    DEFAULT (datetime('now')),
                 updated_at  TEXT    DEFAULT (datetime('now')),
+                engine      TEXT    NOT NULL DEFAULT 'smart_shuffle',
                 UNIQUE(scope, owner_id, name)
             );
         """)
@@ -206,15 +250,26 @@ def init_db():
             "ALTER TABLE radio_stations ADD COLUMN jingle_enabled INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE radio_stations ADD COLUMN created_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
             "ALTER TABLE radio_stations ADD COLUMN updated_at TEXT",
+            "ALTER TABLE radio_stations ADD COLUMN engine TEXT NOT NULL DEFAULT 'smart_shuffle'",
             "ALTER TABLE users ADD COLUMN allow_playlists INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE users ADD COLUMN allow_radio_stations INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE playlists ADD COLUMN system_key TEXT",
+            "ALTER TABLE sessions ADD COLUMN connection_id INTEGER",
+            "ALTER TABLE connection_log ADD COLUMN client_key TEXT",
         ]:
             try:
                 conn.execute(migration)
             except Exception:
                 pass
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_log_client
+            ON connection_log(client_key) WHERE client_key IS NOT NULL
+        """)
+        _migrate_lastfm_schema(conn)
+        _migrate_personal_favorites(conn)
         _seed_radio_stations(conn)
+        adolar4u.init_schema(conn)
         # Play-count/BPM updates must not churn the full-text index.
         conn.executescript("""
             DROP TRIGGER IF EXISTS tracks_au;
@@ -244,6 +299,131 @@ _SYSTEM_PLAYLISTS = [
     ("Disco Hits",          "disco_top",    "{}"),
 ]
 
+
+def _table_columns(conn, table: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _migrate_lastfm_schema(conn) -> None:
+    """Move the former global Last.fm account and loved rows to its admin owner."""
+    columns = _table_columns(conn, "lastfm_loved_tracks")
+    if columns and "user_id" not in columns:
+        conn.execute("ALTER TABLE lastfm_loved_tracks RENAME TO lastfm_loved_tracks_legacy")
+        conn.executescript("""
+            CREATE TABLE lastfm_loved_tracks (
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                artist_norm TEXT NOT NULL,
+                title_norm  TEXT NOT NULL,
+                artist      TEXT,
+                title       TEXT,
+                loved_at    INTEGER,
+                synced_at   REAL DEFAULT (unixepoch()),
+                PRIMARY KEY (user_id, artist_norm, title_norm)
+            );
+        """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_lastfm_loved_user
+        ON lastfm_loved_tracks(user_id, loved_at DESC)
+    """)
+
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS user_lastfm_accounts (
+            user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            username      TEXT NOT NULL,
+            session_key   TEXT NOT NULL,
+            auto_love_favorites INTEGER NOT NULL DEFAULT 1,
+            connected_at  REAL NOT NULL DEFAULT (unixepoch()),
+            loved_synced_at REAL,
+            playcounts_synced_at REAL
+        );
+        CREATE TABLE IF NOT EXISTS user_lastfm_sync_jobs (
+            user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            job_type    TEXT NOT NULL CHECK(job_type IN ('loved','playcounts')),
+            running     INTEGER NOT NULL DEFAULT 0,
+            error       TEXT,
+            done        INTEGER NOT NULL DEFAULT 0,
+            total       INTEGER NOT NULL DEFAULT 0,
+            result_count INTEGER NOT NULL DEFAULT 0,
+            updated_count INTEGER NOT NULL DEFAULT 0,
+            finished_at REAL,
+            PRIMARY KEY (user_id, job_type)
+        );
+    """)
+    legacy_username = conn.execute(
+        "SELECT value FROM settings WHERE key='lastfm_username'"
+    ).fetchone()
+    legacy_key = conn.execute(
+        "SELECT value FROM settings WHERE key='lastfm_session_key'"
+    ).fetchone()
+    admin = conn.execute(
+        "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+    ).fetchone()
+    if admin:
+        user_id = int(admin["id"])
+        if "lastfm_loved_tracks_legacy" in {
+            row["name"] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }:
+            conn.execute("""
+                INSERT OR IGNORE INTO lastfm_loved_tracks
+                    (user_id, artist_norm, title_norm, artist, title, loved_at, synced_at)
+                SELECT ?, artist_norm, title_norm, artist, title, loved_at, synced_at
+                FROM lastfm_loved_tracks_legacy
+            """, (user_id,))
+            conn.execute("DROP TABLE lastfm_loved_tracks_legacy")
+    if legacy_username and legacy_key and admin:
+        conn.execute("""
+            INSERT OR IGNORE INTO user_lastfm_accounts
+                (user_id, username, session_key, auto_love_favorites)
+            VALUES (?, ?, ?, 1)
+        """, (user_id, legacy_username["value"], legacy_key["value"]))
+        conn.execute(
+            "DELETE FROM settings WHERE key IN ('lastfm_username','lastfm_session_key','lastfm_loved_synced_at')"
+        )
+
+
+def _migrate_personal_favorites(conn) -> None:
+    """Turn the former radio bookmark list into one protected Favorites list."""
+    if "system_key" not in _table_columns(conn, "playlists"):
+        return
+    owners = conn.execute("""
+        SELECT DISTINCT owner_id FROM playlists
+        WHERE owner_id IS NOT NULL AND name IN ('Adolar Radio Favoriten', 'Favoriten')
+    """).fetchall()
+    for owner in owners:
+        user_id = int(owner["owner_id"])
+        rows = conn.execute("""
+            SELECT id, name FROM playlists
+            WHERE owner_id=? AND name IN ('Adolar Radio Favoriten', 'Favoriten')
+            ORDER BY CASE name WHEN 'Favoriten' THEN 0 ELSE 1 END, id
+        """, (user_id,)).fetchall()
+        target_id = int(rows[0]["id"])
+        for duplicate in rows[1:]:
+            conn.execute("""
+                INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, added_at)
+                SELECT ?, track_id, added_at FROM playlist_tracks WHERE playlist_id=?
+            """, (target_id, int(duplicate["id"])))
+            conn.execute("DELETE FROM playlists WHERE id=?", (int(duplicate["id"]),))
+        conn.execute("""
+            UPDATE playlists
+            SET name='Favoriten', type='static', filters='{}', sort='artist',
+                is_system=1, system_key='favorites'
+            WHERE id=?
+        """, (target_id,))
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_playlists_personal_system
+        ON playlists(owner_id, system_key)
+        WHERE owner_id IS NOT NULL AND system_key IS NOT NULL
+    """)
+    conn.execute("""
+        INSERT OR IGNORE INTO playlists
+            (owner_id, name, type, filters, sort, is_system, system_key)
+        SELECT id, 'Favoriten', 'static', '{}', 'artist', 1, 'favorites'
+        FROM users
+    """)
+
 def _seed_system_playlists(conn):
     existing = {r[0] for r in conn.execute(
         "SELECT sort FROM playlists WHERE is_system=1"
@@ -264,6 +444,24 @@ def _seed_radio_stations(conn):
         VALUES
             (1, 'Adolar Radio', 'Alle Tracks in zufälliger Reihenfolge',
              '{"mode":"all","rules":[]}', 'global', NULL, 0, 0, 1, NULL)
+    """)
+    conn.execute("""
+        DELETE FROM radio_stations
+        WHERE engine='adolar4u' AND id NOT IN (
+            SELECT MIN(id) FROM radio_stations WHERE engine='adolar4u'
+        )
+    """)
+    conn.execute("""
+        INSERT INTO radio_stations
+            (name, description, filter_json, scope, owner_id, jingle_every_tracks,
+             jingle_enabled, is_system, created_by, engine)
+        SELECT
+            'Adolar4U', 'Persönlicher, lernender Radiosender',
+            '{"mode":"all","rules":[]}', 'global', NULL, 0, 0, 1, NULL,
+            'adolar4u'
+        WHERE NOT EXISTS (
+            SELECT 1 FROM radio_stations WHERE engine='adolar4u'
+        )
     """)
 
 
@@ -343,13 +541,15 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
     # loved JOIN — needed for loved_only filter, loved_at sort, or include_loved
     loved_join = ""
     loved_select = "0 AS loved, NULL AS loved_at"
-    if loved_only or include_loved or sort == "loved_at":
+    if (loved_only or include_loved or sort == "loved_at") and user_id:
+        loved_uid = int(user_id)
         loved_join = """LEFT JOIN lastfm_loved_tracks l
                   ON l.artist_norm = LOWER(COALESCE(t.artist, ''))
-                 AND l.title_norm = LOWER(COALESCE(t.title, ''))"""
+                 AND l.title_norm = LOWER(COALESCE(t.title, ''))
+                 AND l.user_id = %d""" % loved_uid
         loved_select = "CASE WHEN l.artist_norm IS NULL THEN 0 ELSE 1 END AS loved, l.loved_at"
     if loved_only:
-        conditions.append("l.artist_norm IS NOT NULL")
+        conditions.append("l.artist_norm IS NOT NULL" if user_id else "0=1")
 
     # Play-count-based sort options — require JOIN on user_play_counts
     _PC_SORTS = {"recent", "top_played", "newest_added", "disco_top", "loved_at"}
@@ -466,11 +666,116 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
     return total, tracks
 
 
-def replace_lastfm_loved_tracks(items: list[dict]):
+def get_lastfm_account(user_id: int) -> dict | None:
+    with db() as conn:
+        row = conn.execute("""
+            SELECT user_id, username, session_key, auto_love_favorites,
+                   connected_at, loved_synced_at, playcounts_synced_at
+            FROM user_lastfm_accounts WHERE user_id=?
+        """, (int(user_id),)).fetchone()
+    return dict(row) if row else None
+
+
+def set_lastfm_account(user_id: int, username: str, session_key: str) -> None:
+    with db() as conn:
+        conn.execute("""
+            INSERT INTO user_lastfm_accounts (user_id, username, session_key)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username=excluded.username,
+                session_key=excluded.session_key,
+                connected_at=unixepoch()
+        """, (int(user_id), username, session_key))
+
+
+def disconnect_lastfm_account(user_id: int) -> None:
+    with db() as conn:
+        conn.execute("DELETE FROM user_lastfm_sync_jobs WHERE user_id=?", (int(user_id),))
+        conn.execute("DELETE FROM lastfm_loved_tracks WHERE user_id=?", (int(user_id),))
+        conn.execute("DELETE FROM user_lastfm_accounts WHERE user_id=?", (int(user_id),))
+
+
+def set_lastfm_auto_love(user_id: int, enabled: bool) -> bool:
+    with db() as conn:
+        cur = conn.execute("""
+            UPDATE user_lastfm_accounts SET auto_love_favorites=? WHERE user_id=?
+        """, (1 if enabled else 0, int(user_id)))
+    return cur.rowcount > 0
+
+
+_LASTFM_SYNC_FIELDS = {
+    "running", "error", "done", "total", "result_count", "updated_count",
+    "finished_at",
+}
+
+
+def get_lastfm_sync_state(user_id: int, job_type: str) -> dict:
+    if job_type not in ("loved", "playcounts"):
+        raise ValueError("invalid Last.fm sync job type")
+    with db() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO user_lastfm_sync_jobs (user_id, job_type)
+            VALUES (?, ?)
+        """, (int(user_id), job_type))
+        row = conn.execute("""
+            SELECT running, error, done, total, result_count, updated_count,
+                   finished_at
+            FROM user_lastfm_sync_jobs WHERE user_id=? AND job_type=?
+        """, (int(user_id), job_type)).fetchone()
+    result = dict(row)
+    result["running"] = bool(result["running"])
+    if job_type == "loved":
+        result["count"] = result.pop("result_count")
+        result.pop("updated_count", None)
+    else:
+        result["updated"] = result.pop("updated_count")
+        result.pop("result_count", None)
+    return result
+
+
+def update_lastfm_sync_state(user_id: int, job_type: str, **values) -> dict:
+    invalid = set(values) - _LASTFM_SYNC_FIELDS
+    if invalid or job_type not in ("loved", "playcounts"):
+        raise ValueError("invalid Last.fm sync state")
+    mapped = dict(values)
+    if "running" in mapped:
+        mapped["running"] = 1 if mapped["running"] else 0
+    with db() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO user_lastfm_sync_jobs (user_id, job_type)
+            VALUES (?, ?)
+        """, (int(user_id), job_type))
+        if mapped:
+            assignments = ", ".join(f"{field}=?" for field in mapped)
+            conn.execute(
+                f"UPDATE user_lastfm_sync_jobs SET {assignments} WHERE user_id=? AND job_type=?",
+                [*mapped.values(), int(user_id), job_type],
+            )
+    return get_lastfm_sync_state(user_id, job_type)
+
+
+def claim_lastfm_sync_job(user_id: int, job_type: str) -> bool:
+    if job_type not in ("loved", "playcounts"):
+        raise ValueError("invalid Last.fm sync job type")
+    with db() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO user_lastfm_sync_jobs (user_id, job_type)
+            VALUES (?, ?)
+        """, (int(user_id), job_type))
+        cur = conn.execute("""
+            UPDATE user_lastfm_sync_jobs
+            SET running=1, error=NULL, done=0, total=0,
+                result_count=0, updated_count=0, finished_at=NULL
+            WHERE user_id=? AND job_type=? AND running=0
+        """, (int(user_id), job_type))
+    return cur.rowcount > 0
+
+
+def replace_lastfm_loved_tracks(user_id: int, items: list[dict]):
     now = __import__("time").time()
     rows = [
         (
-            _norm_text(item.get("artist")),
+            int(user_id), _norm_text(item.get("artist")),
             _norm_text(item.get("title")),
             item.get("artist"),
             item.get("title"),
@@ -481,32 +786,21 @@ def replace_lastfm_loved_tracks(items: list[dict]):
         if _norm_text(item.get("artist")) and _norm_text(item.get("title"))
     ]
     with db() as conn:
-        conn.execute("DELETE FROM lastfm_loved_tracks")
+        conn.execute("DELETE FROM lastfm_loved_tracks WHERE user_id=?", (int(user_id),))
         conn.executemany(
             """INSERT OR REPLACE INTO lastfm_loved_tracks
-               (artist_norm, title_norm, artist, title, loved_at, synced_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               (user_id, artist_norm, title_norm, artist, title, loved_at, synced_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             rows,
         )
-        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-                     ("lastfm_loved_synced_at", str(now)))
+        conn.execute(
+            "UPDATE user_lastfm_accounts SET loved_synced_at=? WHERE user_id=?",
+            (now, int(user_id)),
+        )
     return len(rows)
 
 
-def get_loved_tracks_for_tag_write() -> list[dict]:
-    """Return tracks that Last.fm says are loved, for writing the tag to disk."""
-    with db() as conn:
-        rows = conn.execute("""
-            SELECT t.id, t.path, t.artist, t.title
-            FROM tracks t
-            JOIN lastfm_loved_tracks l
-              ON LOWER(TRIM(COALESCE(t.artist,''))) = l.artist_norm
-             AND LOWER(TRIM(COALESCE(t.title,'')))  = l.title_norm
-        """).fetchall()
-    return [dict(r) for r in rows]
-
-
-def set_lastfm_loved(artist: str, title: str, loved: bool):
+def set_lastfm_loved(user_id: int, artist: str, title: str, loved: bool):
     artist_norm = _norm_text(artist)
     title_norm = _norm_text(title)
     if not artist_norm or not title_norm:
@@ -515,23 +809,26 @@ def set_lastfm_loved(artist: str, title: str, loved: bool):
         if loved:
             conn.execute(
                 """INSERT OR REPLACE INTO lastfm_loved_tracks
-                   (artist_norm, title_norm, artist, title, loved_at, synced_at)
-                   VALUES (?, ?, ?, ?, unixepoch(), unixepoch())""",
-                (artist_norm, title_norm, artist, title),
+                   (user_id, artist_norm, title_norm, artist, title, loved_at, synced_at)
+                   VALUES (?, ?, ?, ?, ?, unixepoch(), unixepoch())""",
+                (int(user_id), artist_norm, title_norm, artist, title),
             )
         else:
             conn.execute(
-                "DELETE FROM lastfm_loved_tracks WHERE artist_norm=? AND title_norm=?",
-                (artist_norm, title_norm),
+                "DELETE FROM lastfm_loved_tracks WHERE user_id=? AND artist_norm=? AND title_norm=?",
+                (int(user_id), artist_norm, title_norm),
             )
 
 
-def get_lastfm_loved_status():
+def get_lastfm_loved_status(user_id: int):
     with db() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM lastfm_loved_tracks").fetchone()[0]
-        row = conn.execute("SELECT value FROM settings WHERE key=?", ("lastfm_loved_synced_at",)).fetchone()
-        synced_at = row["value"] if row else None
-    return {"total": total, "synced_at": float(synced_at) if synced_at else None}
+        total = conn.execute(
+            "SELECT COUNT(*) FROM lastfm_loved_tracks WHERE user_id=?", (int(user_id),)
+        ).fetchone()[0]
+        row = conn.execute(
+            "SELECT loved_synced_at FROM user_lastfm_accounts WHERE user_id=?", (int(user_id),)
+        ).fetchone()
+    return {"total": total, "synced_at": row["loved_synced_at"] if row else None}
 
 
 def get_genres():
@@ -562,12 +859,15 @@ def get_random_tracks(count=25, exclude_ids=None, shuffle_state=None):
                        COUNT(DISTINCT LOWER(TRIM(artist))) AS artists,
                        COUNT(DISTINCT CASE WHEN TRIM(album) != '' THEN
                            COALESCE(LOWER(TRIM(artist)), '') || CHAR(31) ||
-                           LOWER(TRIM(album)) END) AS albums
+                           LOWER(TRIM(album)) END) AS albums,
+                       COUNT(DISTINCT CASE WHEN TRIM(genre) != '' THEN
+                           LOWER(TRIM(genre)) END) AS genres
                 FROM tracks
             """).fetchone()
             shuffle_state.total_tracks = stats["total"]
             shuffle_state.unique_artists = stats["artists"]
             shuffle_state.unique_albums = stats["albums"]
+            shuffle_state.unique_genres = stats["genres"]
         pool_size = min(
             shuffle_state.total_tracks,
             max(2500, count * 100),
@@ -585,6 +885,7 @@ def get_random_tracks(count=25, exclude_ids=None, shuffle_state=None):
         shuffle_state.unique_artists,
         shuffle_state.unique_albums,
         exclude_ids=excl,
+        unique_genres=shuffle_state.unique_genres or 0,
     )
     return _track_rows_to_dicts(selected)
 
@@ -639,10 +940,10 @@ def _normalize_radio_filter(filter_def) -> dict:
 
 
 def validate_radio_filter(filter_def) -> dict:
-    """Return a normalized filter tree or raise ValueError."""
+    """Return a normalized filter tree or raise errors.ValidationError."""
     def walk(node, depth=0):
         if depth > 4:
-            raise ValueError("filter too deeply nested")
+            raise errors.ValidationError("Filter ist zu tief verschachtelt (maximal 4 Ebenen).")
         node = _normalize_radio_filter(node)
         out = {"mode": node["mode"], "rules": []}
         for rule in node["rules"]:
@@ -658,24 +959,39 @@ def validate_radio_filter(filter_def) -> dict:
             value = rule.get("value")
             if field in _RADIO_TEXT_FIELDS:
                 if op not in ("contains", "not_contains"):
-                    raise ValueError(f"invalid operator for {field}")
+                    raise errors.ValidationError(
+                        f"Ungültiger Operator für Textfeld '{field}'.")
                 value = str(value or "").strip()
                 if value:
                     out["rules"].append({"field": field, "op": op, "value": value[:120]})
             elif field in _RADIO_NUM_FIELDS:
                 if op not in ("eq", "ne", "gt", "lt"):
-                    raise ValueError(f"invalid operator for {field}")
+                    raise errors.ValidationError(
+                        f"Ungültiger Operator für Zahlenfeld '{field}'.")
                 try:
                     num = int(value)
                 except (TypeError, ValueError):
-                    raise ValueError(f"invalid numeric value for {field}")
+                    raise errors.ValidationError(
+                        f"Ungültiger Zahlenwert für Feld '{field}'.")
                 if field == "decade":
                     num = (num // 10) * 10
                 out["rules"].append({"field": field, "op": op, "value": num})
             else:
-                raise ValueError("invalid filter field")
+                raise errors.ValidationError("Unbekanntes Filterfeld.")
         return out
     return walk(filter_def)
+
+
+def _radio_filter_uses_genre(filter_def) -> bool:
+    """Return whether any nested radio rule explicitly targets genre."""
+    if not isinstance(filter_def, dict):
+        return False
+    for rule in filter_def.get("rules") or []:
+        if not isinstance(rule, dict):
+            continue
+        if rule.get("field") == "genre" or _radio_filter_uses_genre(rule):
+            return True
+    return False
 
 
 def _radio_filter_sql(filter_def) -> tuple[str, list]:
@@ -733,6 +1049,7 @@ def _radio_station_from_row(row) -> dict:
     d["jingle_enabled"] = bool(d.get("jingle_enabled"))
     d["has_jingle"] = bool(d.pop("jingle_path", None))
     d["scope"] = d.get("scope") or "global"
+    d["engine"] = d.get("engine") or "smart_shuffle"
     try:
         d["filter"] = json.loads(d.pop("filter_json") or "{}")
     except Exception:
@@ -754,12 +1071,13 @@ def list_radio_stations(user_id: int | None = None, include_all_private: bool = 
             SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
                    rs.owner_id, u.username AS owner_name, rs.jingle_path,
                    rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
-                   rs.created_at, rs.updated_at
+                   rs.created_at, rs.updated_at, rs.engine
             FROM radio_stations rs
             LEFT JOIN users u ON u.id=rs.owner_id
             WHERE """ + " OR ".join(where) + """
             GROUP BY rs.id
             ORDER BY rs.is_system DESC,
+                     CASE rs.engine WHEN 'adolar4u' THEN 1 ELSE 0 END,
                      CASE rs.scope WHEN 'global' THEN 0 ELSE 1 END,
                      u.username COLLATE NOCASE,
                      rs.name COLLATE NOCASE
@@ -773,7 +1091,7 @@ def get_radio_station(station_id: int) -> dict | None:
             SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
                    rs.owner_id, u.username AS owner_name, rs.jingle_path,
                    rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
-                   rs.created_at, rs.updated_at
+                   rs.created_at, rs.updated_at, rs.engine
             FROM radio_stations rs
             LEFT JOIN users u ON u.id=rs.owner_id
             WHERE rs.id=?
@@ -893,10 +1211,19 @@ def get_radio_station_jingle_path(station_id: int, enabled_only: bool = True) ->
 
 
 def get_radio_station_tracks(station_id: int, count=25, exclude_ids=None, user_id=None,
-                             shuffle_state=None) -> list[dict] | None:
+                             shuffle_state=None,
+                             recommendation_session_id: str | None = None) -> list[dict] | None:
     station = get_radio_station(station_id)
     if not station:
         return None
+    if station.get("engine") == "adolar4u":
+        if not user_id:
+            return None
+        return adolar4u.recommend_tracks(
+            int(user_id), count=count, exclude_ids=exclude_ids,
+            shuffle_state=shuffle_state,
+            recommendation_session_id=recommendation_session_id,
+        )
     return get_radio_filter_tracks(
         station.get("filter") or {}, count, exclude_ids,
         user_id=user_id, shuffle_state=shuffle_state,
@@ -922,7 +1249,9 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
                        COUNT(DISTINCT LOWER(TRIM(t.artist))) AS artists,
                        COUNT(DISTINCT CASE WHEN TRIM(t.album) != '' THEN
                            COALESCE(LOWER(TRIM(t.artist)), '') || CHAR(31) ||
-                           LOWER(TRIM(t.album)) END) AS albums
+                           LOWER(TRIM(t.album)) END) AS albums,
+                       COUNT(DISTINCT CASE WHEN TRIM(t.genre) != '' THEN
+                           LOWER(TRIM(t.genre)) END) AS genres
                 FROM tracks t
                 LEFT JOIN user_play_counts upc ON upc.track_id=t.id AND upc.user_id=?
                 {where}
@@ -930,6 +1259,7 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
             shuffle_state.total_tracks = stats["total"]
             shuffle_state.unique_artists = stats["artists"]
             shuffle_state.unique_albums = stats["albums"]
+            shuffle_state.unique_genres = stats["genres"]
         pool_size = min(
             shuffle_state.total_tracks,
             max(2500, count * 100),
@@ -937,19 +1267,26 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
         rows = conn.execute(f"""
             SELECT t.id, t.path, t.title, t.artist, t.album, t.genre, t.year, t.track_no,
                    t.duration, t.bitrate, t.size, t.cover_hash, t.bpm,
-                   COALESCE(upc.count, 0) AS user_play_count, upc.last_played_at
+                   COALESCE(upc.count, 0) AS user_play_count, upc.last_played_at,
+                   CASE WHEN l.artist_norm IS NULL THEN 0 ELSE 1 END AS loved
             FROM tracks t
             LEFT JOIN user_play_counts upc ON upc.track_id=t.id AND upc.user_id=?
+            LEFT JOIN lastfm_loved_tracks l
+                   ON l.artist_norm=LOWER(COALESCE(t.artist, ''))
+                  AND l.title_norm=LOWER(COALESCE(t.title, ''))
+                  AND l.user_id=?
             {where}
             ORDER BY RANDOM()
             LIMIT ?
-        """, [uid] + params + [pool_size]).fetchall()
+        """, [uid, uid] + params + [pool_size]).fetchall()
     selected = smart_shuffle.select_tracks(
         rows, count, shuffle_state,
         shuffle_state.total_tracks,
         shuffle_state.unique_artists,
         shuffle_state.unique_albums,
         exclude_ids=excl,
+        unique_genres=shuffle_state.unique_genres or 0,
+        use_genre_spacing=not _radio_filter_uses_genre(filter_def),
     )
     return _track_rows_to_dicts(selected)
 
@@ -1154,21 +1491,26 @@ def increment_user_play_count(user_id: int, track_id: int):
 
 def get_playlists(user_id: int) -> list[dict]:
     """Return system playlists + playlists owned by user_id."""
+    if user_id:
+        get_or_create_favorites(user_id)
     with db() as conn:
         rows = conn.execute(
             """SELECT p.id, p.owner_id, p.name, p.type, p.filters, p.sort,
-                      p.is_system, p.created_at,
+                      p.is_system, p.system_key, p.created_at,
                       (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id=p.id) AS track_count
                FROM playlists p
-               WHERE p.is_system=1 OR p.owner_id=?
-               ORDER BY p.is_system DESC, p.type ASC, p.created_at ASC""",
-            (user_id,)
+               WHERE (p.is_system=1 AND p.owner_id IS NULL) OR p.owner_id=?
+               ORDER BY CASE WHEN p.system_key='favorites' THEN 0 ELSE 1 END,
+                        p.is_system DESC, p.type ASC, p.created_at ASC""",
+            (int(user_id),)
         ).fetchall()
     return [dict(r) for r in rows]
 
 
 def create_playlist(user_id: int, name: str, filters: str, sort: str,
                     type_: str = "smart") -> int:
+    if type_ not in ("smart", "static"):
+        raise errors.ValidationError("Unbekannter Playlist-Typ (erwartet: smart oder static).")
     with db() as conn:
         cur = conn.execute(
             "INSERT INTO playlists (owner_id, name, type, filters, sort) VALUES (?,?,?,?,?)",
@@ -1177,20 +1519,144 @@ def create_playlist(user_id: int, name: str, filters: str, sort: str,
         return cur.lastrowid
 
 
-def get_or_create_radio_favorites(user_id: int) -> int:
-    """Return playlist id of user's radio bookmark playlist, creating it if needed."""
+def next_playlist_name(user_id: int) -> str:
+    """Return the next stable default name for a personal playlist."""
+    import re
+
+    with db() as conn:
+        rows = conn.execute(
+            """SELECT name FROM playlists
+               WHERE owner_id=? AND is_system=0""",
+            (int(user_id),),
+        ).fetchall()
+    highest = len(rows)
+    for row in rows:
+        match = re.fullmatch(r"Neue Playlist\s+(\d+)", (row["name"] or "").strip(), re.I)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"Neue Playlist {highest + 1}"
+
+
+def get_personal_playlist(playlist_id: int, user_id: int) -> dict | None:
     with db() as conn:
         row = conn.execute(
-            "SELECT id FROM playlists WHERE owner_id=? AND type='static' AND name='Adolar Radio Favoriten'",
-            (user_id,)
+            """SELECT id, owner_id, name, type, filters, sort, is_system,
+                      system_key, created_at
+               FROM playlists
+               WHERE id=? AND owner_id=? AND is_system=0""",
+            (int(playlist_id), int(user_id)),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def save_personal_playlist(user_id: int, name: str, type_: str, filters: str,
+                           sort: str, track_ids: list[int],
+                           playlist_id: int | None = None) -> int | None:
+    """Create or replace a personal playlist and its ordered static tracks."""
+    if type_ not in ("smart", "static"):
+        raise errors.ValidationError("Unbekannter Playlist-Typ (erwartet: smart oder static).")
+    clean_ids = []
+    seen = set()
+    for value in track_ids:
+        track_id = int(value)
+        if track_id not in seen:
+            clean_ids.append(track_id)
+            seen.add(track_id)
+    with db() as conn:
+        if clean_ids:
+            placeholders = ",".join("?" * len(clean_ids))
+            existing = {
+                int(row["id"]) for row in conn.execute(
+                    f"SELECT id FROM tracks WHERE id IN ({placeholders})", clean_ids
+                ).fetchall()
+            }
+            if len(existing) != len(clean_ids):
+                raise errors.ValidationError(
+                    "Mindestens ein Track der Playlist existiert nicht mehr in der Bibliothek.")
+        if playlist_id is None:
+            cur = conn.execute(
+                """INSERT INTO playlists (owner_id, name, type, filters, sort)
+                   VALUES (?,?,?,?,?)""",
+                (int(user_id), name, type_, filters, sort),
+            )
+            playlist_id = int(cur.lastrowid)
+        else:
+            cur = conn.execute(
+                """UPDATE playlists SET name=?, type=?, filters=?, sort=?
+                   WHERE id=? AND owner_id=? AND is_system=0""",
+                (name, type_, filters, sort, int(playlist_id), int(user_id)),
+            )
+            if cur.rowcount == 0:
+                return None
+        conn.execute("DELETE FROM playlist_tracks WHERE playlist_id=?", (int(playlist_id),))
+        if type_ == "static":
+            conn.executemany(
+                """INSERT INTO playlist_tracks (playlist_id, track_id, added_at)
+                   VALUES (?,?,?)""",
+                [(int(playlist_id), track_id, index)
+                 for index, track_id in enumerate(clean_ids, 1)],
+            )
+    return int(playlist_id)
+
+
+def get_or_create_favorites(user_id: int) -> int:
+    """Return the user's protected Favorites playlist, creating it if needed."""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT id FROM playlists WHERE owner_id=? AND system_key='favorites'",
+            (int(user_id),)
         ).fetchone()
         if row:
             return row["id"]
         cur = conn.execute(
-            "INSERT INTO playlists (owner_id, name, type, filters, sort) VALUES (?,?,?,?,?)",
-            (user_id, "Adolar Radio Favoriten", "static", "{}", "artist")
+            """INSERT INTO playlists
+               (owner_id, name, type, filters, sort, is_system, system_key)
+               VALUES (?, 'Favoriten', 'static', '{}', 'artist', 1, 'favorites')""",
+            (int(user_id),)
         )
         return cur.lastrowid
+
+
+def get_or_create_radio_favorites(user_id: int) -> int:
+    """Backward-compatible alias for the unified Favorites playlist."""
+    return get_or_create_favorites(user_id)
+
+
+def set_favorite(user_id: int, track_id: int, favorite: bool) -> bool:
+    playlist_id = get_or_create_favorites(user_id)
+    with db() as conn:
+        if not conn.execute("SELECT 1 FROM tracks WHERE id=?", (int(track_id),)).fetchone():
+            return False
+        if favorite:
+            conn.execute("""
+                INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id)
+                VALUES (?, ?)
+            """, (playlist_id, int(track_id)))
+        else:
+            conn.execute("""
+                DELETE FROM playlist_tracks WHERE playlist_id=? AND track_id=?
+            """, (playlist_id, int(track_id)))
+    return True
+
+
+def get_favorite_track_ids(user_id: int, track_ids: list[int] | None = None) -> set[int]:
+    with db() as conn:
+        playlist = conn.execute(
+            "SELECT id FROM playlists WHERE owner_id=? AND system_key='favorites'",
+            (int(user_id),),
+        ).fetchone()
+        if not playlist:
+            return set()
+        params: list[int] = [int(playlist["id"])]
+        where = "WHERE playlist_id=?"
+        if track_ids:
+            clean_ids = [int(value) for value in track_ids]
+            where += f" AND track_id IN ({','.join('?' * len(clean_ids))})"
+            params.extend(clean_ids)
+        rows = conn.execute(
+            f"SELECT track_id FROM playlist_tracks {where}", params,
+        ).fetchall()
+    return {int(row["track_id"]) for row in rows}
 
 
 def get_track_playlist_memberships(user_id: int, track_ids: list[int]) -> dict[int, list[int]]:
@@ -1203,7 +1669,9 @@ def get_track_playlist_memberships(user_id: int, track_ids: list[int]) -> dict[i
             f"""SELECT pt.track_id, pt.playlist_id
                 FROM playlist_tracks pt
                 JOIN playlists p ON p.id = pt.playlist_id
-                WHERE p.owner_id = ? AND pt.track_id IN ({placeholders})""",
+                WHERE p.owner_id = ?
+                  AND COALESCE(p.system_key, '') != 'favorites'
+                  AND pt.track_id IN ({placeholders})""",
             [user_id] + list(track_ids)
         ).fetchall()
     result: dict[int, list[int]] = {}
@@ -1221,20 +1689,48 @@ def add_track_to_playlist(playlist_id: int, track_id: int):
 
 
 def get_playlist_tracks(playlist_id: int, user_id: int) -> list[dict] | None:
-    """Returns track list for a static playlist owned by user_id, or None if not found/wrong owner."""
+    """Resolve a visible playlist, dynamically for smart playlists."""
     with db() as conn:
         pl = conn.execute(
-            "SELECT id, owner_id, type FROM playlists WHERE id=?", (playlist_id,)
+            "SELECT id, owner_id, type, filters, sort FROM playlists WHERE id=?", (playlist_id,)
         ).fetchone()
         if not pl or (pl["owner_id"] is not None and pl["owner_id"] != user_id):
             return None
+        playlist = dict(pl)
+    if playlist["type"] == "smart" and playlist["owner_id"] is not None:
+        try:
+            saved = json.loads(playlist.get("filters") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            saved = {}
+        if saved.get("editor_version") == 1:
+            return get_playlist_filter_tracks(
+                saved, user_id=user_id, sort=playlist.get("sort") or "artist",
+                limit=5000,
+            )
+        # Compatibility with smart playlists created by the former sidebar UI.
+        _, tracks = search_tracks(
+            **{key: value for key, value in saved.items() if key in {
+                "artist_query", "title_query", "album_query", "genre", "decade",
+                "fmt", "min_dur", "max_dur", "min_bitrate", "year_min",
+                "year_max", "bpm_min", "bpm_max", "loved_only",
+            }},
+            page=1, per_page=5000, sort=playlist.get("sort") or "artist",
+            count=False, include_loved=True, user_id=user_id,
+        )
+        return tracks
+    with db() as conn:
         rows = conn.execute(
             """SELECT t.id, t.path, t.title, t.artist, t.album, t.genre,
-                      t.year, t.duration, t.bitrate, t.cover_hash, t.bpm
+                      t.year, t.duration, t.bitrate, t.cover_hash, t.bpm,
+                      CASE WHEN l.artist_norm IS NULL THEN 0 ELSE 1 END AS loved
                FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
+               LEFT JOIN lastfm_loved_tracks l
+                 ON l.user_id=?
+                AND l.artist_norm=LOWER(COALESCE(t.artist, ''))
+                AND l.title_norm=LOWER(COALESCE(t.title, ''))
                WHERE pt.playlist_id = ?
                ORDER BY pt.added_at""",
-            (playlist_id,)
+            (int(user_id), playlist_id,)
         ).fetchall()
     import os as _os
 
@@ -1248,9 +1744,71 @@ def get_playlist_tracks(playlist_id: int, user_id: int) -> list[dict] | None:
         d["duration_fmt"] = _fmt(d["duration"])
         d["format"] = _os.path.splitext(d["path"])[1].lstrip(".").upper() if d.get("path") else "MP3"
         d["has_cover"] = bool(d["cover_hash"])
-        d["loved"] = False
+        d["loved"] = bool(d.get("loved"))
         tracks.append(d)
     return tracks
+
+
+def _playlist_filter_tree(saved: dict) -> dict:
+    search = saved.get("search") if isinstance(saved.get("search"), dict) else {}
+    rules = saved.get("rules") if isinstance(saved.get("rules"), dict) else {
+        "mode": "all", "rules": [],
+    }
+    combined = []
+    for field in ("title", "artist", "album"):
+        value = str(search.get(field) or "").strip()
+        if value:
+            combined.append({"field": field, "op": "contains", "value": value})
+    clean_rules = validate_radio_filter(rules)
+    if clean_rules["rules"]:
+        combined.append(clean_rules)
+    return validate_radio_filter({"mode": "all", "rules": combined})
+
+
+def get_playlist_filter_tracks(saved: dict, user_id: int, sort: str = "artist",
+                               limit: int = 500, random_order: bool = False,
+                               exclude_ids: list[int] | None = None) -> list[dict]:
+    """Return tracks matching a playlist-editor filter definition."""
+    tree = _playlist_filter_tree(saved)
+    where_sql, params = _radio_filter_sql(tree)
+    conditions = [f"({where_sql})"] if where_sql else []
+    excluded = [int(value) for value in (exclude_ids or [])]
+    if excluded:
+        conditions.append(f"t.id NOT IN ({','.join('?' * len(excluded))})")
+        params.extend(excluded)
+    where = "WHERE " + " AND ".join(conditions) if conditions else ""
+    order_map = {
+        "artist": "t.artist, t.album, t.track_no",
+        "title": "t.title, t.artist",
+        "album": "t.album, t.track_no",
+        "year": "t.year DESC, t.artist",
+        "duration": "t.duration DESC, t.artist",
+        "top_played": "COALESCE(upc.count,0) DESC, t.artist",
+    }
+    order = "RANDOM()" if random_order else order_map.get(sort, order_map["artist"])
+    limit = max(1, min(int(limit), 5000))
+    uid = int(user_id or 0)
+    with db() as conn:
+        rows = conn.execute(
+            f"""SELECT t.id, t.path, t.title, t.artist, t.album, t.genre,
+                       t.year, t.track_no, t.duration, t.bitrate, t.size,
+                       t.cover_hash, t.bpm,
+                       COALESCE(upc.count,0) AS user_play_count,
+                       upc.last_played_at,
+                       CASE WHEN l.artist_norm IS NULL THEN 0 ELSE 1 END AS loved
+                FROM tracks t
+                LEFT JOIN user_play_counts upc
+                       ON upc.track_id=t.id AND upc.user_id=?
+                LEFT JOIN lastfm_loved_tracks l
+                       ON l.user_id=?
+                      AND l.artist_norm=LOWER(COALESCE(t.artist, ''))
+                      AND l.title_norm=LOWER(COALESCE(t.title, ''))
+                {where}
+                ORDER BY {order}
+                LIMIT ?""",
+            [uid, uid] + params + [limit],
+        ).fetchall()
+    return _track_rows_to_dicts(rows)
 
 
 def delete_playlist(playlist_id: int, user_id: int) -> bool:

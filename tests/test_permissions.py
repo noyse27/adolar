@@ -9,6 +9,23 @@ os.environ.setdefault("DB_PATH", os.path.join(_temp_dir.name, "adolar-permission
 import app as app_module
 
 
+class SafeNextUrlTests(unittest.TestCase):
+    def test_same_origin_paths_are_preserved(self):
+        self.assertEqual(app_module._safe_next_url("/miniplayer"), "/miniplayer")
+        self.assertEqual(app_module._safe_next_url("/radio?station=3"), "/radio?station=3")
+        self.assertEqual(app_module._safe_next_url(None), "/")
+        self.assertEqual(app_module._safe_next_url(""), "/")
+
+    def test_external_redirect_targets_are_neutralized(self):
+        self.assertEqual(app_module._safe_next_url("https://evil.com/x"), "/")
+        self.assertEqual(app_module._safe_next_url("//evil.com"), "/")
+        # Browsers collapse any number of leading slashes to "//host".
+        self.assertEqual(app_module._safe_next_url("////evil.com"), "/evil.com")
+        self.assertEqual(app_module._safe_next_url("/\\evil.com"), "/")
+        self.assertEqual(app_module._safe_next_url("\\\\evil.com"), "/")
+        self.assertEqual(app_module._safe_next_url("javascript:alert(1)"), "/")
+
+
 class PermissionTests(unittest.TestCase):
     def setUp(self):
         self.client = app_module.app.test_client()
@@ -63,6 +80,10 @@ class PermissionTests(unittest.TestCase):
     def test_maintenance_requires_admin(self):
         with self._login():
             response = self.client.post("/api/scan/start")
+        self.assertEqual(response.status_code, 403)
+
+        with self._login():
+            response = self.client.get("/api/admin/backups")
         self.assertEqual(response.status_code, 403)
 
     def test_companion_can_require_login(self):
