@@ -16,7 +16,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest ruff
+        # ruff is pinned so local runs and CI agree on the rule set.
+        run: pip install -r requirements.txt pytest ruff==0.16.0
       - name: Lint
         run: ruff check .
       - name: Tests
