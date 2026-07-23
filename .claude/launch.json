@@ -3,13 +3,14 @@
   "configurations": [
     {
       "name": "Adolar",
-      "runtimeExecutable": "python",
+      "runtimeExecutable": "F:/claude/musicapp/.venv/Scripts/python.exe",
       "runtimeArgs": ["-m", "flask", "--app", "app", "run", "--host", "0.0.0.0", "--port", "5000", "--debug"],
       "port": 5000,
       "cwd": "F:/claude/musicapp",
       "env": {
         "DB_PATH": "F:/claude/musicapp/data/adolar.db",
-        "FLASK_APP": "app"
+        "FLASK_APP": "app",
+        "ADOLAR_DEV_ADMIN": "1"
       }
     }
   ]
