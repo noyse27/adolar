@@ -18,7 +18,6 @@ import tarfile
 import time
 from pathlib import Path
 
-
 BACKUP_ID_RE = re.compile(r"^adolar-\d{8}-\d{6}$")
 LOCK_NAME = ".adolar-backup.lock"
 STATUS_NAME = ".adolar-backup-status.json"

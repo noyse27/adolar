@@ -9,11 +9,11 @@ Usage:
     python generate_thumbs.py --workers 4   # parallel generation
 """
 
-import sys
-import os
-import io
 import argparse
+import io
 import logging
+import os
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -33,8 +33,8 @@ def main():
                         help="Show failed cover hashes")
     args = parser.parse_args()
 
-    from db import get_connection
     from app import _THUMB_DIR, _THUMB_SIZE, _thumb_path
+    from db import get_connection
 
     os.makedirs(_THUMB_DIR, exist_ok=True)
 
