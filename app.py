@@ -262,7 +262,13 @@ def login_post():
         user["id"], remember, product="adolar_web", ip_address=ip,
     )
     max_age = _auth.SESSION_TTL_LONG if remember else _auth.SESSION_TTL
-    resp = make_response(redirect(next_url))
+    # _safe_next_url already guarantees a same-origin path; this guard
+    # restates the invariant in the exact form the CodeQL query help for
+    # py/url-redirection documents as safe, so the analysis can verify it.
+    if not urlparse(next_url).netloc and not urlparse(next_url).scheme:
+        resp = make_response(redirect(next_url))
+    else:
+        resp = make_response(redirect("/"))
     resp.set_cookie(_auth.SESSION_COOKIE, token, httponly=True, samesite="Lax", max_age=max_age)
     return resp
 
