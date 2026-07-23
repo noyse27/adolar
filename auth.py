@@ -4,6 +4,7 @@ import secrets
 import time
 import threading
 from functools import wraps
+from urllib.parse import quote
 from flask import request, redirect, session as flask_session, jsonify, g
 from werkzeug.security import generate_password_hash, check_password_hash
 import db
@@ -348,7 +349,9 @@ def before_request():
 
     if request.path.startswith("/api/"):
         return jsonify({"error": "unauthorized"}), 401
-    return redirect(f"/login?next={request.path}")
+    # Quote the path so it stays a query value and cannot smuggle a foreign
+    # redirect target into /login (CodeQL py/url-redirection).
+    return redirect("/login?next=" + quote(request.path, safe="/"))
 
 def login_required(f):
     @wraps(f)

@@ -6,6 +6,7 @@ import logging
 import atexit
 import threading
 import ipaddress
+from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 from zoneinfo import ZoneInfo
 from flask import Flask, jsonify, request, send_file, abort, render_template, redirect, make_response, g, session as flask_session
@@ -144,6 +145,16 @@ def _safe_data_path(path: str, root: str) -> str | None:
     return real
 
 
+def _client_error(message: str, exc: Exception, status: int = 400):
+    """Log the technical exception, return only a stable message to the client.
+
+    Never put str(exc) into a response (CodeQL py/stack-trace-exposure):
+    exception text can contain file paths, SQL fragments, or library internals.
+    """
+    logging.getLogger(__name__).warning("%s (%s)", message, exc)
+    return jsonify({"error": message}), status
+
+
 def _int_arg(name: str, default: int, min_val: int = None, max_val: int = None) -> int:
     try:
         v = int(request.args.get(name, default))
@@ -219,7 +230,11 @@ def login_post():
     password = request.form.get("password", "")
     remember = bool(request.form.get("remember"))
     next_url = request.form.get("next", "/") or "/"
-    if not next_url.startswith("/"):
+    # Only same-origin paths: reject absolute URLs, protocol-relative
+    # "//host" targets, and backslash tricks (CodeQL py/url-redirection).
+    parsed_next = urlparse(next_url)
+    if (parsed_next.scheme or parsed_next.netloc
+            or not next_url.startswith("/") or "\\" in next_url):
         next_url = "/"
 
     user = _auth.get_user_by_name(username)
@@ -575,7 +590,7 @@ def api_playlist_editor_preview():
             limit=500,
         )
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _client_error("Ungültige Filterparameter.", exc)
     return jsonify({"results": tracks, "total": len(tracks)})
 
 
@@ -594,7 +609,7 @@ def api_playlist_editor_fill():
             exclude_ids=data.get("exclude_ids") or [],
         )
     except (TypeError, ValueError) as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _client_error("Ungültige Filterparameter.", exc)
     return jsonify({"results": tracks, "total": len(tracks)})
 
 
@@ -705,7 +720,7 @@ def api_playlists_create():
             data.get("track_ids") or [],
         )
     except (TypeError, ValueError) as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _client_error("Ungültige Playlist-Daten.", exc)
     return jsonify({"ok": True, "id": pid}), 201
 
 
@@ -725,7 +740,7 @@ def api_playlists_update(playlist_id):
             playlist_id=playlist_id,
         )
     except (TypeError, ValueError) as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _client_error("Ungültige Playlist-Daten.", exc)
     if saved_id is None:
         return jsonify({"error": "Nicht gefunden oder keine Berechtigung."}), 404
     return jsonify({"ok": True, "id": saved_id})
@@ -823,7 +838,7 @@ def api_adolar4u_onboarding_options():
             kind, request.args.get("q", ""), _int_arg("limit", 12, 1, 30),
         )
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _client_error("Ungültige Onboarding-Anfrage.", exc)
     return jsonify(options)
 
 
@@ -837,7 +852,7 @@ def api_adolar4u_onboarding_complete():
         )
         initial_playlist = adolar4u.recommend_tracks(g.user["id"], count=25) or []
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _client_error("Ungültige Onboarding-Auswahl.", exc)
     return jsonify({
         "onboarding": onboarding,
         "initial_playlist": initial_playlist,
@@ -857,7 +872,7 @@ def api_adolar4u_user_settings_put():
     try:
         settings = adolar4u.update_user_settings(g.user["id"], data)
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _client_error("Ungültige Adolar4U-Einstellungen.", exc)
     return jsonify(settings)
 
 
@@ -876,7 +891,7 @@ def api_adolar4u_event(track_id):
             g.user["id"], track_id, request.get_json(silent=True) or {},
         )
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _client_error("Ungültiges Hörereignis.", exc)
     except LookupError:
         abort(404)
     return jsonify(result), 202 if result.get("accepted") else 200
@@ -1106,8 +1121,9 @@ def api_backups_list():
                 "error": "Die letzte Sicherung wurde unterbrochen. Sie kann erneut gestartet werden.",
             }
     except OSError as exc:
+        logging.getLogger(__name__).warning("Backup-Ziel nicht verfügbar (%s)", exc)
         return jsonify({
-            "error": f"Backup-Ziel nicht verfügbar: {exc}",
+            "error": "Backup-Ziel nicht verfügbar.",
             "configured_path": BACKUP_ROOT,
         }), 503
     return jsonify({
@@ -1126,7 +1142,7 @@ def api_backups_create():
     try:
         backup_service.ensure_backup_root(BACKUP_ROOT)
     except OSError as exc:
-        return jsonify({"error": f"Backup-Ziel nicht beschreibbar: {exc}"}), 503
+        return _client_error("Backup-Ziel nicht beschreibbar.", exc, 503)
     if not _start_backup_job("manual", g.user["id"]):
         return jsonify({"error": "Eine Datensicherung läuft bereits."}), 409
     return jsonify({"status": "started"}), 202
@@ -1771,7 +1787,7 @@ def api_radio_stations_create():
             scope=requested_scope,
         )
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _client_error("Ungültige Senderdefinition.", e)
     except Exception as e:
         if "UNIQUE" in str(e).upper():
             return jsonify({"error": "name already exists"}), 409
@@ -1798,7 +1814,7 @@ def api_radio_stations_update(station_id):
             scope=data.get("scope"),
         )
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _client_error("Ungültige Senderdefinition.", e)
     except Exception as e:
         if "UNIQUE" in str(e).upper():
             return jsonify({"error": "name already exists"}), 409
@@ -1830,7 +1846,7 @@ def api_radio_stations_test():
             user_id=g.user["id"],
         )
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _client_error("Ungültige Senderdefinition.", e)
     return jsonify({"results": tracks, "total": len(tracks)})
 
 
@@ -1985,7 +2001,8 @@ def api_lastfm_callback():
         session = lastfm.get_session(token)
         db.set_lastfm_account(g.user["id"], session["name"], session["key"])
     except Exception as e:
-        return f"Last.fm Auth fehlgeschlagen: {html.escape(str(e))}", 500
+        logging.getLogger(__name__).warning("Last.fm Auth fehlgeschlagen (%s)", e)
+        return "Last.fm Auth fehlgeschlagen. Bitte erneut verbinden.", 500
 
     username = html.escape(session.get("name") or "")
     return f"""<html><body style="font-family:sans-serif;padding:40px;background:#30302E;color:#ECECEC">
