@@ -1,10 +1,12 @@
-import sqlite3
-import os
+import contextlib
 import json
+import os
+import sqlite3
 from contextlib import contextmanager
+
+import adolar4u
 import errors
 import smart_shuffle
-import adolar4u
 
 DB_PATH = os.environ.get("DB_PATH", "/data/adolar.db")
 
@@ -258,10 +260,8 @@ def init_db():
             "ALTER TABLE sessions ADD COLUMN connection_id INTEGER",
             "ALTER TABLE connection_log ADD COLUMN client_key TEXT",
         ]:
-            try:
+            with contextlib.suppress(Exception):
                 conn.execute(migration)
-            except Exception:
-                pass
         conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_log_client
             ON connection_log(client_key) WHERE client_key IS NOT NULL
@@ -543,10 +543,10 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
     loved_select = "0 AS loved, NULL AS loved_at"
     if (loved_only or include_loved or sort == "loved_at") and user_id:
         loved_uid = int(user_id)
-        loved_join = """LEFT JOIN lastfm_loved_tracks l
+        loved_join = f"""LEFT JOIN lastfm_loved_tracks l
                   ON l.artist_norm = LOWER(COALESCE(t.artist, ''))
                  AND l.title_norm = LOWER(COALESCE(t.title, ''))
-                 AND l.user_id = %d""" % loved_uid
+                 AND l.user_id = {loved_uid}"""
         loved_select = "CASE WHEN l.artist_norm IS NULL THEN 0 ELSE 1 END AS loved, l.loved_at"
     if loved_only:
         conditions.append("l.artist_norm IS NOT NULL" if user_id else "0=1")
@@ -972,7 +972,7 @@ def validate_radio_filter(filter_def) -> dict:
                     num = int(value)
                 except (TypeError, ValueError):
                     raise errors.ValidationError(
-                        f"Ungültiger Zahlenwert für Feld '{field}'.")
+                        f"Ungültiger Zahlenwert für Feld '{field}'.") from None
                 if field == "decade":
                     num = (num // 10) * 10
                 out["rules"].append({"field": field, "op": op, "value": num})

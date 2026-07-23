@@ -1,12 +1,14 @@
 """Authentication, session management and brute-force protection for Adolar."""
 import os
 import secrets
-import time
 import threading
+import time
 from functools import wraps
 from urllib.parse import quote
-from flask import request, redirect, session as flask_session, jsonify, g
-from werkzeug.security import generate_password_hash, check_password_hash
+
+from flask import g, jsonify, redirect, request
+from werkzeug.security import check_password_hash, generate_password_hash
+
 import db
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -270,13 +272,9 @@ def verify_password(user: dict, password: str) -> bool:
 # ── Flask middleware ──────────────────────────────────────────────────────────
 
 def _is_public(path: str) -> bool:
-    for prefix in PUBLIC_PREFIXES:
-        if path == prefix or path.startswith(prefix):
-            return True
-    for suffix in PUBLIC_SUFFIXES:
-        if path.endswith(suffix):
-            return True
-    return False
+    if any(path == prefix or path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
+        return True
+    return any(path.endswith(suffix) for suffix in PUBLIC_SUFFIXES)
 
 
 def setting_enabled(key: str, default: bool = False) -> bool:
@@ -338,12 +336,15 @@ def before_request():
     if _is_public(request.path):
         return
 
-    if request.method in ("GET", "HEAD") and request.path in ("/", "/miniplayer", "/api/genres", "/api/playlists", "/api/shuffle"):
-        if can(None, "view_web"):
-            return
-    if request.method in ("GET", "HEAD") and request.path.startswith("/api/playlists/") and request.path.endswith("/tracks"):
-        if can(None, "view_web"):
-            return
+    if (request.method in ("GET", "HEAD")
+            and request.path in ("/", "/miniplayer", "/api/genres", "/api/playlists", "/api/shuffle")
+            and can(None, "view_web")):
+        return
+    if (request.method in ("GET", "HEAD")
+            and request.path.startswith("/api/playlists/")
+            and request.path.endswith("/tracks")
+            and can(None, "view_web")):
+        return
     if request.path == "/radio" and db.get_setting("companion_access", "public") == "public":
         return
 

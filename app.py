@@ -1,26 +1,32 @@
-import os
-import html
+import atexit
+import contextlib
 import hashlib
+import html
+import ipaddress
 import json
 import logging
-import atexit
+import os
 import threading
-import ipaddress
-from urllib.parse import urlparse
+import time as _time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
-from flask import Flask, jsonify, request, send_file, abort, render_template, redirect, make_response, g, session as flask_session
+
+import psutil
+from flask import Flask, abort, g, jsonify, make_response, redirect, render_template, request, send_file
+from flask import session as flask_session
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-import db
-import scanner
-import lastfm
-import auth as _auth
-import errors
-import smart_shuffle
+
 import adolar4u
+import auth as _auth
 import backup_service
-import psutil
+import db
+import errors
+import lastfm
+import scanner
+import smart_shuffle
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -56,7 +62,6 @@ BACKUP_AUTO_ENABLED = os.environ.get("BACKUP_AUTO_ENABLED", "0").lower() in (
 )
 
 # ── Adolar Disco connection tracking ─────────────────────────────────────────
-import time as _time
 _disco_last_seen: float = 0   # epoch seconds
 _DISCO_TIMEOUT = 120          # seconds until considered disconnected
 
@@ -560,8 +565,6 @@ def api_playlist_add_track(playlist_id):
     track_id = data.get("track_id")
     if not isinstance(track_id, int):
         return jsonify({"error": "track_id fehlt."}), 400
-    # Verify ownership
-    pl = db.get_user_by_id(g.user["id"])  # just check user exists
     with db.db() as conn:
         row = conn.execute(
             "SELECT id, type FROM playlists WHERE id=? AND owner_id=?",
@@ -705,12 +708,12 @@ def api_playlist_editor_export():
             track_ids,
         ).fetchall()
     by_id = {int(row["id"]): dict(row) for row in rows}
-    from datetime import datetime, timezone
     import io
+    from datetime import datetime
     payload = {
         "format": "adolar-disco-playlist",
         "version": 1,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "tracks": [
             {key: by_id[track_id].get(key)
              for key in ("title", "artist", "album", "duration", "year")}
@@ -1346,8 +1349,9 @@ def _thumb_path(hash_: str) -> str:
 
 def _make_thumb(data: bytes) -> bytes | None:
     try:
-        from PIL import Image
         import io as _io
+
+        from PIL import Image
         img = Image.open(_io.BytesIO(data))
         img.thumbnail(_THUMB_SIZE, Image.LANCZOS)
         buf = _io.BytesIO()
@@ -1471,7 +1475,9 @@ def _parse_range(header: str, size: int):
 def api_download():
     if not _auth.can(g.user, "download_tracks"):
         return jsonify({"error": "Download nicht erlaubt."}), 403
-    import zipfile, io, time
+    import io
+    import time
+    import zipfile
     ids = request.json.get("ids", [])
     if not ids:
         return jsonify({"error": "no ids"}), 400
@@ -1921,8 +1927,8 @@ def api_radio_station_jingle_upload(station_id):
     for old_ext in (".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aac"):
         old = os.path.join(JINGLE_ROOT, f"station_{station_id}{old_ext}")
         if old != safe_target and os.path.exists(old):
-            try: os.remove(old)
-            except OSError: pass
+            with contextlib.suppress(OSError):
+                os.remove(old)
     file.save(safe_target)
     db.set_radio_station_jingle(station_id, safe_target, every, enabled)
     return jsonify(db.get_radio_station(station_id))
@@ -1952,8 +1958,8 @@ def api_radio_station_jingle_delete(station_id):
     if path:
         safe = _safe_data_path(path, JINGLE_ROOT)
         if safe and os.path.exists(safe):
-            try: os.remove(safe)
-            except OSError: pass
+            with contextlib.suppress(OSError):
+                os.remove(safe)
     return jsonify(db.get_radio_station(station_id))
 
 
@@ -2293,7 +2299,7 @@ def api_bpm_tags():
                 except Exception:
                     pass
         except Exception as e:
-            import logging; logging.getLogger(__name__).error("bpm-tags: %s", e)
+            logging.getLogger(__name__).error("bpm-tags: %s", e)
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
     return jsonify({"status": "started", "updated": 0, "note": "running in background"})
@@ -2335,14 +2341,14 @@ def _play_count_tag_scheduler():
         _time.sleep(300)
 
 
-import threading as _threading
-_threading.Thread(target=_play_count_tag_scheduler, daemon=True).start()
+threading.Thread(target=_play_count_tag_scheduler, daemon=True).start()
 
 
 def _database_backup_scheduler():
     """Create one verified snapshot per local day after the configured hour."""
+    import datetime
     while True:
-        now = __import__("datetime").datetime.now(ZoneInfo(BACKUP_TIMEZONE))
+        now = datetime.datetime.now(ZoneInfo(BACKUP_TIMEZONE))
         if now.hour >= BACKUP_HOUR:
             job_key = f"database_backup_job:{now.date().isoformat()}"
             if db.claim_once(job_key):
@@ -2351,11 +2357,13 @@ def _database_backup_scheduler():
 
 
 if BACKUP_AUTO_ENABLED:
-    _threading.Thread(
+    threading.Thread(
         target=_database_backup_scheduler,
         daemon=True,
         name="adolar-backup-scheduler",
     ).start()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    # Dev fallback only; production runs Gunicorn in a container where
+    # binding all interfaces is intended.
+    app.run(host="0.0.0.0", port=5000, debug=False)  # noqa: S104

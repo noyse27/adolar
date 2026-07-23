@@ -1,11 +1,12 @@
-import os
 import hashlib
+import logging
+import os
 import threading
 import time
-import logging
+
 from mutagen import File as MutagenFile
-from mutagen.id3 import ID3NoHeaderError
-from db import upsert_track, save_cover, init_db
+
+from db import save_cover, upsert_track
 
 log = logging.getLogger(__name__)
 
@@ -56,12 +57,12 @@ def _extract_cover(audio):
         return None, None, None
 
     # ID3 APIC
-    for key in tags.keys():
+    for key in tags:
         if key.startswith("APIC"):
             pic = tags[key]
             data = pic.data
             mime = pic.mime or "image/jpeg"
-            h = hashlib.sha1(data).hexdigest()
+            h = hashlib.sha1(data, usedforsecurity=False).hexdigest()
             return h, data, mime
 
     # MP4 / FLAC / Ogg cover
@@ -75,7 +76,7 @@ def _extract_cover(audio):
             else:
                 data = bytes(pic)
                 mime = "image/jpeg"
-            h = hashlib.sha1(data).hexdigest()
+            h = hashlib.sha1(data, usedforsecurity=False).hexdigest()
             return h, data, mime
 
     return None, None, None
@@ -320,10 +321,13 @@ def run_thumb_generation():
     """Generate missing cover thumbnails in the background after a scan."""
     def _worker():
         try:
-            import io as _io, os as _os
+            import io as _io
+            import os as _os
+
             from PIL import Image
-            from db import get_connection
+
             from app import _THUMB_DIR, _THUMB_SIZE, _thumb_path
+            from db import get_connection
 
             conn = get_connection()
             rows = conn.execute("SELECT hash, data, mime FROM covers").fetchall()
@@ -362,6 +366,7 @@ def run_bpm_scan(limit: int = 0):
     def _bpm_worker():
         try:
             import librosa
+
             from db import get_connection
             conn = get_connection()
             try:

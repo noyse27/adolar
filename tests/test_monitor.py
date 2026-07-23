@@ -4,7 +4,6 @@ import time
 import unittest
 from unittest import mock
 
-
 _temp_dir = tempfile.TemporaryDirectory()
 os.environ.setdefault("DB_PATH", os.path.join(_temp_dir.name, "adolar-monitor-test.db"))
 

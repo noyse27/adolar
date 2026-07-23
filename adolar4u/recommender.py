@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import json
 import logging
 import math
@@ -10,11 +9,11 @@ import os
 import random
 import time
 import uuid
+from collections import Counter
 
 import smart_shuffle
 
 from .service import get_global_settings, get_seed_affinities, get_user_settings
-
 
 ALGORITHM_VERSION = "metadata-v2-skip-smoothing-1"
 DIAGNOSTIC_RETENTION_DAYS = 60
@@ -432,9 +431,8 @@ def _record_recommendation_batch(
     batch_id = uuid.uuid4().hex
     created_at = time.time()
     bucket_selected = dict(Counter(row["adolar4u_bucket"] for row in selected))
-    compact_json = lambda value: json.dumps(
-        value, ensure_ascii=False, separators=(",", ":"), sort_keys=True,
-    )
+    def compact_json(value):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     try:
         with db.db() as conn:
             conn.execute(

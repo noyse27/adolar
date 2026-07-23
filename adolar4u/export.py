@@ -9,7 +9,6 @@ import json
 import time
 import zipfile
 
-
 BUCKETS = ("anchor", "similar", "familiar", "discovery")
 BONUS_KEYS = (
     "play_count", "explicit_favorite", "personal_playlist",
@@ -41,7 +40,7 @@ def _json_object(value) -> dict:
 def _iso(epoch) -> str:
     if epoch is None:
         return ""
-    return dt.datetime.fromtimestamp(float(epoch), dt.timezone.utc).isoformat(
+    return dt.datetime.fromtimestamp(float(epoch), dt.UTC).isoformat(
         timespec="seconds"
     )
 

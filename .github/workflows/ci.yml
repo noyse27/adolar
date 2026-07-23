@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Matches the python:3.12-slim deployment image.
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        # ruff is pinned so local runs and CI agree on the rule set.
+        run: pip install -r requirements.txt pytest ruff==0.16.0
+      - name: Lint
+        run: ruff check .
+      - name: Tests
+        run: pytest -q

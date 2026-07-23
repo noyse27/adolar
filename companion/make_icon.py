@@ -3,6 +3,7 @@ Generates logo.png and logo.ico for AdolarRadio using Pillow only (no Cairo).
 Run once before building: python make_icon.py
 """
 import os
+
 from PIL import Image, ImageDraw
 
 OUT_PNG = os.path.join(os.path.dirname(__file__), "logo.png")
