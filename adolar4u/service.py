@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 import json
 import math
 import time
+from collections import defaultdict
 
 import errors
-
 
 EVENT_TYPES = {"started", "skipped", "completed"}
 EVENT_SOURCES = {"library", "playlist", "shuffle", "radio", "adolar4u", "unknown"}
@@ -83,7 +82,7 @@ def update_user_settings(user_id: int, values: dict) -> dict:
             discovery = float(values["discovery_level"])
         except (TypeError, ValueError):
             raise errors.ValidationError(
-                "Ungültiges Entdeckungs-Level (Zahl zwischen 0 und 1 erwartet).")
+                "Ungültiges Entdeckungs-Level (Zahl zwischen 0 und 1 erwartet).") from None
         if not math.isfinite(discovery) or not 0 <= discovery <= 1:
             raise errors.ValidationError(
                 "Ungültiges Entdeckungs-Level (Zahl zwischen 0 und 1 erwartet).")
@@ -255,7 +254,8 @@ def _nonnegative_number(value, field: str) -> float:
     try:
         result = float(value or 0)
     except (TypeError, ValueError):
-        raise errors.ValidationError(f"Ungültiger Wert für '{field}' (nicht-negative Zahl erwartet).")
+        raise errors.ValidationError(
+            f"Ungültiger Wert für '{field}' (nicht-negative Zahl erwartet).") from None
     if not math.isfinite(result) or result < 0:
         raise errors.ValidationError(f"Ungültiger Wert für '{field}' (nicht-negative Zahl erwartet).")
     return result

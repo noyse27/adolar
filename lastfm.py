@@ -1,6 +1,7 @@
-import os
 import hashlib
+import os
 import time
+
 import requests
 
 API_KEY    = os.environ.get("LASTFM_API_KEY", "")
@@ -119,10 +120,8 @@ def get_loved_tracks(username: str, limit: int = 200) -> list[dict]:
 
         for item in loved.get("track", []):
             artist = item.get("artist", {})
-            if isinstance(artist, dict):
-                artist_name = artist.get("name")
-            else:
-                artist_name = str(artist) if artist else None
+            artist_name = (artist.get("name") if isinstance(artist, dict)
+                           else (str(artist) if artist else None))
             loved_at = None
             date = item.get("date", {})
             if isinstance(date, dict):

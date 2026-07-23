@@ -3,9 +3,11 @@ AdolarRadio – Windows companion app for Adolar.
 Single-file pywebview app. Build to .exe with: pyinstaller adolar_radio.spec
 """
 
+import contextlib
 import json
 import os
 import sys
+
 import webview
 
 CONFIG_PATH = os.path.join(os.environ.get("APPDATA", "."), "AdolarRadio", "config.json")
@@ -131,7 +133,7 @@ document.getElementById("url").addEventListener("keydown", e => {
 
 def load_config():
     try:
-        with open(CONFIG_PATH, "r") as f:
+        with open(CONFIG_PATH) as f:
             return json.load(f)
     except Exception:
         return {}
@@ -208,18 +210,14 @@ class Api:
             .then(() => loadStations(true))
             .catch(() => {});
         """
-        try:
+        with contextlib.suppress(Exception):
             self._win[0].evaluate_js(script)
-        except Exception:
-            pass
         return {"ok": True}
 
     def _close_settings_windows(self):
         for win in list(self._settings_windows):
-            try:
+            with contextlib.suppress(Exception):
                 win.destroy()
-            except Exception:
-                pass
         self._settings_windows.clear()
 
 

@@ -3,7 +3,6 @@ import tempfile
 import unittest
 from unittest import mock
 
-
 _temp_dir = tempfile.TemporaryDirectory()
 os.environ["DB_PATH"] = os.path.join(_temp_dir.name, "adolar-test.db")
 

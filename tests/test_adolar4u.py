@@ -1,14 +1,13 @@
-import os
 import csv
 import io
 import json
+import os
+import random
 import sqlite3
 import tempfile
 import unittest
-import random
 import zipfile
 from unittest import mock
-
 
 _temp_dir = tempfile.TemporaryDirectory()
 os.environ.setdefault("DB_PATH", os.path.join(_temp_dir.name, "adolar4u-test.db"))
@@ -371,7 +370,7 @@ class Adolar4UTests(unittest.TestCase):
         for bucket, amount in (
             ("anchor", 70), ("similar", 30), ("familiar", 30), ("discovery", 30),
         ):
-            for index in range(amount):
+            for _ in range(amount):
                 candidates.append({
                     "id": len(candidates) + 1,
                     "_adolar4u_score": 1000 - len(candidates),
