@@ -178,6 +178,17 @@ class LibraryManagementTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         run.assert_called_once()
 
+    def test_optimize_endpoint_requires_admin_and_reports_both_databases(self):
+        with self._as(self.user):
+            forbidden = self.client.post("/api/admin/database/optimize")
+        self.assertEqual(forbidden.status_code, 403)
+        with self._as(self.admin):
+            response = self.client.post("/api/admin/database/optimize")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["content"]["integrity_check"], "ok")
+        self.assertEqual(data["control"]["integrity_check"], "ok")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@ both succeeded, so interrupted jobs never look like valid backups.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -147,20 +148,49 @@ def is_backup_running(root: str) -> bool:
     return _lock_is_active(lock_path)
 
 
-def _database_counts(conn: sqlite3.Connection) -> dict[str, int]:
+def _database_counts(conn: sqlite3.Connection, wanted: tuple[str, ...]) -> dict[str, int]:
     tables = {
         row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()
     }
-    wanted = (
-        "tracks", "users", "playlists", "radio_stations",
-        "user_play_counts", "lastfm_loved_tracks",
-        "adolar4u_recommendations", "adolar4u_listening_events",
-    )
     return {
         table: int(conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0])
         for table in wanted if table in tables
+    }
+
+
+_CONTENT_COUNT_TABLES = (
+    "tracks", "playlists", "radio_stations", "user_play_counts",
+    "adolar4u_recommendations", "adolar4u_listening_events",
+)
+_CONTROL_COUNT_TABLES = ("users", "sessions", "lastfm_loved_tracks")
+
+
+def _snapshot_sqlite(source_path: str, target_path: Path, wanted_counts: tuple[str, ...]) -> dict:
+    """Copy one SQLite database file via the backup API and verify it.
+
+    Returns a manifest fragment: file size, sha256, quick_check result, and
+    row counts for `wanted_counts` (whichever of those tables exist).
+    """
+    source_conn = sqlite3.connect(source_path, timeout=30)
+    target_conn = sqlite3.connect(target_path)
+    try:
+        source_conn.execute("PRAGMA busy_timeout=30000")
+        source_conn.backup(target_conn, pages=4096, sleep=0.05)
+        result = target_conn.execute("PRAGMA quick_check").fetchone()[0]
+        if result != "ok":
+            raise BackupError(f"SQLite-Prüfung fehlgeschlagen: {result}")
+        counts = _database_counts(target_conn, wanted_counts)
+    finally:
+        target_conn.close()
+        source_conn.close()
+    return {
+        "file": target_path.name,
+        "size": target_path.stat().st_size,
+        "sha256": _sha256(target_path),
+        "quick_check": "ok",
+        "counts": counts,
     }
 
 
@@ -183,6 +213,7 @@ def create_backup(
     database_path: str,
     backup_root: str,
     *,
+    control_db_path: str | None = None,
     jingle_root: str | None = None,
     app_version: str = "unknown",
     source: str = "manual",
@@ -207,36 +238,25 @@ def create_backup(
             "started_at": started.isoformat(timespec="seconds"),
         })
 
-        database_file = partial / "adolar.db"
-        source_conn = sqlite3.connect(database_path, timeout=30)
-        target_conn = sqlite3.connect(database_file)
-        try:
-            source_conn.execute("PRAGMA busy_timeout=30000")
-            source_conn.backup(target_conn, pages=4096, sleep=0.05)
-            result = target_conn.execute("PRAGMA quick_check").fetchone()[0]
-            if result != "ok":
-                raise BackupError(f"SQLite-Prüfung fehlgeschlagen: {result}")
-            counts = _database_counts(target_conn)
-        finally:
-            target_conn.close()
-            source_conn.close()
+        database_fragment = _snapshot_sqlite(
+            database_path, partial / "adolar.db", _CONTENT_COUNT_TABLES,
+        )
+        control_fragment = None
+        if control_db_path and Path(control_db_path).is_file():
+            control_fragment = _snapshot_sqlite(
+                control_db_path, partial / "control.db", _CONTROL_COUNT_TABLES,
+            )
 
         jingle_file = partial / "radio-jingles.tar.gz"
         jingle_count, jingle_size = _archive_jingles(jingle_root, jingle_file)
-        database_size = database_file.stat().st_size
         manifest = {
-            "format_version": 1,
+            "format_version": 2,
             "backup_id": backup_id,
             "created_at": started.isoformat(timespec="seconds"),
             "source": source,
             "app_version": app_version,
-            "database": {
-                "file": "adolar.db",
-                "size": database_size,
-                "sha256": _sha256(database_file),
-                "quick_check": "ok",
-            },
-            "counts": counts,
+            "database": database_fragment,
+            "control_database": control_fragment,
             "radio_jingles": {
                 "file": "radio-jingles.tar.gz" if jingle_count else None,
                 "count": jingle_count,
@@ -274,8 +294,11 @@ def list_backups(backup_root: str) -> list[dict]:
         try:
             manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
             db_file = _safe_file(root, directory.name, "adolar.db")
+            total_size = db_file.stat().st_size
+            with contextlib.suppress(FileNotFoundError):
+                total_size += _safe_file(root, directory.name, "control.db").stat().st_size
             manifest["backup_id"] = directory.name
-            manifest["size"] = db_file.stat().st_size
+            manifest["size"] = total_size
             backups.append(manifest)
         except (OSError, ValueError, KeyError, FileNotFoundError):
             continue
@@ -313,6 +336,7 @@ def get_backup_file(backup_root: str, backup_id: str, kind: str = "database") ->
     root = Path(backup_root).expanduser().resolve()
     filenames = {
         "database": "adolar.db",
+        "control": "control.db",
         "jingles": "radio-jingles.tar.gz",
         "manifest": "manifest.json",
     }
