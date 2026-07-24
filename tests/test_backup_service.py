@@ -42,8 +42,8 @@ class BackupServiceTests(unittest.TestCase):
 
         self.assertTrue(snapshot.is_file())
         self.assertEqual(manifest["database"]["quick_check"], "ok")
-        self.assertEqual(manifest["counts"]["tracks"], 2)
-        self.assertEqual(manifest["counts"]["users"], 1)
+        self.assertEqual(manifest["database"]["counts"]["tracks"], 2)
+        self.assertIsNone(manifest["control_database"])
         self.assertEqual(
             manifest["database"]["sha256"],
             hashlib.sha256(snapshot.read_bytes()).hexdigest(),
@@ -55,6 +55,29 @@ class BackupServiceTests(unittest.TestCase):
         self.assertEqual(check.execute("SELECT COUNT(*) FROM tracks").fetchone()[0], 2)
         check.close()
         self.assertFalse(any(self.backups.glob("*.partial")))
+
+    def test_control_database_is_snapshotted_and_counted_separately(self):
+        control_db = self.root / "control.db"
+        conn = sqlite3.connect(control_db)
+        conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT)")
+        conn.execute("INSERT INTO users(username) VALUES ('admin')")
+        conn.commit()
+        conn.close()
+
+        result = backup_service.create_backup(
+            str(self.database), str(self.backups),
+            control_db_path=str(control_db), app_version="test", retention=7,
+        )
+        directory = self.backups / result["backup_id"]
+        control_snapshot = directory / "control.db"
+
+        self.assertTrue(control_snapshot.is_file())
+        self.assertEqual(result["control_database"]["quick_check"], "ok")
+        self.assertEqual(result["control_database"]["counts"]["users"], 1)
+        self.assertEqual(
+            result["control_database"]["sha256"],
+            hashlib.sha256(control_snapshot.read_bytes()).hexdigest(),
+        )
 
     def test_list_download_and_delete_reject_unsafe_ids(self):
         result = backup_service.create_backup(str(self.database), str(self.backups))

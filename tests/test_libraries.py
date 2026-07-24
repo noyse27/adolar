@@ -130,5 +130,41 @@ class MigrateTrackPathsTests(unittest.TestCase):
         self.assertEqual(updated, 2)
 
 
+class OptimizeDatabaseTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db_patch = mock.patch.object(
+            db, "DB_PATH", os.path.join(self.temp.name, "optimize-test.db"),
+        )
+        self.control_db_patch = mock.patch.object(
+            db, "CONTROL_DB_PATH", os.path.join(self.temp.name, "optimize-test-control.db"),
+        )
+        self.db_patch.start()
+        self.control_db_patch.start()
+        db.init_db()
+
+    def tearDown(self):
+        self.db_patch.stop()
+        self.control_db_patch.stop()
+        self.temp.cleanup()
+
+    def test_checks_and_vacuums_both_databases(self):
+        result = db.optimize_database()
+        self.assertEqual(result["content"]["integrity_check"], "ok")
+        self.assertTrue(result["content"]["vacuumed"])
+        self.assertEqual(result["control"]["integrity_check"], "ok")
+        self.assertTrue(result["control"]["vacuumed"])
+
+    def test_leaves_data_intact(self):
+        with db.db() as conn:
+            conn.execute(
+                "INSERT INTO tracks (id, path, title) VALUES (1, '/music/a.mp3', 'A')",
+            )
+        db.optimize_database()
+        with db.db() as conn:
+            count = conn.execute("SELECT COUNT(*) c FROM tracks").fetchone()["c"]
+        self.assertEqual(count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

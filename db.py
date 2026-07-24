@@ -1561,6 +1561,31 @@ def get_play_count_tag_status() -> dict:
     return {"pending": pending}
 
 
+def optimize_database() -> dict:
+    """Integrity-check, VACUUM, and refresh planner stats for both databases.
+
+    VACUUM cannot run inside an explicit transaction, so this uses its own
+    autocommit connection rather than the db()/get_connection() pattern used
+    for regular queries elsewhere.
+    """
+    conn = get_connection()
+    conn.isolation_level = None
+    try:
+        result = {}
+        for label, schema in (("content", "main"), ("control", "control")):
+            result[label] = {
+                "integrity_check": conn.execute(f"PRAGMA {schema}.integrity_check").fetchone()[0],
+            }
+        conn.execute("VACUUM")
+        conn.execute("VACUUM control")
+        conn.execute("PRAGMA optimize")
+        for label in result:
+            result[label]["vacuumed"] = True
+        return result
+    finally:
+        conn.close()
+
+
 def get_setting(key: str, default=None):
     with db() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()

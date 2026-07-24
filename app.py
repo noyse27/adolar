@@ -6,6 +6,7 @@ import ipaddress
 import json
 import logging
 import os
+import sqlite3
 import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor
@@ -1146,6 +1147,7 @@ def _run_backup_job(source: str, actor_id: int | None = None):
         result = backup_service.create_backup(
             db.DB_PATH,
             BACKUP_ROOT,
+            control_db_path=db.CONTROL_DB_PATH,
             jingle_root=JINGLE_ROOT,
             app_version=APP_VERSION,
             source=source,
@@ -1248,7 +1250,7 @@ def api_backups_download(backup_id, kind):
     except FileNotFoundError:
         abort(404)
     suffixes = {
-        "database": ".db", "jingles": "-radio-jingles.tar.gz",
+        "database": ".db", "control": "-control.db", "jingles": "-radio-jingles.tar.gz",
         "manifest": "-manifest.json",
     }
     if kind not in suffixes:
@@ -1362,6 +1364,22 @@ def api_library_covers():
     """
     scanner.run_thumb_generation()
     return jsonify({"status": "started"})
+
+
+@app.post("/api/admin/database/optimize")
+@_auth.admin_required
+def api_database_optimize():
+    """Integrity-check, VACUUM, and refresh planner stats for both databases.
+
+    Runs synchronously (VACUUM on a typical library database takes seconds,
+    not minutes) so the response reflects the actual result.
+    """
+    try:
+        result = db.optimize_database()
+    except sqlite3.OperationalError as exc:
+        return _client_error("Datenbank-Optimierung fehlgeschlagen.", exc, 503)
+    db.log_audit(g.user["id"], "database.optimized", None, json.dumps(result))
+    return jsonify(result)
 
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
