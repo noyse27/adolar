@@ -2544,12 +2544,6 @@ async function loadDatabaseLibraryPicker() {
   }
 }
 
-$("db-library-select").onchange = async () => {
-  const libraryId = $("db-library-select").value;
-  await fetch(`/api/admin/libraries/${libraryId}/activate`, { method: "POST" });
-  await loadBackupState();
-};
-
 async function optimizeDatabase() {
   const button = $("btn-db-optimize");
   const message = $("db-optimize-message");
@@ -2571,11 +2565,10 @@ async function optimizeDatabase() {
   }
 }
 
-$("btn-db-optimize").onclick = optimizeDatabase;
-
 function openLibraryManager() {
   if (!_me || _me.role !== "admin") return;
   $("library-modal").style.display = "flex";
+  $("lib-message").textContent = "";
   loadLibraryState();
 }
 
@@ -2587,7 +2580,6 @@ let _libraryState = null;
 
 async function loadLibraryState() {
   const message = $("lib-message");
-  message.textContent = "";
   try {
     const response = await fetch("/api/admin/libraries");
     const data = await response.json();
@@ -2703,11 +2695,27 @@ async function readLibraryCovers() {
   }
 }
 
-$("btn-lib-switch").onclick = switchLibrary;
-$("btn-lib-create").onclick = createLibrary;
-$("btn-lib-move").onclick = moveLibrary;
-$("btn-lib-rescan").onclick = rescanLibrary;
-$("btn-lib-covers").onclick = readLibraryCovers;
+// Wired on DOMContentLoaded, not at top level: these elements live in modals
+// placed after this <script> tag in the HTML, so they don't exist yet when
+// this file first runs (a plain <script src> executes synchronously at the
+// point the parser reaches it — referencing them here directly used to throw
+// "Cannot set properties of null", which silently aborted the rest of this
+// script, including loadMe()/loadTracks() at the bottom of the file).
+document.addEventListener("DOMContentLoaded", () => {
+  $("db-library-select").onchange = async () => {
+    const libraryId = $("db-library-select").value;
+    await fetch(`/api/admin/libraries/${libraryId}/activate`, { method: "POST" });
+    await loadBackupState();
+  };
+  $("btn-db-optimize").onclick = optimizeDatabase;
+  $("btn-lib-switch").onclick = switchLibrary;
+  $("btn-lib-create").onclick = createLibrary;
+  $("btn-lib-move").onclick = moveLibrary;
+  $("btn-lib-rescan").onclick = rescanLibrary;
+  $("btn-lib-covers").onclick = readLibraryCovers;
+  $("btn-backup-create").onclick = startDatabaseBackup;
+  $("btn-backup-config-save").onclick = saveBackupConfig;
+});
 
 function renderBackupState(data) {
   const summary = $("backup-summary");
@@ -2816,9 +2824,6 @@ async function saveBackupConfig() {
     button.disabled = false;
   }
 }
-
-$("btn-backup-create").onclick = startDatabaseBackup;
-$("btn-backup-config-save").onclick = saveBackupConfig;
 
 async function lfmDisconnect() {
   await fetch(`${API}/api/lastfm/disconnect`, { method: "POST" });
