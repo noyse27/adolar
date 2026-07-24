@@ -2,7 +2,7 @@
 
 from .export import build_learning_export
 from .recommender import recommend_tracks
-from .schema import init_schema
+from .schema import init_schema, migrate_legacy_user_fks
 from .service import (
     complete_onboarding,
     delete_profile,
@@ -27,6 +27,7 @@ __all__ = [
     "get_seed_affinities",
     "get_user_settings",
     "init_schema",
+    "migrate_legacy_user_fks",
     "record_event",
     "search_onboarding_options",
     "recommend_tracks",

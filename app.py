@@ -25,6 +25,7 @@ import backup_service
 import db
 import errors
 import lastfm
+import libraries
 import scanner
 import smart_shuffle
 
@@ -53,6 +54,12 @@ DATA_ROOT = os.path.dirname(os.path.abspath(os.path.expanduser(
     os.environ.get("DB_PATH", "") or "~/.cache/adolar.db"
 )))
 JINGLE_ROOT = os.path.join(DATA_ROOT, "radio_jingles")
+LIBRARY_REGISTRY_PATH = os.path.join(DATA_ROOT, "libraries.json")
+LIBRARIES_DIR = os.path.join(DATA_ROOT, "libraries")
+# Anchored to DATA_ROOT (not left on db.py's own "/data/control.db" default)
+# so it sits next to whichever DB_PATH was configured, and stays put when a
+# library switch later reassigns db.DB_PATH to a different file.
+db.CONTROL_DB_PATH = os.environ.get("CONTROL_DB_PATH") or os.path.join(DATA_ROOT, "control.db")
 BACKUP_ROOT = os.environ.get("BACKUP_PATH", "/backups")
 BACKUP_TIMEZONE = os.environ.get("TZ", "Europe/Berlin")
 
@@ -1263,6 +1270,93 @@ def api_backups_delete(backup_id):
     return jsonify({"ok": True})
 
 
+# ── Library management (admin only) ────────────────────────────────────────────
+
+@app.get("/api/admin/libraries")
+@_auth.admin_required
+def api_libraries_list():
+    libs, active_id = libraries.list_libraries(LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH)
+    return jsonify({"libraries": libs, "active_id": active_id})
+
+
+@app.post("/api/admin/libraries")
+@_auth.admin_required
+def api_libraries_create():
+    global MUSIC_ROOT
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    music_path = (data.get("music_path") or "").strip()
+    try:
+        if not name:
+            raise errors.ValidationError("Bitte einen Namen für die Bibliothek angeben.")
+        if not music_path or not os.path.isdir(music_path):
+            raise errors.ValidationError("Der angegebene Pfad existiert nicht oder ist kein Verzeichnis.")
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    lib = libraries.add_library(
+        LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH, LIBRARIES_DIR, name, music_path,
+    )
+    db.DB_PATH = lib["db_path"]
+    MUSIC_ROOT = lib["music_path"]
+    db.init_db()
+    db.log_audit(g.user["id"], "library.created", lib["id"], json.dumps(lib))
+    return jsonify(lib), 201
+
+
+@app.post("/api/admin/libraries/<library_id>/activate")
+@_auth.admin_required
+def api_libraries_activate(library_id):
+    global MUSIC_ROOT
+    try:
+        lib = libraries.set_active(LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH, library_id)
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc, 404)
+    db.DB_PATH = lib["db_path"]
+    MUSIC_ROOT = lib["music_path"]
+    db.init_db()
+    db.log_audit(g.user["id"], "library.activated", lib["id"])
+    return jsonify(lib)
+
+
+@app.put("/api/admin/libraries/<library_id>/move")
+@_auth.admin_required
+def api_libraries_move(library_id):
+    global MUSIC_ROOT
+    _libs, active_id = libraries.list_libraries(LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH)
+    data = request.get_json(silent=True) or {}
+    new_music_path = (data.get("new_music_path") or "").strip()
+    try:
+        if library_id != active_id:
+            raise errors.ValidationError("Bitte zuerst diese Bibliothek aktivieren, bevor sie umgezogen wird.")
+        if not new_music_path or not os.path.isdir(new_music_path):
+            raise errors.ValidationError("Der neue Pfad existiert nicht oder ist kein Verzeichnis.")
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    old_music_path = MUSIC_ROOT
+    updated = db.migrate_track_paths(old_music_path, new_music_path)
+    lib = libraries.update_music_path(
+        LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH, library_id, new_music_path,
+    )
+    MUSIC_ROOT = lib["music_path"]
+    db.log_audit(
+        g.user["id"], "library.moved", library_id,
+        json.dumps({"old_path": old_music_path, "new_path": new_music_path, "tracks_updated": updated}),
+    )
+    return jsonify({"library": lib, "tracks_updated": updated})
+
+
+@app.post("/api/admin/library/covers")
+@_auth.admin_required
+def api_library_covers():
+    """Generate thumbnails for cover art already found on disk/in tags.
+
+    This does not re-read tags from files that a normal scan considers
+    unchanged; use "Bibliothek neu scannen" for that.
+    """
+    scanner.run_thumb_generation()
+    return jsonify({"status": "started"})
+
+
 # ── Pages ─────────────────────────────────────────────────────────────────────
 
 @app.route("/", methods=["HEAD"])
@@ -2372,6 +2466,13 @@ def api_scan_status():
 
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
+
+# The library registry is authoritative for which content database and music
+# folder are active; it persists across restarts independently of db.DB_PATH,
+# so a library switched-to in a previous run stays active after a restart.
+_active_library = libraries.get_active(LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH)
+db.DB_PATH = _active_library["db_path"]
+MUSIC_ROOT = _active_library["music_path"]
 
 db.init_db()
 _auth.load_persisted_blocks()
