@@ -2515,17 +2515,199 @@ function formatBackupBytes(value) {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
-async function toggleBackupPanel() {
-  const panel = $("backup-panel");
-  const open = panel.style.display === "block";
-  panel.style.display = open ? "none" : "block";
-  $("backup-chevron").className = open ? "ti ti-chevron-down" : "ti ti-chevron-up";
-  if (!open) await loadBackupState();
-  if (open && backupPollTimer) {
+function openDatabaseManager() {
+  if (!_me || _me.role !== "admin") return;
+  $("database-modal").style.display = "flex";
+  loadBackupState();
+  loadDatabaseLibraryPicker();
+}
+
+function closeDatabaseManager() {
+  $("database-modal").style.display = "none";
+  if (backupPollTimer) {
     clearTimeout(backupPollTimer);
     backupPollTimer = null;
   }
 }
+
+async function loadDatabaseLibraryPicker() {
+  const select = $("db-library-select");
+  try {
+    const response = await fetch("/api/admin/libraries");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Bibliotheken nicht erreichbar");
+    select.innerHTML = data.libraries.map(lib =>
+      `<option value="${esc(lib.id)}" ${lib.id === data.active_id ? "selected" : ""}>${esc(lib.name)}</option>`,
+    ).join("");
+  } catch (error) {
+    select.innerHTML = `<option>${esc(error.message)}</option>`;
+  }
+}
+
+$("db-library-select").onchange = async () => {
+  const libraryId = $("db-library-select").value;
+  await fetch(`/api/admin/libraries/${libraryId}/activate`, { method: "POST" });
+  await loadBackupState();
+};
+
+async function optimizeDatabase() {
+  const button = $("btn-db-optimize");
+  const message = $("db-optimize-message");
+  button.disabled = true;
+  message.textContent = "";
+  const original = button.innerHTML;
+  button.innerHTML = '<i class="ti ti-loader"></i> Optimiert…';
+  try {
+    const response = await fetch("/api/admin/database/optimize", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Optimierung fehlgeschlagen");
+    message.textContent =
+      `Content-DB: ${data.content.integrity_check} · Control-DB: ${data.control.integrity_check} · VACUUM + Statistiken aktualisiert.`;
+  } catch (error) {
+    message.innerHTML = `<span style="color:#e58b8b">${esc(error.message)}</span>`;
+  } finally {
+    button.disabled = false;
+    button.innerHTML = original;
+  }
+}
+
+$("btn-db-optimize").onclick = optimizeDatabase;
+
+function openLibraryManager() {
+  if (!_me || _me.role !== "admin") return;
+  $("library-modal").style.display = "flex";
+  loadLibraryState();
+}
+
+function closeLibraryManager() {
+  $("library-modal").style.display = "none";
+}
+
+let _libraryState = null;
+
+async function loadLibraryState() {
+  const message = $("lib-message");
+  message.textContent = "";
+  try {
+    const response = await fetch("/api/admin/libraries");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Bibliotheken nicht erreichbar");
+    _libraryState = data;
+    const active = data.libraries.find(lib => lib.id === data.active_id) || data.libraries[0];
+
+    $("lib-current-path").textContent = active
+      ? `${active.name} — ${active.music_path}`
+      : "Keine Bibliothek vorhanden.";
+    $("lib-move-old-path").textContent = active ? `Aktueller Pfad: ${active.music_path}` : "";
+
+    const switchSection = $("lib-switch-section");
+    if (data.libraries.length > 1) {
+      switchSection.style.display = "block";
+      $("lib-switch-select").innerHTML = data.libraries.map(lib =>
+        `<option value="${esc(lib.id)}" ${lib.id === data.active_id ? "selected" : ""}>${esc(lib.name)}</option>`,
+      ).join("");
+    } else {
+      switchSection.style.display = "none";
+    }
+  } catch (error) {
+    message.innerHTML = `<span style="color:#e58b8b">${esc(error.message)}</span>`;
+  }
+}
+
+async function switchLibrary() {
+  const message = $("lib-message");
+  const libraryId = $("lib-switch-select").value;
+  const button = $("btn-lib-switch");
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/admin/libraries/${libraryId}/activate`, { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Wechsel fehlgeschlagen");
+    message.textContent = `Bibliothek "${data.name}" ist jetzt aktiv.`;
+    await loadLibraryState();
+    loadTracks(1, true);
+  } catch (error) {
+    message.innerHTML = `<span style="color:#e58b8b">${esc(error.message)}</span>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function createLibrary() {
+  const message = $("lib-message");
+  const name = $("lib-new-name").value.trim();
+  const musicPath = $("lib-new-path").value.trim();
+  const button = $("btn-lib-create");
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/admin/libraries", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ name, music_path: musicPath }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Anlegen fehlgeschlagen");
+    message.textContent = `Bibliothek "${data.name}" angelegt und aktiv.`;
+    $("lib-new-name").value = "";
+    $("lib-new-path").value = "";
+    await loadLibraryState();
+    loadTracks(1, true);
+  } catch (error) {
+    message.innerHTML = `<span style="color:#e58b8b">${esc(error.message)}</span>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function moveLibrary() {
+  const message = $("lib-message");
+  const newPath = $("lib-move-new-path").value.trim();
+  const activeId = _libraryState?.active_id;
+  if (!activeId) return;
+  const button = $("btn-lib-move");
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/admin/libraries/${activeId}/move`, {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ new_music_path: newPath }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Umzug fehlgeschlagen");
+    message.textContent = `Pfad aktualisiert, ${data.tracks_updated} Track(s) angepasst.`;
+    $("lib-move-new-path").value = "";
+    await loadLibraryState();
+  } catch (error) {
+    message.innerHTML = `<span style="color:#e58b8b">${esc(error.message)}</span>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function rescanLibrary() {
+  await fetch(`${API}/api/scan/start`, { method: "POST" });
+  showBanner("Bibliothek wird gescannt…");
+  startScanPolling();
+  $("lib-message").textContent = "Scan gestartet.";
+}
+
+async function readLibraryCovers() {
+  const message = $("lib-message");
+  try {
+    const response = await fetch("/api/admin/library/covers", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Cover-Einlesen fehlgeschlagen");
+    message.textContent = "Cover-Verarbeitung gestartet.";
+  } catch (error) {
+    message.innerHTML = `<span style="color:#e58b8b">${esc(error.message)}</span>`;
+  }
+}
+
+$("btn-lib-switch").onclick = switchLibrary;
+$("btn-lib-create").onclick = createLibrary;
+$("btn-lib-move").onclick = moveLibrary;
+$("btn-lib-rescan").onclick = rescanLibrary;
+$("btn-lib-covers").onclick = readLibraryCovers;
 
 function renderBackupState(data) {
   const summary = $("backup-summary");
@@ -2573,7 +2755,7 @@ function renderBackupState(data) {
 }
 
 async function loadBackupState() {
-  if ($("backup-panel").style.display !== "block") return;
+  if ($("database-modal").style.display !== "flex") return;
   try {
     const response = await fetch("/api/admin/backups");
     const data = await response.json();
@@ -2635,7 +2817,6 @@ async function saveBackupConfig() {
   }
 }
 
-$("btn-backup-toggle").onclick = toggleBackupPanel;
 $("btn-backup-create").onclick = startDatabaseBackup;
 $("btn-backup-config-save").onclick = saveBackupConfig;
 
@@ -3915,6 +4096,7 @@ async function loadMe() {
   if (_me.role === "admin") {
     $("btn-user-mgmt").style.display = "flex";
     $("btn-monitor").style.display = "flex";
+    $("btn-library").style.display = "flex";
   }
 
   await loadAdolar4UStatus();
