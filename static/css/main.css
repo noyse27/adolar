@@ -443,15 +443,15 @@
     }
     #btn-loved-filter.running { color: var(--accent); border-color: var(--accent-border); }
     /* Wartung panel */
-    #btn-wartung-toggle, #btn-monitor {
+    #btn-library, #btn-wartung-toggle, #btn-monitor {
       display: flex; align-items: center; gap: 6px;
       width: 100%; padding: 6px 10px;
       background: transparent; border: 0.5px solid var(--border-medium);
       border-radius: 6px; font-size: var(--text-base);
       color: var(--text-secondary); cursor: pointer; transition: background .1s;
     }
-    #btn-wartung-toggle:hover, #btn-monitor:hover { background: var(--bg-secondary); }
-    #btn-monitor { display: none; margin-bottom: 6px; }
+    #btn-library:hover, #btn-wartung-toggle:hover, #btn-monitor:hover { background: var(--bg-secondary); }
+    #btn-library, #btn-monitor { display: none; margin-bottom: 6px; }
     #wartung-panel { display: none; margin-top: 6px; }
     #wartung-panel button {
       display: flex; align-items: center; gap: 6px;
@@ -464,23 +464,33 @@
     #wartung-panel button:hover { background: var(--bg-secondary); }
     #wartung-panel button.running { color: var(--accent); }
     #btn-loved-sync, #btn-pc-sync { display: none; }
-    #backup-panel {
-      display: none; margin: 6px 0 2px; padding: 8px;
-      border: 0.5px solid var(--border-subtle); border-radius: 6px;
-      background: var(--bg-secondary); font-size: 11px; color: var(--text-tertiary);
+
+    /* Bibliothek / Datenbank modals */
+    .lib-section {
+      padding: 12px 0; border-top: 0.5px solid var(--border-subtle);
     }
-    #backup-panel #btn-backup-create { margin: 0 0 7px; justify-content: center; }
-    #backup-summary { line-height: 1.4; margin-bottom: 5px; overflow-wrap: anywhere; }
+    .lib-section:first-of-type { border-top: none; padding-top: 0; }
+    .lib-section-label {
+      font-size: 12px; font-weight: 650; color: var(--text-tertiary);
+      text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px;
+    }
+    .lib-row { display: flex; gap: 8px; align-items: center; }
+    .lib-row-wrap { flex-wrap: wrap; }
+    .lib-row-wrap .radio-input { flex: 1; min-width: 160px; }
+    .lib-hint { font-size: 12px; color: var(--text-tertiary); margin-bottom: 6px; overflow-wrap: anywhere; }
+    .lib-message { font-size: 12px; margin-top: 8px; overflow-wrap: anywhere; }
+    #lib-current-path { font-size: 13px; color: var(--text-primary); overflow-wrap: anywhere; }
+    #btn-backup-create { width: 100%; margin-bottom: 7px; }
+    #backup-summary { line-height: 1.4; margin-bottom: 5px; overflow-wrap: anywhere; font-size: 12px; color: var(--text-secondary); }
     #backup-config {
       border-top: 0.5px solid var(--border-subtle); border-bottom: 0.5px solid var(--border-subtle);
-      padding: 7px 0; margin-bottom: 7px; display: flex; flex-direction: column; gap: 6px;
+      padding: 10px 0; margin-bottom: 7px; display: flex; flex-direction: column; gap: 6px;
     }
     .backup-config-row {
-      display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary);
+      display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);
     }
-    .backup-config-row input[type=number] { width: 52px; }
-    #backup-config #btn-backup-config-save { justify-content: center; }
-    #backup-config-message { font-size: 11px; overflow-wrap: anywhere; }
+    .backup-config-row input[type=number] { width: 56px; }
+    #backup-config-message { font-size: 12px; overflow-wrap: anywhere; }
     .backup-item { padding: 6px 0; border-top: 0.5px solid var(--border-subtle); }
     .backup-item-head { color: var(--text-secondary); margin-bottom: 3px; }
     .backup-item-actions { display: flex; gap: 8px; align-items: center; }

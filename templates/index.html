@@ -242,6 +242,10 @@
     </div>
 
     <div class="sidebar-scan">
+      <button id="btn-library" onclick="openLibraryManager()">
+        <i class="ti ti-library"></i>
+        <span>Bibliothek</span>
+      </button>
       <button id="btn-monitor" onclick="openMonitor()">
         <i class="ti ti-activity-heartbeat"></i>
         <span data-i18n="monitor">Monitor</span>
@@ -276,34 +280,10 @@
           <i class="ti ti-device-floppy"></i>
           <span>Playcount-Tags schreiben</span>
         </button>
-        <button id="btn-backup-toggle" title="Geprüfte Datenbanksicherungen verwalten">
-          <i class="ti ti-database-export"></i>
-          <span>Datensicherung</span>
-          <i class="ti ti-chevron-down" id="backup-chevron" style="margin-left:auto;font-size:11px"></i>
+        <button id="btn-database" onclick="openDatabaseManager()" title="Datenbank verwalten: Sicherungen, Zeitplan, Optimierung">
+          <i class="ti ti-database-cog"></i>
+          <span>Datenbank</span>
         </button>
-        <div id="backup-panel">
-          <button id="btn-backup-create">
-            <i class="ti ti-device-floppy"></i><span>Jetzt sichern</span>
-          </button>
-          <div id="backup-summary">Backup-Ziel wird geprüft…</div>
-          <div id="backup-config">
-            <label class="backup-config-row">
-              <input type="checkbox" id="backup-cfg-enabled">
-              Automatische tägliche Sicherung
-            </label>
-            <label class="backup-config-row">
-              Ab Stunde
-              <input type="number" id="backup-cfg-hour" min="0" max="23" step="1">
-            </label>
-            <label class="backup-config-row">
-              Sicherungen behalten
-              <input type="number" id="backup-cfg-retention" min="1" max="365" step="1">
-            </label>
-            <button id="btn-backup-config-save">Zeitplan speichern</button>
-            <div id="backup-config-message"></div>
-          </div>
-          <div id="backup-list"></div>
-        </div>
       </div>
     </div>
 
@@ -652,6 +632,103 @@
     <div class="monitor-section-title">Letzte 10 Verbindungen</div>
     <div id="monitor-recent" class="monitor-table-wrap"><div class="monitor-empty">Wird geladen…</div></div>
     <div id="monitor-status" style="margin-top:10px;font-size:11px;color:var(--text-tertiary)"></div>
+  </div>
+</div>
+
+<!-- ── Library management ── -->
+<div id="library-modal" class="modal-backdrop" style="z-index:10001" onclick="if(event.target===this)closeLibraryManager()">
+  <div class="modal-box" style="width:min(560px,96vw)">
+    <div class="modal-head">
+      <div class="modal-title"><i class="ti ti-library" style="color:var(--accent)"></i> Bibliothek</div>
+      <button class="modal-close" onclick="closeLibraryManager()" aria-label="Bibliothek schließen">✕</button>
+    </div>
+
+    <div class="lib-section">
+      <div class="lib-section-label">Aktuelle Bibliothek</div>
+      <div id="lib-current-path">–</div>
+    </div>
+
+    <div class="lib-section" id="lib-switch-section" style="display:none">
+      <div class="lib-section-label">Bibliothek wechseln</div>
+      <div class="lib-row">
+        <select id="lib-switch-select" class="radio-select"></select>
+        <button id="btn-lib-switch" class="radio-secondary-btn">Wechseln</button>
+      </div>
+    </div>
+
+    <div class="lib-section">
+      <div class="lib-section-label">Neue Bibliothek anlegen</div>
+      <div class="lib-row lib-row-wrap">
+        <input type="text" id="lib-new-name" class="radio-input" placeholder="Name">
+        <input type="text" id="lib-new-path" class="radio-input" placeholder="Pfad, z.B. /music/neu">
+        <button id="btn-lib-create" class="radio-secondary-btn">Anlegen</button>
+      </div>
+    </div>
+
+    <div class="lib-section">
+      <div class="lib-section-label">Bibliothek umziehen</div>
+      <div id="lib-move-old-path" class="lib-hint"></div>
+      <div class="lib-row lib-row-wrap">
+        <input type="text" id="lib-move-new-path" class="radio-input" placeholder="Neuer Pfad">
+        <button id="btn-lib-move" class="radio-secondary-btn">Pfad in DB aktualisieren</button>
+      </div>
+    </div>
+
+    <div class="lib-section">
+      <div class="lib-section-label">Aktionen</div>
+      <div class="lib-row">
+        <button id="btn-lib-rescan" class="radio-secondary-btn"><i class="ti ti-refresh"></i> Neu scannen</button>
+        <button id="btn-lib-covers" class="radio-secondary-btn"><i class="ti ti-photo"></i> Cover einlesen</button>
+      </div>
+    </div>
+
+    <div id="lib-message" class="lib-message"></div>
+  </div>
+</div>
+
+<!-- ── Database management ── -->
+<div id="database-modal" class="modal-backdrop" style="z-index:10001" onclick="if(event.target===this)closeDatabaseManager()">
+  <div class="modal-box" style="width:min(560px,96vw)">
+    <div class="modal-head">
+      <div class="modal-title"><i class="ti ti-database-cog" style="color:var(--accent)"></i> Datenbank</div>
+      <button class="modal-close" onclick="closeDatabaseManager()" aria-label="Datenbank schließen">✕</button>
+    </div>
+
+    <div class="lib-section">
+      <div class="lib-section-label">Bibliothek</div>
+      <select id="db-library-select" class="radio-select"></select>
+    </div>
+
+    <div class="lib-section">
+      <div class="lib-section-label">Sicherung</div>
+      <button id="btn-backup-create" class="radio-secondary-btn">
+        <i class="ti ti-device-floppy"></i><span>Jetzt sichern</span>
+      </button>
+      <div id="backup-summary">Backup-Ziel wird geprüft…</div>
+      <div id="backup-config">
+        <label class="backup-config-row">
+          <input type="checkbox" id="backup-cfg-enabled">
+          Automatische tägliche Sicherung
+        </label>
+        <label class="backup-config-row">
+          Ab Stunde
+          <input type="number" id="backup-cfg-hour" min="0" max="23" step="1">
+        </label>
+        <label class="backup-config-row">
+          Sicherungen behalten
+          <input type="number" id="backup-cfg-retention" min="1" max="365" step="1">
+        </label>
+        <button id="btn-backup-config-save" class="radio-secondary-btn">Zeitplan speichern</button>
+        <div id="backup-config-message"></div>
+      </div>
+      <div id="backup-list"></div>
+    </div>
+
+    <div class="lib-section">
+      <div class="lib-section-label">Wartung</div>
+      <button id="btn-db-optimize" class="radio-secondary-btn"><i class="ti ti-sparkles"></i> Optimieren</button>
+      <div id="db-optimize-message" class="lib-message"></div>
+    </div>
   </div>
 </div>
 
