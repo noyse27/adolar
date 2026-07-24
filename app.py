@@ -54,12 +54,32 @@ DATA_ROOT = os.path.dirname(os.path.abspath(os.path.expanduser(
 )))
 JINGLE_ROOT = os.path.join(DATA_ROOT, "radio_jingles")
 BACKUP_ROOT = os.environ.get("BACKUP_PATH", "/backups")
-BACKUP_RETENTION = max(1, int(os.environ.get("BACKUP_RETENTION", "7")))
-BACKUP_HOUR = max(0, min(23, int(os.environ.get("BACKUP_HOUR", "3"))))
 BACKUP_TIMEZONE = os.environ.get("TZ", "Europe/Berlin")
-BACKUP_AUTO_ENABLED = os.environ.get("BACKUP_AUTO_ENABLED", "0").lower() in (
+
+# Seed defaults for the first run only; after that the admin-editable values
+# in the settings table (see _backup_*() below) take over. This lets the
+# schedule be changed at runtime from the Datenbank-Wartung UI without a
+# container restart.
+_BACKUP_DEFAULT_RETENTION = max(1, int(os.environ.get("BACKUP_RETENTION", "7")))
+_BACKUP_DEFAULT_HOUR = max(0, min(23, int(os.environ.get("BACKUP_HOUR", "3"))))
+_BACKUP_DEFAULT_AUTO_ENABLED = os.environ.get("BACKUP_AUTO_ENABLED", "0").lower() in (
     "1", "true", "yes", "on",
 )
+
+
+def _backup_auto_enabled() -> bool:
+    value = db.get_setting("backup_auto_enabled")
+    return _BACKUP_DEFAULT_AUTO_ENABLED if value is None else value == "1"
+
+
+def _backup_hour() -> int:
+    value = db.get_setting("backup_hour")
+    return _BACKUP_DEFAULT_HOUR if value is None else int(value)
+
+
+def _backup_retention() -> int:
+    value = db.get_setting("backup_retention")
+    return _BACKUP_DEFAULT_RETENTION if value is None else int(value)
 
 # ── Adolar Disco connection tracking ─────────────────────────────────────────
 _disco_last_seen: float = 0   # epoch seconds
@@ -1122,7 +1142,7 @@ def _run_backup_job(source: str, actor_id: int | None = None):
             jingle_root=JINGLE_ROOT,
             app_version=APP_VERSION,
             source=source,
-            retention=BACKUP_RETENTION,
+            retention=_backup_retention(),
         )
         db.log_audit(
             actor_id, "backup.created", result["backup_id"],
@@ -1167,10 +1187,38 @@ def api_backups_list():
         "backups": backups,
         "status": status,
         "configured_path": BACKUP_ROOT,
-        "automatic": BACKUP_AUTO_ENABLED,
-        "hour": BACKUP_HOUR,
-        "retention": BACKUP_RETENTION,
+        "automatic": _backup_auto_enabled(),
+        "hour": _backup_hour(),
+        "retention": _backup_retention(),
     })
+
+
+@app.put("/api/admin/backups/config")
+@_auth.admin_required
+def api_backups_config_update():
+    data = request.get_json(silent=True) or {}
+    try:
+        if "enabled" not in data or "hour" not in data or "retention" not in data:
+            raise errors.ValidationError("Bitte enabled, hour und retention angeben.")
+        enabled = bool(data["enabled"])
+        hour = int(data["hour"])
+        retention = int(data["retention"])
+        if not 0 <= hour <= 23:
+            raise errors.ValidationError("Die Startstunde muss zwischen 0 und 23 liegen.")
+        if not 1 <= retention <= 365:
+            raise errors.ValidationError("Die Anzahl behaltener Sicherungen muss zwischen 1 und 365 liegen.")
+    except (TypeError, ValueError) as exc:
+        return _client_error("Ungültige Sicherungs-Konfiguration.", exc)
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    db.set_setting("backup_auto_enabled", "1" if enabled else "0")
+    db.set_setting("backup_hour", str(hour))
+    db.set_setting("backup_retention", str(retention))
+    db.log_audit(
+        g.user["id"], "backup.config_updated", None,
+        json.dumps({"enabled": enabled, "hour": hour, "retention": retention}),
+    )
+    return jsonify({"automatic": enabled, "hour": hour, "retention": retention})
 
 
 @app.post("/api/admin/backups")
@@ -2345,23 +2393,27 @@ threading.Thread(target=_play_count_tag_scheduler, daemon=True).start()
 
 
 def _database_backup_scheduler():
-    """Create one verified snapshot per local day after the configured hour."""
+    """Create one verified snapshot per local day after the configured hour.
+
+    Runs unconditionally so that enabling/disabling or rescheduling via the
+    Datenbank-Wartung UI takes effect on the next tick, without a restart.
+    """
     import datetime
     while True:
-        now = datetime.datetime.now(ZoneInfo(BACKUP_TIMEZONE))
-        if now.hour >= BACKUP_HOUR:
-            job_key = f"database_backup_job:{now.date().isoformat()}"
-            if db.claim_once(job_key):
-                _run_backup_job("automatic")
+        if _backup_auto_enabled():
+            now = datetime.datetime.now(ZoneInfo(BACKUP_TIMEZONE))
+            if now.hour >= _backup_hour():
+                job_key = f"database_backup_job:{now.date().isoformat()}"
+                if db.claim_once(job_key):
+                    _run_backup_job("automatic")
         _time.sleep(300)
 
 
-if BACKUP_AUTO_ENABLED:
-    threading.Thread(
-        target=_database_backup_scheduler,
-        daemon=True,
-        name="adolar-backup-scheduler",
-    ).start()
+threading.Thread(
+    target=_database_backup_scheduler,
+    daemon=True,
+    name="adolar-backup-scheduler",
+).start()
 
 if __name__ == "__main__":
     # Dev fallback only; production runs Gunicorn in a container where

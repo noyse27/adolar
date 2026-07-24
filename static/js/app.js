@@ -2541,6 +2541,10 @@ function renderBackupState(data) {
     summary.textContent = `${schedule} · ${data.retention} Sicherungen werden aufbewahrt`;
   }
 
+  $("backup-cfg-enabled").checked = !!data.automatic;
+  $("backup-cfg-hour").value = data.hour;
+  $("backup-cfg-retention").value = data.retention;
+
   const backups = data.backups || [];
   $("backup-list").innerHTML = backups.length ? backups.map(item => {
     const id = item.backup_id;
@@ -2605,8 +2609,35 @@ async function deleteBackup(backupId) {
   if (response.ok) await loadBackupState();
 }
 
+async function saveBackupConfig() {
+  const button = $("btn-backup-config-save");
+  const message = $("backup-config-message");
+  button.disabled = true;
+  message.textContent = "";
+  try {
+    const response = await fetch("/api/admin/backups/config", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        enabled: $("backup-cfg-enabled").checked,
+        hour: Number($("backup-cfg-hour").value),
+        retention: Number($("backup-cfg-retention").value),
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Zeitplan konnte nicht gespeichert werden");
+    message.textContent = "Gespeichert.";
+    await loadBackupState();
+  } catch (error) {
+    message.innerHTML = `<span style="color:#e58b8b">${esc(error.message)}</span>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 $("btn-backup-toggle").onclick = toggleBackupPanel;
 $("btn-backup-create").onclick = startDatabaseBackup;
+$("btn-backup-config-save").onclick = saveBackupConfig;
 
 async function lfmDisconnect() {
   await fetch(`${API}/api/lastfm/disconnect`, { method: "POST" });

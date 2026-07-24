@@ -286,6 +286,22 @@
             <i class="ti ti-device-floppy"></i><span>Jetzt sichern</span>
           </button>
           <div id="backup-summary">Backup-Ziel wird geprüft…</div>
+          <div id="backup-config">
+            <label class="backup-config-row">
+              <input type="checkbox" id="backup-cfg-enabled">
+              Automatische tägliche Sicherung
+            </label>
+            <label class="backup-config-row">
+              Ab Stunde
+              <input type="number" id="backup-cfg-hour" min="0" max="23" step="1">
+            </label>
+            <label class="backup-config-row">
+              Sicherungen behalten
+              <input type="number" id="backup-cfg-retention" min="1" max="365" step="1">
+            </label>
+            <button id="btn-backup-config-save">Zeitplan speichern</button>
+            <div id="backup-config-message"></div>
+          </div>
           <div id="backup-list"></div>
         </div>
       </div>
