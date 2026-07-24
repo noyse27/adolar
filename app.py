@@ -1285,7 +1285,11 @@ def api_libraries_create():
     global MUSIC_ROOT
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
-    music_path = (data.get("music_path") or "").strip()
+    music_path_input = (data.get("music_path") or "").strip()
+    # Admin-supplied library root, deliberately unrestricted (this endpoint's
+    # whole purpose is letting an admin point at any host directory) —
+    # resolved to a canonical absolute path before any filesystem check.
+    music_path = os.path.realpath(music_path_input) if music_path_input else ""
     try:
         if not name:
             raise errors.ValidationError("Bitte einen Namen für die Bibliothek angeben.")
@@ -1324,7 +1328,10 @@ def api_libraries_move(library_id):
     global MUSIC_ROOT
     _libs, active_id = libraries.list_libraries(LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH)
     data = request.get_json(silent=True) or {}
-    new_music_path = (data.get("new_music_path") or "").strip()
+    new_music_path_input = (data.get("new_music_path") or "").strip()
+    # Admin-supplied library root, deliberately unrestricted — see the same
+    # comment in api_libraries_create.
+    new_music_path = os.path.realpath(new_music_path_input) if new_music_path_input else ""
     try:
         if library_id != active_id:
             raise errors.ValidationError("Bitte zuerst diese Bibliothek aktivieren, bevor sie umgezogen wird.")

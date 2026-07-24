@@ -146,10 +146,11 @@ class LibraryManagementTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertEqual(data["tracks_updated"], 1)
-        self.assertEqual(app_module.MUSIC_ROOT, new_path)
+        resolved_new_path = os.path.realpath(new_path)
+        self.assertEqual(app_module.MUSIC_ROOT, resolved_new_path)
         with app_module.db.db() as conn:
             path = conn.execute("SELECT path FROM tracks WHERE id=1").fetchone()["path"]
-        self.assertTrue(path.startswith(new_path))
+        self.assertTrue(path.startswith(resolved_new_path))
 
     def test_move_rejects_inactive_library(self):
         new_music_path = os.path.join(self.temp.name, "music2")
