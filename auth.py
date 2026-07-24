@@ -252,6 +252,14 @@ def delete_user(user_id: int):
             (user_id,),
         )
         conn.execute("DELETE FROM playlists WHERE owner_id=?", (user_id,))
+        # radio_stations.owner_id/created_by have no FK to users (they can't:
+        # users lives in the separate control database — see db.CONTROL_DB_PATH),
+        # so the CASCADE/SET NULL behavior those columns used to get from
+        # SQLite is replicated here explicitly.
+        conn.execute("DELETE FROM radio_stations WHERE owner_id=?", (user_id,))
+        conn.execute(
+            "UPDATE radio_stations SET created_by=NULL WHERE created_by=?", (user_id,),
+        )
         conn.execute("DELETE FROM users WHERE id=?", (user_id,))
 
 def get_blocked_ips() -> list[dict]:

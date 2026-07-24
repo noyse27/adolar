@@ -11,6 +11,7 @@ from unittest import mock
 
 _temp_dir = tempfile.TemporaryDirectory()
 os.environ.setdefault("DB_PATH", os.path.join(_temp_dir.name, "adolar4u-test.db"))
+os.environ.setdefault("CONTROL_DB_PATH", os.path.join(_temp_dir.name, "adolar4u-test-control.db"))
 
 import adolar4u
 import adolar4u.recommender as recommender

@@ -15,7 +15,11 @@ class PlaylistEditorTests(unittest.TestCase):
         self.db_patch = mock.patch.object(
             app_module.db, "DB_PATH", os.path.join(self.temp.name, "playlist-editor.db")
         )
+        self.control_db_patch = mock.patch.object(
+            app_module.db, "CONTROL_DB_PATH", os.path.join(self.temp.name, "playlist-editor-control.db")
+        )
         self.db_patch.start()
+        self.control_db_patch.start()
         app_module.db.init_db()
         with app_module.db.db() as conn:
             conn.execute(
@@ -49,6 +53,7 @@ class PlaylistEditorTests(unittest.TestCase):
 
     def tearDown(self):
         self.db_patch.stop()
+        self.control_db_patch.stop()
         self.temp.cleanup()
 
     def _login(self):

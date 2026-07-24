@@ -1,5 +1,6 @@
 import contextlib
 import json
+import logging
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -10,10 +11,21 @@ import smart_shuffle
 
 DB_PATH = os.environ.get("DB_PATH", "/data/adolar.db")
 
+# Users/sessions/audit log etc. live in a separate, fixed database that never
+# changes when the active library (content database) is switched — otherwise
+# switching libraries would lock every account out. It is attached to every
+# connection as schema "control"; unqualified table names resolve to whichever
+# schema actually defines them (content and control table names never
+# collide), so almost no query text needs a schema prefix.
+CONTROL_DB_PATH = os.environ.get("CONTROL_DB_PATH", "/data/control.db")
+
 
 def get_connection():
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+    os.makedirs(os.path.dirname(CONTROL_DB_PATH) or ".", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("ATTACH DATABASE ? AS control", (CONTROL_DB_PATH,))
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA mmap_size=134217728")
@@ -33,10 +45,208 @@ def db():
         conn.close()
 
 
+_CONTROL_TABLES = (
+    "settings", "users", "user_lastfm_accounts",
+    "user_lastfm_sync_jobs", "sessions", "connection_log", "login_blocks",
+    "audit_log",
+)
+# lastfm_loved_tracks is handled separately by _migrate_lastfm_schema, which
+# also has to deal with a pre-multi-user format that has no user_id column.
+
+
+def _migrate_control_tables_out_of_content_db(conn) -> None:
+    """One-time migration for installs from before the control/content split.
+
+    Copies rows for each control table found in "main" over to the same
+    table in the attached "control" schema (preserving explicit ids, which
+    keeps AUTOINCREMENT sequences correct — see the split PR for the
+    behavior this relies on), then drops the old copy from "main".
+    """
+    main_tables = {
+        row["name"] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    for table in _CONTROL_TABLES:
+        if table not in main_tables:
+            continue
+        columns = [
+            row["name"] for row in conn.execute(f'PRAGMA main.table_info("{table}")')
+        ]
+        column_list = ", ".join(f'"{c}"' for c in columns)
+        conn.execute(
+            f'INSERT INTO control."{table}" ({column_list}) '
+            f'SELECT {column_list} FROM main."{table}"'
+        )
+        conn.execute(f'DROP TABLE main."{table}"')
+
+
+def rebuild_table_dropping_user_fk(conn, table: str, create_sql: str) -> None:
+    """Rebuild `table` from `create_sql` if it still has a stale FK to users.
+
+    Content-side tables (radio_stations, the adolar4u_* tables) used to
+    declare "REFERENCES users(id)" columns. SQLite can't drop a column's FK
+    via ALTER TABLE, and merely changing the CREATE TABLE text in code has
+    no effect on tables that already exist on disk from before the
+    control/content split — so installs that already ran an older version
+    still carry the old constraint, which then fails at the first write
+    once users has moved to the control database (SQLite cannot enforce, or
+    even resolve, a foreign key across attached databases). This does a
+    rename+recreate+copy+drop to reach the same table with the constraint
+    gone; `create_sql` must be the exact modern CREATE TABLE statement,
+    without "IF NOT EXISTS" and without any REFERENCES users(...) clause.
+    """
+    fks = conn.execute(f'PRAGMA foreign_key_list("{table}")').fetchall()
+    if not any(fk["table"] == "users" for fk in fks):
+        return
+    old_name = f"{table}_pre_control_split"
+    conn.execute(f'ALTER TABLE "{table}" RENAME TO "{old_name}"')
+    conn.execute(create_sql)
+    columns = [row["name"] for row in conn.execute(f'PRAGMA table_info("{old_name}")')]
+    column_list = ", ".join(f'"{c}"' for c in columns)
+    conn.execute(f'INSERT INTO "{table}" ({column_list}) SELECT {column_list} FROM "{old_name}"')
+    conn.execute(f'DROP TABLE "{old_name}"')
+
+
 def init_db():
     with db() as conn:
         # Set the persistent journal mode once instead of repeating it on every request.
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA control.journal_mode=WAL")
+
+        # Off for the whole rename/drop-heavy migration section below (up to
+        # and including _migrate_lastfm_schema). Renaming a table SQLite
+        # auto-rewrites *other* tables' REFERENCES clauses to point at the
+        # new (temporary) name; dropping that renamed table then fires any
+        # ON DELETE CASCADE/SET NULL from those other tables immediately,
+        # silently wiping their rows before they get their own turn to
+        # migrate (this is exactly how a real install's sessions and
+        # lastfm_loved_tracks were lost — dropping "users" cascaded into
+        # both while they were still unmigrated in "main"). Verified with
+        # a foreign_key_check before re-enabling.
+        conn.execute("PRAGMA foreign_keys=OFF")
+
+        # Drop any stale "REFERENCES users(id)" constraint on content tables
+        # while users still lives in this same file (installs from before
+        # the control/content split). This must run before users moves to
+        # the control database below — SQLite needs to resolve the FK's
+        # target table to rebuild/drop the table that references it, which
+        # it can no longer do once users is gone from "main".
+        rebuild_table_dropping_user_fk(conn, "radio_stations", """
+            CREATE TABLE radio_stations (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT    NOT NULL,
+                description TEXT    NOT NULL DEFAULT '',
+                filter_json TEXT    NOT NULL DEFAULT '{"mode":"all","rules":[]}',
+                scope       TEXT    NOT NULL DEFAULT 'global',
+                owner_id    INTEGER,
+                jingle_path TEXT,
+                jingle_every_tracks INTEGER NOT NULL DEFAULT 0,
+                jingle_enabled INTEGER NOT NULL DEFAULT 0,
+                is_system   INTEGER NOT NULL DEFAULT 0,
+                created_by  INTEGER,
+                created_at  TEXT    DEFAULT (datetime('now')),
+                updated_at  TEXT    DEFAULT (datetime('now')),
+                engine      TEXT    NOT NULL DEFAULT 'smart_shuffle',
+                UNIQUE(scope, owner_id, name)
+            )
+        """)
+        adolar4u.migrate_legacy_user_fks(conn)
+
+        # ── Control schema: users/sessions/auth/audit — fixed, survives library switches ──
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS control.settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS control.users (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                username             TEXT    NOT NULL UNIQUE,
+                password_hash        TEXT    NOT NULL,
+                role                 TEXT    NOT NULL DEFAULT 'user',
+                allow_download       INTEGER NOT NULL DEFAULT 0,
+                allow_playlists      INTEGER NOT NULL DEFAULT 1,
+                allow_radio_stations INTEGER NOT NULL DEFAULT 1,
+                contributes_playcount INTEGER NOT NULL DEFAULT 0,
+                is_active            INTEGER NOT NULL DEFAULT 1,
+                must_change_password INTEGER NOT NULL DEFAULT 1,
+                created_at           TEXT    DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS control.user_lastfm_accounts (
+                user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                username      TEXT NOT NULL,
+                session_key   TEXT NOT NULL,
+                auto_love_favorites INTEGER NOT NULL DEFAULT 1,
+                connected_at  REAL NOT NULL DEFAULT (unixepoch()),
+                loved_synced_at REAL,
+                playcounts_synced_at REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS control.lastfm_loved_tracks (
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                artist_norm TEXT NOT NULL,
+                title_norm  TEXT NOT NULL,
+                artist      TEXT,
+                title       TEXT,
+                loved_at    INTEGER,
+                synced_at   REAL DEFAULT (unixepoch()),
+                PRIMARY KEY (user_id, artist_norm, title_norm)
+            );
+
+            CREATE TABLE IF NOT EXISTS control.user_lastfm_sync_jobs (
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                job_type    TEXT NOT NULL CHECK(job_type IN ('loved','playcounts')),
+                running     INTEGER NOT NULL DEFAULT 0,
+                error       TEXT,
+                done        INTEGER NOT NULL DEFAULT 0,
+                total       INTEGER NOT NULL DEFAULT 0,
+                result_count INTEGER NOT NULL DEFAULT 0,
+                updated_count INTEGER NOT NULL DEFAULT 0,
+                finished_at REAL,
+                PRIMARY KEY (user_id, job_type)
+            );
+
+            CREATE TABLE IF NOT EXISTS control.sessions (
+                token      TEXT    PRIMARY KEY,
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                expires_at REAL    NOT NULL,
+                connection_id INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS control.connection_log (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                username     TEXT    NOT NULL,
+                product      TEXT    NOT NULL,
+                ip_address   TEXT    NOT NULL,
+                connected_at REAL    NOT NULL,
+                last_seen_at REAL    NOT NULL,
+                client_key   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS control.idx_connection_log_connected
+            ON connection_log(connected_at DESC);
+            CREATE INDEX IF NOT EXISTS control.idx_connection_log_active
+            ON connection_log(last_seen_at DESC);
+
+            CREATE TABLE IF NOT EXISTS control.login_blocks (
+                ip           TEXT PRIMARY KEY,
+                blocked_until REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS control.audit_log (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                action     TEXT NOT NULL,
+                target     TEXT,
+                details    TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS control.idx_audit_created ON audit_log(created_at DESC);
+        """)
+
+        # ── Content schema: tracks/playlists/radio — swaps with the active library ──
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS tracks (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,96 +307,6 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_tracks_year   ON tracks(year);
             CREATE INDEX IF NOT EXISTS idx_tracks_bpm    ON tracks(bpm);
 
-            CREATE TABLE IF NOT EXISTS settings (
-                key   TEXT PRIMARY KEY,
-                value TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS users (
-                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-                username             TEXT    NOT NULL UNIQUE,
-                password_hash        TEXT    NOT NULL,
-                role                 TEXT    NOT NULL DEFAULT 'user',
-                allow_download       INTEGER NOT NULL DEFAULT 0,
-                allow_playlists      INTEGER NOT NULL DEFAULT 1,
-                allow_radio_stations INTEGER NOT NULL DEFAULT 1,
-                contributes_playcount INTEGER NOT NULL DEFAULT 0,
-                is_active            INTEGER NOT NULL DEFAULT 1,
-                must_change_password INTEGER NOT NULL DEFAULT 1,
-                created_at           TEXT    DEFAULT (datetime('now'))
-            );
-
-            CREATE TABLE IF NOT EXISTS user_lastfm_accounts (
-                user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-                username      TEXT NOT NULL,
-                session_key   TEXT NOT NULL,
-                auto_love_favorites INTEGER NOT NULL DEFAULT 1,
-                connected_at  REAL NOT NULL DEFAULT (unixepoch()),
-                loved_synced_at REAL,
-                playcounts_synced_at REAL
-            );
-
-            CREATE TABLE IF NOT EXISTS lastfm_loved_tracks (
-                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                artist_norm TEXT NOT NULL,
-                title_norm  TEXT NOT NULL,
-                artist      TEXT,
-                title       TEXT,
-                loved_at    INTEGER,
-                synced_at   REAL DEFAULT (unixepoch()),
-                PRIMARY KEY (user_id, artist_norm, title_norm)
-            );
-
-            CREATE TABLE IF NOT EXISTS user_lastfm_sync_jobs (
-                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                job_type    TEXT NOT NULL CHECK(job_type IN ('loved','playcounts')),
-                running     INTEGER NOT NULL DEFAULT 0,
-                error       TEXT,
-                done        INTEGER NOT NULL DEFAULT 0,
-                total       INTEGER NOT NULL DEFAULT 0,
-                result_count INTEGER NOT NULL DEFAULT 0,
-                updated_count INTEGER NOT NULL DEFAULT 0,
-                finished_at REAL,
-                PRIMARY KEY (user_id, job_type)
-            );
-
-            CREATE TABLE IF NOT EXISTS sessions (
-                token      TEXT    PRIMARY KEY,
-                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                expires_at REAL    NOT NULL,
-                connection_id INTEGER
-            );
-
-            CREATE TABLE IF NOT EXISTS connection_log (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                username     TEXT    NOT NULL,
-                product      TEXT    NOT NULL,
-                ip_address   TEXT    NOT NULL,
-                connected_at REAL    NOT NULL,
-                last_seen_at REAL    NOT NULL,
-                client_key   TEXT
-            );
-            CREATE INDEX IF NOT EXISTS idx_connection_log_connected
-            ON connection_log(connected_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_connection_log_active
-            ON connection_log(last_seen_at DESC);
-
-            CREATE TABLE IF NOT EXISTS login_blocks (
-                ip           TEXT PRIMARY KEY,
-                blocked_until REAL NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS audit_log (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                actor_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                action     TEXT NOT NULL,
-                target     TEXT,
-                details    TEXT,
-                created_at TEXT DEFAULT (datetime('now'))
-            );
-            CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
-
             CREATE TABLE IF NOT EXISTS user_play_counts (
                 user_id        INTEGER NOT NULL,
                 track_id       INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
@@ -217,24 +337,35 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_plt_playlist ON playlist_tracks(playlist_id, added_at);
 
+            -- owner_id/created_by are plain columns, not enforced foreign keys:
+            -- users live in the separate control database (see CONTROL_DB_PATH
+            -- above), and SQLite cannot enforce foreign keys across attached
+            -- databases. User-deletion cleanup for these is handled in app code.
             CREATE TABLE IF NOT EXISTS radio_stations (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 name        TEXT    NOT NULL,
                 description TEXT    NOT NULL DEFAULT '',
                 filter_json TEXT    NOT NULL DEFAULT '{"mode":"all","rules":[]}',
                 scope       TEXT    NOT NULL DEFAULT 'global',
-                owner_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                owner_id    INTEGER,
                 jingle_path TEXT,
                 jingle_every_tracks INTEGER NOT NULL DEFAULT 0,
                 jingle_enabled INTEGER NOT NULL DEFAULT 0,
                 is_system   INTEGER NOT NULL DEFAULT 0,
-                created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_by  INTEGER,
                 created_at  TEXT    DEFAULT (datetime('now')),
                 updated_at  TEXT    DEFAULT (datetime('now')),
                 engine      TEXT    NOT NULL DEFAULT 'smart_shuffle',
                 UNIQUE(scope, owner_id, name)
             );
         """)
+        # Installs from before the control/content split kept these tables in
+        # the same file as tracks; move any such leftover data into the
+        # control database before anything else touches it. Unqualified
+        # queries prefer "main" over an attached schema when a name exists in
+        # both, so leaving the old copies in place would silently shadow the
+        # new control tables instead of using them.
+        _migrate_control_tables_out_of_content_db(conn)
         # Seed system playlists (idempotent)
         _seed_system_playlists(conn)
         # Migrations (safe to run repeatedly)
@@ -246,11 +377,11 @@ def init_db():
             "ALTER TABLE users ADD COLUMN contributes_playcount INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE radio_stations ADD COLUMN description TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE radio_stations ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'",
-            "ALTER TABLE radio_stations ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE",
+            "ALTER TABLE radio_stations ADD COLUMN owner_id INTEGER",
             "ALTER TABLE radio_stations ADD COLUMN jingle_path TEXT",
             "ALTER TABLE radio_stations ADD COLUMN jingle_every_tracks INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE radio_stations ADD COLUMN jingle_enabled INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE radio_stations ADD COLUMN created_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+            "ALTER TABLE radio_stations ADD COLUMN created_by INTEGER",
             "ALTER TABLE radio_stations ADD COLUMN updated_at TEXT",
             "ALTER TABLE radio_stations ADD COLUMN engine TEXT NOT NULL DEFAULT 'smart_shuffle'",
             "ALTER TABLE users ADD COLUMN allow_playlists INTEGER NOT NULL DEFAULT 1",
@@ -263,10 +394,19 @@ def init_db():
             with contextlib.suppress(Exception):
                 conn.execute(migration)
         conn.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_log_client
+            CREATE UNIQUE INDEX IF NOT EXISTS control.idx_connection_log_client
             ON connection_log(client_key) WHERE client_key IS NOT NULL
         """)
         _migrate_lastfm_schema(conn)
+
+        violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            logging.getLogger(__name__).warning(
+                "foreign_key_check found %d violation(s) after migration: %s",
+                len(violations), [dict(v) for v in violations],
+            )
+        conn.execute("PRAGMA foreign_keys=ON")
+
         _migrate_personal_favorites(conn)
         _seed_radio_stations(conn)
         adolar4u.init_schema(conn)
@@ -305,30 +445,47 @@ def _table_columns(conn, table: str) -> set[str]:
 
 
 def _migrate_lastfm_schema(conn) -> None:
-    """Move the former global Last.fm account and loved rows to its admin owner."""
-    columns = _table_columns(conn, "lastfm_loved_tracks")
-    if columns and "user_id" not in columns:
-        conn.execute("ALTER TABLE lastfm_loved_tracks RENAME TO lastfm_loved_tracks_legacy")
-        conn.executescript("""
-            CREATE TABLE lastfm_loved_tracks (
-                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                artist_norm TEXT NOT NULL,
-                title_norm  TEXT NOT NULL,
-                artist      TEXT,
-                title       TEXT,
-                loved_at    INTEGER,
-                synced_at   REAL DEFAULT (unixepoch()),
-                PRIMARY KEY (user_id, artist_norm, title_norm)
-            );
-        """)
+    """Move the former global Last.fm account and loved rows to its admin owner.
+
+    lastfm_loved_tracks is excluded from _migrate_control_tables_out_of_content_db
+    because very old installs have a pre-multi-user copy with no user_id
+    column at all, which needs the admin-attribution handling below rather
+    than a plain column-preserving copy.
+    """
+    main_tables = {
+        row["name"] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if "lastfm_loved_tracks" in main_tables:
+        columns = {
+            row["name"] for row in conn.execute('PRAGMA main.table_info("lastfm_loved_tracks")')
+        }
+        if "user_id" in columns:
+            conn.execute("INSERT INTO control.lastfm_loved_tracks SELECT * FROM main.lastfm_loved_tracks")
+        else:
+            admin = conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()
+            if admin:
+                conn.execute("""
+                    INSERT OR IGNORE INTO control.lastfm_loved_tracks
+                        (user_id, artist_norm, title_norm, artist, title, loved_at, synced_at)
+                    SELECT ?, artist_norm, title_norm, artist, title, loved_at, synced_at
+                    FROM main.lastfm_loved_tracks
+                """, (int(admin["id"]),))
+        conn.execute("DROP TABLE main.lastfm_loved_tracks")
 
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_lastfm_loved_user
+        CREATE INDEX IF NOT EXISTS control.idx_lastfm_loved_user
         ON lastfm_loved_tracks(user_id, loved_at DESC)
     """)
 
+    # These two already exist from init_db()'s control schema; kept here
+    # (schema-qualified, so IF NOT EXISTS is a true no-op) for installs
+    # upgrading from a version old enough to predate that schema split.
     conn.executescript("""
-        CREATE TABLE IF NOT EXISTS user_lastfm_accounts (
+        CREATE TABLE IF NOT EXISTS control.user_lastfm_accounts (
             user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
             username      TEXT NOT NULL,
             session_key   TEXT NOT NULL,
@@ -337,7 +494,7 @@ def _migrate_lastfm_schema(conn) -> None:
             loved_synced_at REAL,
             playcounts_synced_at REAL
         );
-        CREATE TABLE IF NOT EXISTS user_lastfm_sync_jobs (
+        CREATE TABLE IF NOT EXISTS control.user_lastfm_sync_jobs (
             user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             job_type    TEXT NOT NULL CHECK(job_type IN ('loved','playcounts')),
             running     INTEGER NOT NULL DEFAULT 0,
@@ -359,26 +516,12 @@ def _migrate_lastfm_schema(conn) -> None:
     admin = conn.execute(
         "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
     ).fetchone()
-    if admin:
-        user_id = int(admin["id"])
-        if "lastfm_loved_tracks_legacy" in {
-            row["name"] for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }:
-            conn.execute("""
-                INSERT OR IGNORE INTO lastfm_loved_tracks
-                    (user_id, artist_norm, title_norm, artist, title, loved_at, synced_at)
-                SELECT ?, artist_norm, title_norm, artist, title, loved_at, synced_at
-                FROM lastfm_loved_tracks_legacy
-            """, (user_id,))
-            conn.execute("DROP TABLE lastfm_loved_tracks_legacy")
     if legacy_username and legacy_key and admin:
         conn.execute("""
             INSERT OR IGNORE INTO user_lastfm_accounts
                 (user_id, username, session_key, auto_love_favorites)
             VALUES (?, ?, ?, 1)
-        """, (user_id, legacy_username["value"], legacy_key["value"]))
+        """, (int(admin["id"]), legacy_username["value"], legacy_key["value"]))
         conn.execute(
             "DELETE FROM settings WHERE key IN ('lastfm_username','lastfm_session_key','lastfm_loved_synced_at')"
         )
@@ -1427,6 +1570,22 @@ def get_setting(key: str, default=None):
 def set_setting(key: str, value: str):
     with db() as conn:
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (key, value))
+
+
+def migrate_track_paths(old_root: str, new_root: str) -> int:
+    """Rewrite tracks.path after a library folder moved on disk.
+
+    Only rewrites the DB; files themselves are not touched. Returns the
+    number of rows updated.
+    """
+    old_root = old_root.rstrip("/")
+    with db() as conn:
+        cur = conn.execute(
+            "UPDATE tracks SET path = ? || substr(path, ?) "
+            "WHERE path = ? OR path LIKE ?",
+            (new_root, len(old_root) + 1, old_root, old_root + "/%"),
+        )
+        return cur.rowcount
 
 
 def log_audit(actor_id: int | None, action: str, target: str = "", details: str = ""):
