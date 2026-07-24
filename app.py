@@ -1225,7 +1225,7 @@ def index_head():
 def index():
     if _auth.user_count() == 0:
         return redirect("/setup")
-    return render_template("index.html")
+    return render_template("index.html", app_version=APP_VERSION)
 
 
 @app.get("/miniplayer")
