@@ -1,5 +1,6 @@
 import contextlib
 import json
+import logging
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -112,6 +113,18 @@ def init_db():
         # Set the persistent journal mode once instead of repeating it on every request.
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA control.journal_mode=WAL")
+
+        # Off for the whole rename/drop-heavy migration section below (up to
+        # and including _migrate_lastfm_schema). Renaming a table SQLite
+        # auto-rewrites *other* tables' REFERENCES clauses to point at the
+        # new (temporary) name; dropping that renamed table then fires any
+        # ON DELETE CASCADE/SET NULL from those other tables immediately,
+        # silently wiping their rows before they get their own turn to
+        # migrate (this is exactly how a real install's sessions and
+        # lastfm_loved_tracks were lost — dropping "users" cascaded into
+        # both while they were still unmigrated in "main"). Verified with
+        # a foreign_key_check before re-enabling.
+        conn.execute("PRAGMA foreign_keys=OFF")
 
         # Drop any stale "REFERENCES users(id)" constraint on content tables
         # while users still lives in this same file (installs from before
@@ -385,6 +398,15 @@ def init_db():
             ON connection_log(client_key) WHERE client_key IS NOT NULL
         """)
         _migrate_lastfm_schema(conn)
+
+        violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            logging.getLogger(__name__).warning(
+                "foreign_key_check found %d violation(s) after migration: %s",
+                len(violations), [dict(v) for v in violations],
+            )
+        conn.execute("PRAGMA foreign_keys=ON")
+
         _migrate_personal_favorites(conn)
         _seed_radio_stations(conn)
         adolar4u.init_schema(conn)
