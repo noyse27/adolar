@@ -17,7 +17,7 @@ def test_compose_allows_gunicorn_a_graceful_shutdown():
 
 
 def test_active_radio_queue_can_be_restored_after_browsing_a_playlist():
-    page = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+    page = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
     assert "function showCurrentRadioQueue()" in page
     assert "if (radio.active && radio.browsingLibrary) showCurrentRadioQueue();" in page
     assert "radio.browsingLibrary = true;\n    updateRadioButton();" in page
