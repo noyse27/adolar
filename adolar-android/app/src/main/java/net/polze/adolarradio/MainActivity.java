@@ -1,7 +1,9 @@
 package net.polze.adolarradio;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ComponentName;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -37,6 +39,7 @@ import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 
+import androidx.core.content.ContextCompat;
 import androidx.core.content.res.ResourcesCompat;
 
 import java.io.InputStream;
@@ -119,6 +122,12 @@ public class MainActivity extends Activity {
                     browserConnecting = false;
                     setStatus(getString(R.string.status_connection_lost), true);
                     setControlsEnabled(false);
+                    // Per MediaBrowserCompat docs: on suspension the browser must be
+                    // discarded and a new one created rather than reused.
+                    mainHandler.post(() -> {
+                        detachController();
+                        connectBrowser();
+                    });
                 }
 
                 @Override
@@ -174,10 +183,21 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         orbitronMedium = ResourcesCompat.getFont(this, R.font.orbitron_medium);
         orbitronBold = ResourcesCompat.getFont(this, R.font.orbitron_bold);
+        requestNotificationPermissionIfNeeded();
         if (AdolarPrefs.hasServerUrl(this)) {
             showPlayer();
         } else {
             showSettings();
+        }
+    }
+
+    private void requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return;
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
         }
     }
 
@@ -570,6 +590,13 @@ public class MainActivity extends Activity {
     private void connectBrowser() {
         if (mediaBrowser != null && (mediaBrowser.isConnected() || browserConnecting)) {
             return;
+        }
+        if (mediaBrowser != null) {
+            // A previous connection attempt failed or was suspended; discard it
+            // instead of leaking its ServiceConnection before creating a new one.
+            mediaBrowser.disconnect();
+            mediaBrowser = null;
+            subscribed = false;
         }
         mediaBrowser = new MediaBrowserCompat(
                 this,
