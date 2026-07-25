@@ -173,14 +173,11 @@ class PlayCountTagsSyncRouteTests(TrackActionsTestBase):
 
 
 class FlushPlayCountTagsTests(TrackActionsTestBase):
-    def test_a_fresh_mp3_with_no_existing_id3_tag_fails_to_write_and_stays_dirty(self):
-        # Found while writing these tests: _write_play_count_tag's MP3 branch
-        # (app.py) does `ID3(path)` directly and lets the exception bubble
-        # into the broad except-log-False fallback, unlike scanner.py's
-        # _write_bpm_tag, which falls back to a fresh ID3() when the file
-        # has no ID3 header yet. Net effect: a track whose file never had
-        # any ID3 tag written (plausible for a fresh, never-BPM-scanned rip)
-        # can never have its play-count tag written and stays dirty forever.
+    def test_a_fresh_mp3_with_no_existing_id3_tag_still_gets_written(self):
+        # _write_play_count_tag's MP3 branch used to call ID3(path) directly
+        # and let the exception bubble into the broad except-log-False
+        # fallback whenever the file had no ID3 header yet. Fixed to fall
+        # back to a fresh ID3(), matching scanner.py's _write_bpm_tag.
         path = os.path.join(self.music_root, "untagged.mp3")
         _make_mp3(path)  # no ID3 header at all
         with app_module.db.db() as conn:
@@ -191,13 +188,13 @@ class FlushPlayCountTagsTests(TrackActionsTestBase):
 
         app_module._flush_play_count_tags()
 
-        self.assertEqual(app_module._play_count_tag_sync["failed"], 1)
-        self.assertEqual(len(app_module.db.get_dirty_play_count_tags()), 1)
+        self.assertEqual(app_module._play_count_tag_sync["written"], 1)
+        self.assertEqual(app_module.db.get_dirty_play_count_tags(), [])
+        self.assertEqual(ID3(path)["PCNT"].count, 5)
 
     def test_writes_the_tag_and_marks_the_track_clean(self):
         path = os.path.join(self.music_root, "song.mp3")
         _make_mp3(path)
-        ID3().save(path)  # pre-existing (empty) ID3 header, as _write_play_count_tag requires
         with app_module.db.db() as conn:
             track_id = conn.execute(
                 "INSERT INTO tracks (path, title, play_count, play_count_tag_dirty) "
