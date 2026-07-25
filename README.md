@@ -110,6 +110,26 @@ graceful Gunicorn shutdown before forcing the container to stop. Non-critical
 Last.fm Now Playing and scrobble calls use a small background queue; a Last.fm
 network outage cannot hold an Adolar web request open.
 
+## Quick Start (ohne Docker)
+
+```bash
+pip install -r requirements.txt
+python run.py        # or double-click run.bat on Windows
+```
+
+`run.py` reads config from a local `.env` file if present (real environment
+variables always take priority), then starts the same Gunicorn worker
+configuration Docker uses (Linux/macOS only — Gunicorn does not support
+Windows, so on Windows `run.py` falls back to Flask's development server,
+which is fine for personal/local use but not for unattended production
+hosting).
+
+`MUSIC_ROOT` has no safe default (your library path is always personal), so
+on first run `run.py` asks for it interactively and saves it to `.env` —
+subsequent runs won't ask again. `DB_PATH` and `BACKUP_PATH` fall back to
+`~/.cache/adolar/...` if left unset, so they don't need to be configured
+before the first run.
+
 ## Database backups
 
 The live SQLite database stays in the Docker-managed `adolar-data` volume. A
@@ -218,7 +238,7 @@ Disabling playlist or radio creation does not delete existing personal content. 
 |---|---|---|
 | `MUSIC_ROOT` | `/music` | Path to music library |
 | `DB_PATH` | `/data/adolar.db` | SQLite database path |
-| `BACKUP_PATH` | `/backups` | Backup directory inside the container |
+| `BACKUP_PATH` | `/backups` | Initial backup directory; admin-editable afterward under Datenbank-Wartung without a restart |
 | `BACKUP_HOST_PATH` | `/volumeUSB1/usbshare/adolarDBbackup` | Host directory mounted at `/backups` by Compose |
 | `BACKUP_AUTO_ENABLED` | `true` in Compose | Enable the daily verified snapshot |
 | `BACKUP_HOUR` | `3` | Local hour after which the daily backup starts |

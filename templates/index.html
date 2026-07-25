@@ -707,6 +707,10 @@
       <div id="backup-summary">Backup-Ziel wird geprüft…</div>
       <div id="backup-config">
         <label class="backup-config-row">
+          Zielpfad
+          <input type="text" id="backup-cfg-path" placeholder="/backups">
+        </label>
+        <label class="backup-config-row">
           <input type="checkbox" id="backup-cfg-enabled">
           Automatische tägliche Sicherung
         </label>
@@ -718,7 +722,7 @@
           Sicherungen behalten
           <input type="number" id="backup-cfg-retention" min="1" max="365" step="1">
         </label>
-        <button id="btn-backup-config-save" class="radio-secondary-btn">Zeitplan speichern</button>
+        <button id="btn-backup-config-save" class="radio-secondary-btn">Speichern</button>
         <div id="backup-config-message"></div>
       </div>
       <div id="backup-list"></div>

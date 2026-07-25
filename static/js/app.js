@@ -2731,6 +2731,7 @@ function renderBackupState(data) {
     summary.textContent = `${schedule} · ${data.retention} Sicherungen werden aufbewahrt`;
   }
 
+  $("backup-cfg-path").value = data.configured_path || "";
   $("backup-cfg-enabled").checked = !!data.automatic;
   $("backup-cfg-hour").value = data.hour;
   $("backup-cfg-retention").value = data.retention;
@@ -2812,6 +2813,7 @@ async function saveBackupConfig() {
         enabled: $("backup-cfg-enabled").checked,
         hour: Number($("backup-cfg-hour").value),
         retention: Number($("backup-cfg-retention").value),
+        path: $("backup-cfg-path").value,
       }),
     });
     const data = await response.json();
