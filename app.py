@@ -1775,7 +1775,10 @@ def _write_play_count_tag(path: str, count: int):
     try:
         if ext == ".mp3":
             from mutagen.id3 import ID3, PCNT
-            tags = ID3(path)
+            try:
+                tags = ID3(path)
+            except Exception:
+                tags = ID3()
             tags["PCNT"] = PCNT(count=count)
             tags.save(path)
         elif ext == ".flac":

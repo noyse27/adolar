@@ -34,3 +34,5 @@ Thumbs.db
 
 # Pytest
 .pytest_cache/
+.coverage
+.ruff_cache/
