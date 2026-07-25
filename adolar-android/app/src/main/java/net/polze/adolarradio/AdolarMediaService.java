@@ -27,6 +27,7 @@ import android.webkit.CookieManager;
 import android.view.KeyEvent;
 
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 import androidx.media.MediaBrowserServiceCompat;
 import androidx.media.app.NotificationCompat.MediaStyle;
 import androidx.media.session.MediaButtonReceiver;
@@ -72,6 +73,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     private int playbackRequest;
     private boolean foregroundStarted;
     private boolean resumeOnAudioFocusGain;
+    private boolean playerPrepared;
     private final Runnable connectionHeartbeat = new Runnable() {
         @Override
         public void run() {
@@ -98,6 +100,10 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         @Override
         public void onPlay() {
             if (player != null && currentTrack != null) {
+                if (!playerPrepared) {
+                    // Still buffering; onPreparedListener starts playback once ready.
+                    return;
+                }
                 if (!requestAudioFocus()) {
                     updatePlaybackState(PlaybackStateCompat.STATE_ERROR, "Audiofokus nicht verfügbar.");
                     return;
@@ -140,7 +146,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
 
         @Override
         public void onSkipToPrevious() {
-            if (player != null) {
+            if (player != null && playerPrepared) {
                 player.seekTo(0);
                 updatePlaybackState(
                         player.isPlaying() ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED,
@@ -152,7 +158,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         @Override
         public void onPause() {
             resumeOnAudioFocusGain = false;
-            if (player != null && player.isPlaying()) {
+            if (player != null && playerPrepared && player.isPlaying()) {
                 player.pause();
                 updatePlaybackState(PlaybackStateCompat.STATE_PAUSED, null);
             }
@@ -373,6 +379,11 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         currentTrack = track;
         mediaSession.setActive(true);
         updateMetadata(track);
+        // Marks the service as "started" so it survives the phone UI unbinding
+        // (e.g. screen off triggers MainActivity.onStop -> mediaBrowser.disconnect()).
+        // Without this the service is bound-only and Android destroys it, and the
+        // player with it, the moment the last bound client goes away.
+        ContextCompat.startForegroundService(this, new Intent(this, AdolarMediaService.class));
         startForeground(PLAYBACK_NOTIFICATION_ID, buildNotification());
         foregroundStarted = true;
         player = new MediaPlayer();
@@ -393,6 +404,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
                     headers
             );
             player.setOnPreparedListener(mediaPlayer -> {
+                playerPrepared = true;
                 if (!requestAudioFocus()) {
                     finishCurrentTrack(false, "error");
                     releasePlayer();
@@ -434,7 +446,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     }
 
     private final AudioManager.OnAudioFocusChangeListener audioFocusListener = focusChange -> {
-        if (player == null) {
+        if (player == null || !playerPrepared) {
             return;
         }
         if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
@@ -664,6 +676,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             player.release();
             player = null;
         }
+        playerPrepared = false;
     }
 
     private void updateMetadata(Track track) {

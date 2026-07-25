@@ -57,22 +57,28 @@ DATA_ROOT = os.path.dirname(os.path.abspath(os.path.expanduser(
 JINGLE_ROOT = os.path.join(DATA_ROOT, "radio_jingles")
 LIBRARY_REGISTRY_PATH = os.path.join(DATA_ROOT, "libraries.json")
 LIBRARIES_DIR = os.path.join(DATA_ROOT, "libraries")
+# Anchored to DATA_ROOT (not left on db.py's own "/data/adolar.db" default)
+# so a bare-metal run (no DB_PATH env var) writes next to DATA_ROOT's own
+# fallback instead of silently trying the Docker-only "/data/adolar.db".
+db.DB_PATH = os.environ.get("DB_PATH") or os.path.join(DATA_ROOT, "adolar.db")
 # Anchored to DATA_ROOT (not left on db.py's own "/data/control.db" default)
 # so it sits next to whichever DB_PATH was configured, and stays put when a
 # library switch later reassigns db.DB_PATH to a different file.
 db.CONTROL_DB_PATH = os.environ.get("CONTROL_DB_PATH") or os.path.join(DATA_ROOT, "control.db")
-BACKUP_ROOT = os.environ.get("BACKUP_PATH", "/backups")
 BACKUP_TIMEZONE = os.environ.get("TZ", "Europe/Berlin")
 
 # Seed defaults for the first run only; after that the admin-editable values
 # in the settings table (see _backup_*() below) take over. This lets the
-# schedule be changed at runtime from the Datenbank-Wartung UI without a
-# container restart.
+# schedule and destination be changed at runtime from the Datenbank-Wartung
+# UI without a container restart.
 _BACKUP_DEFAULT_RETENTION = max(1, int(os.environ.get("BACKUP_RETENTION", "7")))
 _BACKUP_DEFAULT_HOUR = max(0, min(23, int(os.environ.get("BACKUP_HOUR", "3"))))
 _BACKUP_DEFAULT_AUTO_ENABLED = os.environ.get("BACKUP_AUTO_ENABLED", "0").lower() in (
     "1", "true", "yes", "on",
 )
+# Docker-only path; bare-metal runs should set BACKUP_PATH (or change it
+# afterward via the Datenbank-Wartung UI, see _backup_root() below).
+_BACKUP_DEFAULT_ROOT = os.environ.get("BACKUP_PATH", "/backups")
 
 
 def _backup_auto_enabled() -> bool:
@@ -88,6 +94,11 @@ def _backup_hour() -> int:
 def _backup_retention() -> int:
     value = db.get_setting("backup_retention")
     return _BACKUP_DEFAULT_RETENTION if value is None else int(value)
+
+
+def _backup_root() -> str:
+    value = db.get_setting("backup_root")
+    return _BACKUP_DEFAULT_ROOT if value is None else value
 
 # ── Adolar Disco connection tracking ─────────────────────────────────────────
 _disco_last_seen: float = 0   # epoch seconds
@@ -1146,7 +1157,7 @@ def _run_backup_job(source: str, actor_id: int | None = None):
     try:
         result = backup_service.create_backup(
             db.DB_PATH,
-            BACKUP_ROOT,
+            _backup_root(),
             control_db_path=db.CONTROL_DB_PATH,
             jingle_root=JINGLE_ROOT,
             app_version=APP_VERSION,
@@ -1164,7 +1175,7 @@ def _run_backup_job(source: str, actor_id: int | None = None):
 
 
 def _start_backup_job(source: str, actor_id: int | None = None) -> bool:
-    if backup_service.is_backup_running(BACKUP_ROOT):
+    if backup_service.is_backup_running(_backup_root()):
         return False
     threading.Thread(
         target=_run_backup_job,
@@ -1179,9 +1190,9 @@ def _start_backup_job(source: str, actor_id: int | None = None) -> bool:
 @_auth.admin_required
 def api_backups_list():
     try:
-        backups = backup_service.list_backups(BACKUP_ROOT)
-        status = backup_service.read_status(BACKUP_ROOT)
-        if status.get("state") == "running" and not backup_service.is_backup_running(BACKUP_ROOT):
+        backups = backup_service.list_backups(_backup_root())
+        status = backup_service.read_status(_backup_root())
+        if status.get("state") == "running" and not backup_service.is_backup_running(_backup_root()):
             status = {
                 "state": "failed",
                 "error": "Die letzte Sicherung wurde unterbrochen. Sie kann erneut gestartet werden.",
@@ -1190,12 +1201,12 @@ def api_backups_list():
         logging.getLogger(__name__).warning("Backup-Ziel nicht verfügbar (%s)", exc)
         return jsonify({
             "error": "Backup-Ziel nicht verfügbar.",
-            "configured_path": BACKUP_ROOT,
+            "configured_path": _backup_root(),
         }), 503
     return jsonify({
         "backups": backups,
         "status": status,
-        "configured_path": BACKUP_ROOT,
+        "configured_path": _backup_root(),
         "automatic": _backup_auto_enabled(),
         "hour": _backup_hour(),
         "retention": _backup_retention(),
@@ -1216,25 +1227,38 @@ def api_backups_config_update():
             raise errors.ValidationError("Die Startstunde muss zwischen 0 und 23 liegen.")
         if not 1 <= retention <= 365:
             raise errors.ValidationError("Die Anzahl behaltener Sicherungen muss zwischen 1 und 365 liegen.")
+        path = data.get("path")
+        if path is not None:
+            path = str(path).strip()
+            if not path:
+                raise errors.ValidationError("Bitte einen Backup-Pfad angeben.")
     except (TypeError, ValueError) as exc:
         return _client_error("Ungültige Sicherungs-Konfiguration.", exc)
     except errors.ValidationError as exc:
         return _client_error(exc.user_message, exc)
+    if path is not None:
+        try:
+            backup_service.ensure_backup_root(path)
+        except OSError as exc:
+            return _client_error("Backup-Pfad ist nicht beschreibbar.", exc, 503)
+        db.set_setting("backup_root", path)
     db.set_setting("backup_auto_enabled", "1" if enabled else "0")
     db.set_setting("backup_hour", str(hour))
     db.set_setting("backup_retention", str(retention))
     db.log_audit(
         g.user["id"], "backup.config_updated", None,
-        json.dumps({"enabled": enabled, "hour": hour, "retention": retention}),
+        json.dumps({"enabled": enabled, "hour": hour, "retention": retention, "path": path}),
     )
-    return jsonify({"automatic": enabled, "hour": hour, "retention": retention})
+    return jsonify({
+        "automatic": enabled, "hour": hour, "retention": retention, "configured_path": _backup_root(),
+    })
 
 
 @app.post("/api/admin/backups")
 @_auth.admin_required
 def api_backups_create():
     try:
-        backup_service.ensure_backup_root(BACKUP_ROOT)
+        backup_service.ensure_backup_root(_backup_root())
     except OSError as exc:
         return _client_error("Backup-Ziel nicht beschreibbar.", exc, 503)
     if not _start_backup_job("manual", g.user["id"]):
@@ -1246,7 +1270,7 @@ def api_backups_create():
 @_auth.admin_required
 def api_backups_download(backup_id, kind):
     try:
-        path = backup_service.get_backup_file(BACKUP_ROOT, backup_id, kind)
+        path = backup_service.get_backup_file(_backup_root(), backup_id, kind)
     except FileNotFoundError:
         abort(404)
     suffixes = {
@@ -1265,7 +1289,7 @@ def api_backups_download(backup_id, kind):
 @_auth.admin_required
 def api_backups_delete(backup_id):
     try:
-        backup_service.delete_backup(BACKUP_ROOT, backup_id)
+        backup_service.delete_backup(_backup_root(), backup_id)
     except FileNotFoundError:
         abort(404)
     db.log_audit(g.user["id"], "backup.deleted", backup_id)
