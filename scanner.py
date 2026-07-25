@@ -32,24 +32,6 @@ def _update(**kw):
         _status.update(kw)
 
 
-def _tag_str(tags, *keys):
-    for key in keys:
-        val = tags.get(key)
-        if val:
-            return str(val[0]).strip() or None
-    return None
-
-
-def _tag_int(tags, *keys):
-    raw = _tag_str(tags, *keys)
-    if raw:
-        try:
-            return int(raw.split("/")[0])
-        except ValueError:
-            pass
-    return None
-
-
 def _extract_cover(audio):
     """Return (hash, bytes, mime) or (None, None, None)."""
     tags = audio.tags
