@@ -616,14 +616,14 @@ def _like_pattern(value: str) -> str:
     return "%" + value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
-def search_tracks(query="", artist_query="", title_query="", album_query="",
-                  genre=None, decade=None, fmt=None,
-                  min_dur=None, max_dur=None, min_bitrate=None,
-                  year_min=None, year_max=None,
-                  bpm_min=None, bpm_max=None,
-                  page=1, per_page=50, sort="artist",
-                  count=True, loved_only=False, include_loved=False,
-                  user_id=None, random_order=False):
+def _track_filter_conditions(query="", artist_query="", title_query="", album_query="",
+                              genre=None, decade=None, fmt=None,
+                              min_dur=None, max_dur=None, min_bitrate=None,
+                              year_min=None, year_max=None,
+                              bpm_min=None, bpm_max=None,
+                              album_eq=None, artist_eq=None):
+    """Shared WHERE-clause builder for per-track filters, used by both the
+    flat track search and the album-grouped search so the two stay in sync."""
     params = []
     conditions = []
 
@@ -644,6 +644,12 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
     if album_query:
         conditions.append("LOWER(COALESCE(t.album, '')) LIKE ? ESCAPE '\\'")
         params.append(_like_pattern(album_query.casefold()))
+    if album_eq:
+        conditions.append("LOWER(COALESCE(t.album, '')) = ?")
+        params.append(album_eq.strip().casefold())
+    if artist_eq:
+        conditions.append("LOWER(COALESCE(t.artist, '')) = ?")
+        params.append(artist_eq.strip().casefold())
 
     if genre:
         conditions.append("t.genre = ?")
@@ -680,6 +686,27 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
     if bpm_max is not None:
         conditions.append("t.bpm <= ?")
         params.append(float(bpm_max))
+
+    return conditions, params
+
+
+def search_tracks(query="", artist_query="", title_query="", album_query="",
+                  genre=None, decade=None, fmt=None,
+                  min_dur=None, max_dur=None, min_bitrate=None,
+                  year_min=None, year_max=None,
+                  bpm_min=None, bpm_max=None,
+                  album_eq=None, artist_eq=None,
+                  page=1, per_page=50, sort="artist",
+                  count=True, loved_only=False, include_loved=False,
+                  user_id=None, random_order=False):
+    conditions, params = _track_filter_conditions(
+        query=query, artist_query=artist_query, title_query=title_query, album_query=album_query,
+        genre=genre, decade=decade, fmt=fmt,
+        min_dur=min_dur, max_dur=max_dur, min_bitrate=min_bitrate,
+        year_min=year_min, year_max=year_max,
+        bpm_min=bpm_min, bpm_max=bpm_max,
+        album_eq=album_eq, artist_eq=artist_eq,
+    )
 
     # loved JOIN — needed for loved_only filter, loved_at sort, or include_loved
     loved_join = ""
@@ -807,6 +834,69 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
         tracks.append(d)
 
     return total, tracks
+
+
+def search_albums(query="", artist_query="", title_query="", album_query="",
+                   genre=None, decade=None, fmt=None,
+                   min_dur=None, max_dur=None, min_bitrate=None,
+                   year_min=None, year_max=None,
+                   bpm_min=None, bpm_max=None,
+                   page=1, per_page=50, sort="album", count=True):
+    """Distinct (album, artist) groups matching the given per-track filters.
+
+    Used by the album-first browsing view: search a couple of tracks worth of
+    filters, but show one card per album instead of every matching title.
+    """
+    conditions, params = _track_filter_conditions(
+        query=query, artist_query=artist_query, title_query=title_query, album_query=album_query,
+        genre=genre, decade=decade, fmt=fmt,
+        min_dur=min_dur, max_dur=max_dur, min_bitrate=min_bitrate,
+        year_min=year_min, year_max=year_max,
+        bpm_min=bpm_min, bpm_max=bpm_max,
+    )
+    conditions.append("TRIM(COALESCE(t.album, '')) != ''")
+    where = "WHERE " + " AND ".join(conditions)
+    offset = (page - 1) * per_page
+
+    order = "MIN(t.year) DESC, t.album COLLATE NOCASE" if sort == "year" \
+        else "t.album COLLATE NOCASE, t.artist COLLATE NOCASE"
+
+    sql = f"""
+        SELECT t.album AS album, t.artist AS artist,
+               COUNT(*) AS track_count,
+               MIN(t.year) AS year,
+               (SELECT t2.cover_hash FROM tracks t2
+                 WHERE LOWER(COALESCE(t2.album, '')) = LOWER(COALESCE(t.album, ''))
+                   AND LOWER(COALESCE(t2.artist, '')) = LOWER(COALESCE(t.artist, ''))
+                   AND t2.cover_hash IS NOT NULL
+                 LIMIT 1) AS cover_hash
+        FROM tracks t
+        {where}
+        GROUP BY LOWER(COALESCE(t.album, '')), LOWER(COALESCE(t.artist, ''))
+        ORDER BY {order}
+        LIMIT ? OFFSET ?
+    """
+    count_sql = f"""
+        SELECT COUNT(*) FROM (
+            SELECT 1 FROM tracks t {where}
+            GROUP BY LOWER(COALESCE(t.album, '')), LOWER(COALESCE(t.artist, ''))
+        )
+    """
+
+    with db() as conn:
+        rows = conn.execute(sql, params + [per_page, offset]).fetchall()
+        if count:
+            total = conn.execute(count_sql, params).fetchone()[0]
+        else:
+            total = offset + len(rows) + (1 if len(rows) == per_page else 0)
+
+    albums = []
+    for r in rows:
+        d = dict(r)
+        d["has_cover"] = bool(d["cover_hash"])
+        albums.append(d)
+
+    return total, albums
 
 
 def get_lastfm_account(user_id: int) -> dict | None:

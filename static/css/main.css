@@ -994,6 +994,85 @@
       color: #fff;
     }
 
+    /* ── Album grid (album search shows albums first) ──── */
+    #album-back-bar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 16px;
+      background: color-mix(in srgb, var(--accent) 18%, var(--bg-primary));
+      border-bottom: 0.5px solid var(--accent-border);
+    }
+    #album-back-bar.visible { display: flex; }
+
+    #track-list.album-grid-mode {
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-content: flex-start;
+      gap: 18px;
+    }
+    .album-card {
+      width: 160px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+      cursor: pointer;
+    }
+    .album-cover,
+    .album-cover-placeholder {
+      width: 160px;
+      height: 160px;
+      border-radius: 8px;
+      flex-shrink: 0;
+    }
+    .album-cover-placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 40px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .album-card-open-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: none;
+      background: color-mix(in srgb, var(--bg-primary) 75%, transparent);
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity .12s;
+    }
+    .album-card:hover .album-card-open-btn,
+    .album-card:focus-within .album-card-open-btn {
+      opacity: 1;
+    }
+    .album-card-info { min-width: 0; }
+    .album-card-title {
+      font-size: var(--text-md);
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .album-card-sub {
+      font-size: var(--text-sm);
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+
     /* Track info */
     .track-info { flex: 1; min-width: 0; }
     .track-title {
@@ -1806,6 +1885,20 @@
       #track-list {
         padding: 8px 10px 16px;
         gap: 8px;
+      }
+      #track-list.album-grid-mode {
+        gap: 12px;
+        justify-content: space-between;
+      }
+      .album-card,
+      .album-cover,
+      .album-cover-placeholder {
+        width: calc(50% - 6px);
+      }
+      .album-cover,
+      .album-cover-placeholder {
+        height: auto;
+        aspect-ratio: 1 / 1;
       }
       .track-row {
         display: grid;

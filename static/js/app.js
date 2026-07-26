@@ -112,6 +112,13 @@ const LANG = {
     bm_new_prompt:      "Name der neuen Playlist:",
     pl_delete_confirm:  (name) => `Playlist „${name}" löschen?`,
     user_delete_confirm: "Benutzer wirklich löschen?",
+    album_results:       (n) => `${n.toLocaleString("de")} Alben`,
+    no_albums:            "Keine Alben gefunden.",
+    album_open_hint:      "Doppelklick zum Öffnen",
+    album_open_btn_title: "Album öffnen",
+    album_tracks_short:   (n) => `${n} Titel`,
+    back_to_albums:       "Zurück zu den Alben",
+    album_tracks_count:   (n, album) => `${n} Titel · „${album}"`,
   },
   en: {
     loading:          "Loading…",
@@ -207,6 +214,13 @@ const LANG = {
     bm_new_prompt:       "New playlist name:",
     pl_delete_confirm:   (name) => `Delete playlist "${name}"?`,
     user_delete_confirm: "Really delete user?",
+    album_results:       (n) => `${n.toLocaleString("en")} albums`,
+    no_albums:            "No albums found.",
+    album_open_hint:      "Double-click to open",
+    album_open_btn_title: "Open album",
+    album_tracks_short:   (n) => `${n} tracks`,
+    back_to_albums:       "Back to albums",
+    album_tracks_count:   (n, album) => `${n} tracks · "${album}"`,
   },
 };
 
@@ -240,6 +254,7 @@ function applyLang() {
   $("artist-search").placeholder = L.artist_search_ph;
   $("title-search").placeholder = L.title_search_ph;
   $("album-search").placeholder = L.album_search_ph;
+  $("album-back-btn-label").textContent = L.back_to_albums;
   const mobileFilterBtn = $("btn-mobile-filter");
   if (mobileFilterBtn) mobileFilterBtn.title = L.mobile_filters;
   const mobileFilterTitle = $("mobile-filter-title");
@@ -431,6 +446,12 @@ const state = {
     year_min: 0, year_max: 0,
     artist_query: "", title_query: "", album_query: "",
     loved: false,
+  },
+  albumView: {
+    active: false,   // true while the main area is showing the album grid
+    drilled: null,   // {album, artist} while showing one album's tracks
+    albums: [],
+    page: 1,
   },
 };
 
@@ -687,6 +708,14 @@ function _setSearching(on) {
 }
 
 async function loadTracks(page = 1, forceCount = false) {
+  // Album search (without drilling into one specific album) browses albums,
+  // not individual tracks — hand off to the grid loader instead.
+  if (state.filters.album_query && !state.albumView.drilled) {
+    return loadAlbumGrid(page);
+  }
+  const drilled = state.albumView.drilled;
+  state.albumView.active = Boolean(drilled);
+
   // Browsing/searching is independent of the active radio queue.  Keep the
   // station playing until the user explicitly starts one of the search hits.
   if (radio.active) {
@@ -701,27 +730,34 @@ async function loadTracks(page = 1, forceCount = false) {
   const requestId = ++_loadTracksRequest;
   updateSavePlaylistBtn();
   updateMobileFilterButton();
+  updateAlbumBackBar();
   _setSearching(true);
   // Skip COUNT if we already have the total and are just paging
   const needCount = page === 1 || forceCount || state.total === 0;
   state.page = page;
-  const p = new URLSearchParams({ page, per_page: 50, sort: state.sort });
+  const perPage = drilled ? 200 : 50;
+  const p = new URLSearchParams({ page, per_page: perPage, sort: drilled ? "album" : state.sort });
   if (!needCount) p.set("count", "0");
-  if (state.query)              p.set("q", state.query);
-  if (state.filters.genre)      p.set("genre",   state.filters.genre);
-  if (state.filters.decade)     p.set("decade",  state.filters.decade);
-  if (state.filters.format)     p.set("format",  state.filters.format);
-  if (state.filters.min_dur > 0)     p.set("min_dur",     state.filters.min_dur);
-  if (state.filters.max_dur > 0)     p.set("max_dur",     state.filters.max_dur);
-  if (state.filters.min_bitrate > 0) p.set("min_bitrate", state.filters.min_bitrate);
-  if (state.filters.year_min > 0)    p.set("year_min",    state.filters.year_min);
-  if (state.filters.year_max > 0)    p.set("year_max",    state.filters.year_max);
-  if (state.filters.bpm_min > 0)     p.set("bpm_min",     state.filters.bpm_min);
-  if (state.filters.bpm_max > 0)     p.set("bpm_max",     state.filters.bpm_max);
-  if (state.filters.artist_query)    p.set("artist", state.filters.artist_query);
-  if (state.filters.title_query)     p.set("title",  state.filters.title_query);
-  if (state.filters.album_query)     p.set("album",  state.filters.album_query);
-  if (state.filters.loved)           p.set("loved",  "1");
+  if (drilled) {
+    p.set("album_eq", drilled.album || "");
+    p.set("artist_eq", drilled.artist || "");
+  } else {
+    if (state.query)              p.set("q", state.query);
+    if (state.filters.genre)      p.set("genre",   state.filters.genre);
+    if (state.filters.decade)     p.set("decade",  state.filters.decade);
+    if (state.filters.format)     p.set("format",  state.filters.format);
+    if (state.filters.min_dur > 0)     p.set("min_dur",     state.filters.min_dur);
+    if (state.filters.max_dur > 0)     p.set("max_dur",     state.filters.max_dur);
+    if (state.filters.min_bitrate > 0) p.set("min_bitrate", state.filters.min_bitrate);
+    if (state.filters.year_min > 0)    p.set("year_min",    state.filters.year_min);
+    if (state.filters.year_max > 0)    p.set("year_max",    state.filters.year_max);
+    if (state.filters.bpm_min > 0)     p.set("bpm_min",     state.filters.bpm_min);
+    if (state.filters.bpm_max > 0)     p.set("bpm_max",     state.filters.bpm_max);
+    if (state.filters.artist_query)    p.set("artist", state.filters.artist_query);
+    if (state.filters.title_query)     p.set("title",  state.filters.title_query);
+    if (state.filters.album_query)     p.set("album",  state.filters.album_query);
+    if (state.filters.loved)           p.set("loved",  "1");
+  }
 
   let data;
   try {
@@ -754,16 +790,148 @@ async function loadTracks(page = 1, forceCount = false) {
   // Scroll to top of results
   document.getElementById('track-list')?.scrollTo({ top: 0, behavior: 'instant' });
 
-  const q = state.query;
-  $("result-count").textContent = q
-    ? t().results_q(data.total, esc(q))
-    : t().results(data.total);
+  if (drilled) {
+    $("result-count").textContent = t().album_tracks_count(data.total, drilled.album);
+  } else {
+    const q = state.query;
+    $("result-count").textContent = q
+      ? t().results_q(data.total, esc(q))
+      : t().results(data.total);
+  }
   updateMobileFilterButton();
+}
+
+// ── Album grid (album search shows albums, not every matching track) ──────
+let _loadAlbumsRequest = 0;
+
+function updateAlbumBackBar() {
+  const bar = $("album-back-bar");
+  if (!bar) return;
+  bar.classList.toggle("visible", Boolean(state.albumView.drilled));
+}
+
+function openAlbumTracks(album) {
+  state.albumView.drilled = { album: album.album, artist: album.artist };
+  loadTracks(1);
+}
+
+function backToAlbumGrid() {
+  state.albumView.drilled = null;
+  loadAlbumGrid(state.albumView.page || 1);
+}
+
+async function loadAlbumGrid(page = 1) {
+  if (radio.active) {
+    radio.browsingLibrary = true;
+    updateRadioButton();
+  } else {
+    resetNormalCrossfadeBuffer();
+    if (listShuffle.active) stopListShuffle(false);
+  }
+  $("radio-test-banner")?.classList.remove("visible");
+  const requestId = ++_loadAlbumsRequest;
+  updateSavePlaylistBtn();
+  updateMobileFilterButton();
+  updateAlbumBackBar();
+  _setSearching(true);
+
+  state.albumView.active = true;
+  state.albumView.page = page;
+
+  const p = new URLSearchParams({ page, per_page: 50, sort: state.sort === "year" ? "year" : "album" });
+  if (state.query)                   p.set("q", state.query);
+  if (state.filters.genre)           p.set("genre",   state.filters.genre);
+  if (state.filters.decade)          p.set("decade",  state.filters.decade);
+  if (state.filters.format)          p.set("format",  state.filters.format);
+  if (state.filters.min_dur > 0)     p.set("min_dur",     state.filters.min_dur);
+  if (state.filters.max_dur > 0)     p.set("max_dur",     state.filters.max_dur);
+  if (state.filters.min_bitrate > 0) p.set("min_bitrate", state.filters.min_bitrate);
+  if (state.filters.year_min > 0)    p.set("year_min",    state.filters.year_min);
+  if (state.filters.year_max > 0)    p.set("year_max",    state.filters.year_max);
+  if (state.filters.bpm_min > 0)     p.set("bpm_min",     state.filters.bpm_min);
+  if (state.filters.bpm_max > 0)     p.set("bpm_max",     state.filters.bpm_max);
+  if (state.filters.artist_query)    p.set("artist", state.filters.artist_query);
+  if (state.filters.title_query)     p.set("title",  state.filters.title_query);
+  if (state.filters.album_query)     p.set("album",  state.filters.album_query);
+
+  let data;
+  try {
+    const res = await fetch(`${API}/api/albums?${p}`);
+    data = await res.json();
+  } catch {
+    data = { results: [], total: 0, pages: 1 };
+  }
+  if (requestId !== _loadAlbumsRequest) return;
+
+  state.albumView.albums = data.results || [];
+  state.total = data.total;
+  state.pages = data.pages;
+  state.page = page;
+
+  _setSearching(false);
+  renderAlbumGrid();
+  renderPagination();
+
+  document.getElementById('track-list')?.scrollTo({ top: 0, behavior: 'instant' });
+
+  $("result-count").textContent = t().album_results(data.total);
+  updateMobileFilterButton();
+}
+
+function renderAlbumGrid() {
+  const list = $("track-list");
+  list.classList.add("album-grid-mode");
+  list.innerHTML = "";
+
+  const albums = state.albumView.albums;
+  if (!albums.length) {
+    list.innerHTML = `<div class="empty-state"><i class="ti ti-disc-off"></i>${t().no_albums}</div>`;
+    return;
+  }
+
+  albums.forEach(album => {
+    const card = document.createElement("div");
+    card.className = "album-card";
+    card.title = t().album_open_hint;
+
+    const cover = makeCover({ has_cover: album.has_cover, cover_hash: album.cover_hash, artist: album.artist }, 160);
+    // Replace (not add to) the track-cover class: album cards need their own
+    // sizing rules, and keeping "track-cover(-placeholder)" around would let
+    // the track-list's mobile breakpoint rules win the cascade over ours.
+    if (cover.tagName === "IMG") {
+      cover.className = "album-cover";
+    } else {
+      // makePlaceholder() inlines a fixed width/height via cssText — clear it
+      // so the CSS (incl. the mobile 2-up breakpoint) controls sizing.
+      cover.className = "album-cover-placeholder";
+      cover.style.cssText = `background:${artistColor(album.artist)}`;
+    }
+    card.appendChild(cover);
+
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "album-card-open-btn";
+    openBtn.title = t().album_open_btn_title;
+    openBtn.innerHTML = `<i class="ti ti-corner-right-up"></i>`;
+    openBtn.addEventListener("click", e => { e.stopPropagation(); openAlbumTracks(album); });
+    card.appendChild(openBtn);
+
+    const info = document.createElement("div");
+    info.className = "album-card-info";
+    const sub = [album.artist, t().album_tracks_short(album.track_count)].filter(Boolean).join(" · ");
+    info.innerHTML = `<div class="album-card-title">${esc(album.album || "—")}</div>
+                       <div class="album-card-sub">${esc(sub)}</div>`;
+    card.appendChild(info);
+
+    card.addEventListener("dblclick", () => openAlbumTracks(album));
+    list.appendChild(card);
+  });
 }
 
 // ── Render Tracks ─────────────────────────────────────────
 function renderTracks(overrideTracks) {
   const list = $("track-list");
+  list.classList.remove("album-grid-mode");
   list.innerHTML = "";
 
   const tracks = overrideTracks || state.tracks;
@@ -3092,6 +3260,7 @@ function setupFieldSearch(alleId, panelId, inputId, filterKey) {
       alle.classList.add("active");
       input.value = "";
       state.filters[filterKey] = "";
+      if (filterKey === "album_query") state.albumView.drilled = null;
       loadTracks(1);
     } else {
       panel.style.display = "block";
@@ -3104,10 +3273,13 @@ function setupFieldSearch(alleId, panelId, inputId, filterKey) {
     clearTimeout(fieldSearchTimers[filterKey]);
     fieldSearchTimers[filterKey] = setTimeout(() => {
       state.filters[filterKey] = input.value.trim();
+      if (filterKey === "album_query") state.albumView.drilled = null;
       loadTracks(1);
     }, 350);
   };
 }
+
+$("btn-back-to-albums").onclick = backToAlbumGrid;
 
 setupFieldSearch("chip-artist-alle", "artist-search-panel", "artist-search", "artist_query");
 setupFieldSearch("chip-title-alle",  "title-search-panel",  "title-search",  "title_query");
@@ -3600,6 +3772,7 @@ function resetFilters() {
     artist_query: "", title_query: "", album_query: "",
     loved: false,
   };
+  state.albumView.drilled = null;
 }
 
 function resetFilterUI() {

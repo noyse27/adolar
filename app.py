@@ -1464,6 +1464,8 @@ def api_search():
     artist_q    = request.args.get("artist", "").strip()
     title_q     = request.args.get("title", "").strip()
     album_q     = request.args.get("album", "").strip()
+    album_eq    = request.args.get("album_eq", "").strip() or None
+    artist_eq   = request.args.get("artist_eq", "").strip() or None
     loved       = request.args.get("loved") == "1"
     page     = _int_arg("page",     1,   min_val=1)
     per_page = _int_arg("per_page", 50,  min_val=1, max_val=200)
@@ -1484,6 +1486,7 @@ def api_search():
     user_id = g.user["id"] if g.user else None
     total, tracks = db.search_tracks(
         query=q, artist_query=artist_q, title_query=title_q, album_query=album_q,
+        album_eq=album_eq, artist_eq=artist_eq,
         genre=genre, decade=decade, fmt=fmt,
         min_dur=min_dur, max_dur=max_dur, min_bitrate=min_bitrate,
         year_min=year_min, year_max=year_max,
@@ -1498,6 +1501,57 @@ def api_search():
         "per_page": per_page,
         "pages": max(1, (total + per_page - 1) // per_page),
         "results": tracks,
+    })
+
+
+@app.get("/api/albums")
+def api_albums():
+    """Distinct albums matching the same filter set as /api/search, for the
+    album-first browsing view (album search shows albums, not every track)."""
+    q           = request.args.get("q", "").strip()
+    genre       = request.args.get("genre", "").strip() or None
+    decade      = request.args.get("decade", "").strip() or None
+    fmt         = request.args.get("format", "").strip() or None
+    min_dur     = request.args.get("min_dur") or None
+    max_dur     = request.args.get("max_dur") or None
+    min_bitrate = request.args.get("min_bitrate") or None
+    year_min    = request.args.get("year_min") or None
+    year_max    = request.args.get("year_max") or None
+    bpm_min     = request.args.get("bpm_min") or None
+    bpm_max     = request.args.get("bpm_max") or None
+    artist_q    = request.args.get("artist", "").strip()
+    title_q     = request.args.get("title", "").strip()
+    album_q     = request.args.get("album", "").strip()
+    page     = _int_arg("page",     1,   min_val=1)
+    per_page = _int_arg("per_page", 50,  min_val=1, max_val=200)
+    sort     = request.args.get("sort", "album")
+    do_count = request.args.get("count", "1") != "0"
+
+    try:
+        if min_dur:     min_dur     = int(min_dur)
+        if max_dur:     max_dur     = int(max_dur)
+        if min_bitrate: min_bitrate = int(min_bitrate)
+        if year_min:    year_min    = int(year_min)
+        if year_max:    year_max    = int(year_max)
+        if bpm_min:     bpm_min     = float(bpm_min)
+        if bpm_max:     bpm_max     = float(bpm_max)
+    except ValueError:
+        return jsonify({"error": "invalid numeric parameter"}), 400
+
+    total, albums = db.search_albums(
+        query=q, artist_query=artist_q, title_query=title_q, album_query=album_q,
+        genre=genre, decade=decade, fmt=fmt,
+        min_dur=min_dur, max_dur=max_dur, min_bitrate=min_bitrate,
+        year_min=year_min, year_max=year_max,
+        bpm_min=bpm_min, bpm_max=bpm_max,
+        page=page, per_page=per_page, sort=sort, count=do_count,
+    )
+    return jsonify({
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": max(1, (total + per_page - 1) // per_page),
+        "results": albums,
     })
 
 
