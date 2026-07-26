@@ -171,6 +171,59 @@ class SearchRouteTests(PagesTestBase):
         self.assertEqual(response.get_json()["per_page"], 200)
 
 
+class AlbumsRouteTests(PagesTestBase):
+    def setUp(self):
+        super().setUp()
+        with app_module.db.db() as conn:
+            conn.executemany(
+                """INSERT INTO tracks (path, title, artist, album, album_artist, genre, year)
+                   VALUES (?,?,?,?,?,?,?)""",
+                [
+                    ("/music/Daft Punk/RAM/01.flac", "Get Lucky", "Daft Punk",
+                     "Random Access Memories", None, "Electronic", 2013),
+                    ("/music/Daft Punk/RAM/02.flac", "Lose Yourself to Dance", "Daft Punk",
+                     "Random Access Memories", None, "Electronic", 2013),
+                    ("/music/Comp/Tribute/01.mp3", "Enjoy the Silence", "In Strict Confidence",
+                     "40 Years - Tribute", "Various Artists", "Electronic", 2020),
+                    ("/music/Comp/Tribute/02.mp3", "Personal Jesus", "Leaether Strip",
+                     "40 Years - Tribute", "Various Artists", "Electronic", 2020),
+                ],
+            )
+
+    def test_groups_tracks_into_one_card_per_album(self):
+        response = self.client.get("/api/albums")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["total"], 2)
+        albums = {a["album"]: a for a in data["results"]}
+        self.assertEqual(albums["Random Access Memories"]["artist"], "Daft Punk")
+        self.assertFalse(albums["Random Access Memories"]["various"])
+        self.assertEqual(albums["Random Access Memories"]["track_count"], 2)
+
+    def test_compilation_reports_various_artists_not_one_card_per_contributor(self):
+        response = self.client.get("/api/albums")
+        albums = {a["album"]: a for a in response.get_json()["results"]}
+        comp = albums["40 Years - Tribute"]
+        self.assertTrue(comp["various"])
+        self.assertIsNone(comp["artist"])
+        self.assertEqual(comp["track_count"], 2)
+
+    def test_album_filter_narrows_results(self):
+        response = self.client.get("/api/albums?album=random")
+        data = response.get_json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["results"][0]["album"], "Random Access Memories")
+
+    def test_search_with_album_eq_and_dir_eq_opens_exactly_that_album(self):
+        response = self.client.get(
+            "/api/search?album_eq=40 Years - Tribute&dir_eq=/music/Comp/Tribute"
+        )
+        data = response.get_json()
+        self.assertEqual(data["total"], 2)
+        titles = {t["title"] for t in data["results"]}
+        self.assertEqual(titles, {"Enjoy the Silence", "Personal Jesus"})
+
+
 class GenresStatsDiscoStatusTests(PagesTestBase):
     def test_genres_returns_distinct_list(self):
         with app_module.db.db() as conn:

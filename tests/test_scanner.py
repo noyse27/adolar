@@ -4,7 +4,7 @@ import time
 import unittest
 from unittest import mock
 
-from mutagen.id3 import APIC, ID3, PCNT, TBPM, TIT2, TPE1, TXXX
+from mutagen.id3 import APIC, ID3, PCNT, TBPM, TIT2, TPE1, TPE2, TXXX
 
 import db
 import scanner
@@ -30,6 +30,7 @@ def _make_mp3(path: str, **tags) -> None:
     id3_map = {
         "title": lambda v: TIT2(encoding=3, text=v),
         "artist": lambda v: TPE1(encoding=3, text=v),
+        "album_artist": lambda v: TPE2(encoding=3, text=v),
         "bpm": lambda v: TBPM(encoding=3, text=str(v)),
         "play_count": lambda v: PCNT(count=v),
         "loved": lambda v: TXXX(encoding=3, desc="LOVE RATING", text="L" if v else ""),
@@ -86,6 +87,20 @@ class ScanFileTests(unittest.TestCase):
         _make_mp3(self.path)
         data = scanner._scan_file(self.path)
         self.assertFalse(data["loved"])
+
+    def test_reads_album_artist_from_tpe2_tag_distinct_from_artist(self):
+        # TPE2 (album artist) is what a compilation tags "Various Artists"
+        # on, while TPE1 (artist) stays the individual track's performer —
+        # search_albums() relies on these being kept separate.
+        _make_mp3(self.path, artist="In Strict Confidence", album_artist="Various Artists")
+        data = scanner._scan_file(self.path)
+        self.assertEqual(data["artist"], "In Strict Confidence")
+        self.assertEqual(data["album_artist"], "Various Artists")
+
+    def test_album_artist_is_none_when_tag_absent(self):
+        _make_mp3(self.path, artist="Daft Punk")
+        data = scanner._scan_file(self.path)
+        self.assertIsNone(data["album_artist"])
 
     def test_extracts_embedded_cover_art_and_saves_it(self):
         _make_mp3(self.path, cover=b"\x89PNGfakecoverbytes")
@@ -209,6 +224,19 @@ class RunScanIntegrationTests(unittest.TestCase):
         self.assertEqual(len(tracks), 2)
         titles = {row["title"] for row in tracks.values()}
         self.assertEqual(titles, {"One", "Two"})
+
+    def test_run_scan_populates_album_artist_from_tag(self):
+        _make_mp3(
+            os.path.join(self.music_root, "one.mp3"),
+            title="Enjoy the Silence", artist="In Strict Confidence",
+            album_artist="Various Artists",
+        )
+        scanner.run_scan(self.music_root)
+        self._wait_for_scan_to_finish()
+
+        row = next(iter(self._tracks().values()))
+        self.assertEqual(row["artist"], "In Strict Confidence")
+        self.assertEqual(row["album_artist"], "Various Artists")
 
     def test_rescan_skips_unchanged_files_and_does_not_duplicate_rows(self):
         path = os.path.join(self.music_root, "one.mp3")

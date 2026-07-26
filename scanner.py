@@ -149,6 +149,11 @@ def _scan_file(path: str) -> dict | None:
             "title": pick("title", "TIT2"),
             "artist": pick("artist", "TPE1", "TPE2"),
             "album": pick("album", "TALB"),
+            # Dedicated album-artist tag (TPE2/ID3, aART/MP4, ALBUMARTIST/Vorbis
+            # comments) — distinct from the per-track "artist" above, so
+            # compilations can be grouped by album without exploding into one
+            # card per contributing artist. None if the file has no such tag.
+            "album_artist": pick("albumartist", "TPE2", "aART", "ALBUMARTIST"),
             "genre": pick("genre", "TCON"),
             "year": pick_int("date", "TDRC", "TYER"),
             "track_no": pick_int("tracknumber", "TRCK"),

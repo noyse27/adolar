@@ -374,12 +374,18 @@ def init_db():
         _migrate_control_tables_out_of_content_db(conn)
         # Seed system playlists (idempotent)
         _seed_system_playlists(conn)
+        # Tracks scanned before album_artist existed were never read for that
+        # tag at all (not just left NULL) — queue a one-time forced full
+        # rescan below so search_albums() can rely on it. Must be read before
+        # the ALTER below adds the column.
+        had_album_artist = "album_artist" in _table_columns(conn, "tracks")
         # Migrations (safe to run repeatedly)
         for migration in [
             "ALTER TABLE tracks ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tracks ADD COLUMN bpm REAL",
             "ALTER TABLE tracks ADD COLUMN play_count_tag_dirty INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tracks ADD COLUMN loved INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE tracks ADD COLUMN album_artist TEXT",
             "ALTER TABLE users ADD COLUMN contributes_playcount INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE radio_stations ADD COLUMN description TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE radio_stations ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'",
@@ -436,6 +442,21 @@ def init_db():
                 UPDATE tracks SET play_count_tag_dirty=1
                 WHERE play_count > 0
             """)
+
+        if not had_album_artist:
+            queued_album_artist = conn.execute("""
+                INSERT OR IGNORE INTO settings (key, value)
+                VALUES ('migration:backfill_album_artist', datetime('now'))
+            """)
+            if queued_album_artist.rowcount:
+                # scanner.run_scan() skips files whose mtime hasn't changed
+                # since the last scan, so it would otherwise never go back
+                # and read the newly-added album_artist tag for anything
+                # already indexed. Zeroing mtime makes every file look
+                # changed exactly once, forcing the next scan to read every
+                # file's tags again; after that one pass it's back to being
+                # a fast incremental scan as usual.
+                conn.execute("UPDATE tracks SET mtime = 0")
 
 
 _SYSTEM_PLAYLISTS = [
@@ -620,6 +641,15 @@ def _norm_text(value: str | None) -> str:
 
 def _like_pattern(value: str) -> str:
     return "%" + value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+# Common literal values tools write into the album_artist tag itself for
+# compilations. Treated the same as "tag disagrees across tracks" so the
+# frontend shows one localized label either way instead of the literal tag text.
+_VARIOUS_ARTISTS_TAGS = {
+    "various artists", "various artist", "various", "va",
+    "verschiedene interpreten", "diverse interpreten", "diverse künstler",
+}
 
 
 def _track_filter_conditions(query="", artist_query="", title_query="", album_query="",
@@ -856,12 +886,14 @@ def search_albums(query="", artist_query="", title_query="", album_query="",
     Used by the album-first browsing view: search a couple of tracks worth of
     filters, but show one card per album instead of every matching title.
 
-    Grouped by folder rather than artist: the schema has no separate
-    album-artist tag (scanner.py only stores the per-track artist), so a
-    various-artists compilation would otherwise explode into one card per
-    contributing artist. All tracks of one release share a folder, so that's
-    used as the stable identity instead; "artist" is only meaningful when
-    every track in the group agrees, otherwise the card is a "various" one.
+    Grouped by folder rather than artist: two different releases can share an
+    album title (two different "Greatest Hits"), but every track of one
+    release lives in the same folder regardless of how many artists
+    contributed to it — so folder is the reliable identity, artist tags
+    aren't. For the displayed artist, an explicit album_artist tag (read by
+    scanner.py, distinct from the per-track artist) is trusted first; tracks
+    scanned before that tag existed have it NULL, so this falls back to "one
+    card if every track agrees on artist, else Various Artists".
     """
     conditions, params = _track_filter_conditions(
         query=query, artist_query=artist_query, title_query=title_query, album_query=album_query,
@@ -875,15 +907,16 @@ def search_albums(query="", artist_query="", title_query="", album_query="",
     offset = (page - 1) * per_page
 
     order = "year DESC, album COLLATE NOCASE" if sort == "year" \
-        else "album COLLATE NOCASE, artist COLLATE NOCASE"
+        else "album COLLATE NOCASE, COALESCE(tagged_artist, fallback_artist) COLLATE NOCASE"
 
     sql = f"""
         SELECT t.album AS album,
                ALBUM_DIR(t.path) AS dir,
                COUNT(*) AS track_count,
                MIN(t.year) AS year,
+               MAX(NULLIF(TRIM(t.album_artist), '')) AS tagged_artist,
                COUNT(DISTINCT LOWER(COALESCE(t.artist, ''))) AS distinct_artists,
-               MIN(t.artist) AS artist,
+               MIN(t.artist) AS fallback_artist,
                (SELECT t2.cover_hash FROM tracks t2
                  WHERE LOWER(COALESCE(t2.album, '')) = LOWER(COALESCE(t.album, ''))
                    AND ALBUM_DIR(t2.path) = ALBUM_DIR(t.path)
@@ -912,10 +945,16 @@ def search_albums(query="", artist_query="", title_query="", album_query="",
     albums = []
     for r in rows:
         d = dict(r)
-        various = d.pop("distinct_artists", 1) > 1
+        tagged = d.pop("tagged_artist", None)
+        distinct = d.pop("distinct_artists", 1)
+        fallback = d.pop("fallback_artist", None)
+        if tagged:
+            various = tagged.strip().casefold() in _VARIOUS_ARTISTS_TAGS
+            d["artist"] = None if various else tagged
+        else:
+            various = distinct > 1
+            d["artist"] = None if various else fallback
         d["various"] = various
-        if various:
-            d["artist"] = None
         d["has_cover"] = bool(d["cover_hash"])
         albums.append(d)
 
@@ -1567,14 +1606,16 @@ def upsert_track(data: dict):
     data.setdefault("play_count", 0)
     data.setdefault("bpm", None)
     data.setdefault("loved", False)
+    data.setdefault("album_artist", None)
     with db() as conn:
         conn.execute("""
-            INSERT INTO tracks (path, title, artist, album, genre, year, track_no,
+            INSERT INTO tracks (path, title, artist, album, album_artist, genre, year, track_no,
                                 duration, bitrate, size, cover_hash, bpm, mtime, play_count, loved)
-            VALUES (:path, :title, :artist, :album, :genre, :year, :track_no,
+            VALUES (:path, :title, :artist, :album, :album_artist, :genre, :year, :track_no,
                     :duration, :bitrate, :size, :cover_hash, :bpm, :mtime, :play_count, :loved)
             ON CONFLICT(path) DO UPDATE SET
                 title=excluded.title, artist=excluded.artist, album=excluded.album,
+                album_artist=excluded.album_artist,
                 genre=excluded.genre, year=excluded.year, track_no=excluded.track_no,
                 duration=excluded.duration, bitrate=excluded.bitrate, size=excluded.size,
                 cover_hash=excluded.cover_hash, mtime=excluded.mtime,
