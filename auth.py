@@ -30,7 +30,7 @@ BF_HARD_BLOCK    = 253402300800  # permanent (year 9999); admin must unblock man
 
 # Routes that don't require authentication
 PUBLIC_PREFIXES = (
-    "/login", "/setup",
+    "/login", "/setup", "/health",
     "/api/stream/", "/api/random", "/api/cover/",
     "/api/stats", "/api/disco-status", "/api/me-optional",
     "/api/radio/", "/api/radio-stations",
