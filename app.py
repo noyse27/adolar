@@ -1501,6 +1501,12 @@ def api_search():
     })
 
 
+@app.get("/health")
+def health():
+    """Unauthenticated liveness probe for Docker/orchestration healthchecks."""
+    return jsonify({"status": "ok"})
+
+
 # ── Genres / Stats ────────────────────────────────────────────────────────────
 
 @app.get("/api/genres")

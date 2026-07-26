@@ -62,6 +62,12 @@ class PermissionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Adolar Handbuch", response.get_data(as_text=True))
 
+    def test_health_is_public_for_docker_healthchecks(self):
+        with mock.patch.object(app_module.db, "get_setting", return_value="0"):
+            response = self.client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"status": "ok"})
+
     def test_user_playlist_capability_is_enforced_server_side(self):
         self.user["allow_playlists"] = 0
         with self._login(), mock.patch.object(
