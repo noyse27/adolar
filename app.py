@@ -1465,7 +1465,7 @@ def api_search():
     title_q     = request.args.get("title", "").strip()
     album_q     = request.args.get("album", "").strip()
     album_eq    = request.args.get("album_eq", "").strip() or None
-    artist_eq   = request.args.get("artist_eq", "").strip() or None
+    dir_eq      = request.args.get("dir_eq")  # exact folder match; "" is a valid value, so no strip/or-None
     loved       = request.args.get("loved") == "1"
     page     = _int_arg("page",     1,   min_val=1)
     per_page = _int_arg("per_page", 50,  min_val=1, max_val=200)
@@ -1486,7 +1486,7 @@ def api_search():
     user_id = g.user["id"] if g.user else None
     total, tracks = db.search_tracks(
         query=q, artist_query=artist_q, title_query=title_q, album_query=album_q,
-        album_eq=album_eq, artist_eq=artist_eq,
+        album_eq=album_eq, dir_eq=dir_eq,
         genre=genre, decade=decade, fmt=fmt,
         min_dur=min_dur, max_dur=max_dur, min_bitrate=min_bitrate,
         year_min=year_min, year_max=year_max,

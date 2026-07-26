@@ -29,6 +29,12 @@ def get_connection():
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA mmap_size=134217728")
+    # There is no separate album-artist tag in the schema (scanner.py only
+    # stores the per-track artist), so grouping tracks into albums can't key
+    # on artist alone — a compilation would explode into one card per
+    # contributing artist. Tracks of one release share a folder, so group by
+    # that instead; ALBUM_DIR gives search_albums() a stable key for it.
+    conn.create_function("ALBUM_DIR", 1, lambda p: os.path.dirname(p) if p else "")
     return conn
 
 
@@ -621,7 +627,7 @@ def _track_filter_conditions(query="", artist_query="", title_query="", album_qu
                               min_dur=None, max_dur=None, min_bitrate=None,
                               year_min=None, year_max=None,
                               bpm_min=None, bpm_max=None,
-                              album_eq=None, artist_eq=None):
+                              album_eq=None, dir_eq=None):
     """Shared WHERE-clause builder for per-track filters, used by both the
     flat track search and the album-grouped search so the two stay in sync."""
     params = []
@@ -647,9 +653,12 @@ def _track_filter_conditions(query="", artist_query="", title_query="", album_qu
     if album_eq:
         conditions.append("LOWER(COALESCE(t.album, '')) = ?")
         params.append(album_eq.strip().casefold())
-    if artist_eq:
-        conditions.append("LOWER(COALESCE(t.artist, '')) = ?")
-        params.append(artist_eq.strip().casefold())
+    if dir_eq is not None:
+        # Exact-match the album's folder (see ALBUM_DIR in get_connection) —
+        # used to open one specific album/compilation from the album grid,
+        # since artist alone can't identify a various-artists release.
+        conditions.append("ALBUM_DIR(t.path) = ?")
+        params.append(dir_eq)
 
     if genre:
         conditions.append("t.genre = ?")
@@ -695,7 +704,7 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
                   min_dur=None, max_dur=None, min_bitrate=None,
                   year_min=None, year_max=None,
                   bpm_min=None, bpm_max=None,
-                  album_eq=None, artist_eq=None,
+                  album_eq=None, dir_eq=None,
                   page=1, per_page=50, sort="artist",
                   count=True, loved_only=False, include_loved=False,
                   user_id=None, random_order=False):
@@ -705,7 +714,7 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
         min_dur=min_dur, max_dur=max_dur, min_bitrate=min_bitrate,
         year_min=year_min, year_max=year_max,
         bpm_min=bpm_min, bpm_max=bpm_max,
-        album_eq=album_eq, artist_eq=artist_eq,
+        album_eq=album_eq, dir_eq=dir_eq,
     )
 
     # loved JOIN — needed for loved_only filter, loved_at sort, or include_loved
@@ -842,10 +851,17 @@ def search_albums(query="", artist_query="", title_query="", album_query="",
                    year_min=None, year_max=None,
                    bpm_min=None, bpm_max=None,
                    page=1, per_page=50, sort="album", count=True):
-    """Distinct (album, artist) groups matching the given per-track filters.
+    """Distinct (album, folder) groups matching the given per-track filters.
 
     Used by the album-first browsing view: search a couple of tracks worth of
     filters, but show one card per album instead of every matching title.
+
+    Grouped by folder rather than artist: the schema has no separate
+    album-artist tag (scanner.py only stores the per-track artist), so a
+    various-artists compilation would otherwise explode into one card per
+    contributing artist. All tracks of one release share a folder, so that's
+    used as the stable identity instead; "artist" is only meaningful when
+    every track in the group agrees, otherwise the card is a "various" one.
     """
     conditions, params = _track_filter_conditions(
         query=query, artist_query=artist_query, title_query=title_query, album_query=album_query,
@@ -858,28 +874,31 @@ def search_albums(query="", artist_query="", title_query="", album_query="",
     where = "WHERE " + " AND ".join(conditions)
     offset = (page - 1) * per_page
 
-    order = "MIN(t.year) DESC, t.album COLLATE NOCASE" if sort == "year" \
-        else "t.album COLLATE NOCASE, t.artist COLLATE NOCASE"
+    order = "year DESC, album COLLATE NOCASE" if sort == "year" \
+        else "album COLLATE NOCASE, artist COLLATE NOCASE"
 
     sql = f"""
-        SELECT t.album AS album, t.artist AS artist,
+        SELECT t.album AS album,
+               ALBUM_DIR(t.path) AS dir,
                COUNT(*) AS track_count,
                MIN(t.year) AS year,
+               COUNT(DISTINCT LOWER(COALESCE(t.artist, ''))) AS distinct_artists,
+               MIN(t.artist) AS artist,
                (SELECT t2.cover_hash FROM tracks t2
                  WHERE LOWER(COALESCE(t2.album, '')) = LOWER(COALESCE(t.album, ''))
-                   AND LOWER(COALESCE(t2.artist, '')) = LOWER(COALESCE(t.artist, ''))
+                   AND ALBUM_DIR(t2.path) = ALBUM_DIR(t.path)
                    AND t2.cover_hash IS NOT NULL
                  LIMIT 1) AS cover_hash
         FROM tracks t
         {where}
-        GROUP BY LOWER(COALESCE(t.album, '')), LOWER(COALESCE(t.artist, ''))
+        GROUP BY LOWER(COALESCE(t.album, '')), ALBUM_DIR(t.path)
         ORDER BY {order}
         LIMIT ? OFFSET ?
     """
     count_sql = f"""
         SELECT COUNT(*) FROM (
             SELECT 1 FROM tracks t {where}
-            GROUP BY LOWER(COALESCE(t.album, '')), LOWER(COALESCE(t.artist, ''))
+            GROUP BY LOWER(COALESCE(t.album, '')), ALBUM_DIR(t.path)
         )
     """
 
@@ -893,6 +912,10 @@ def search_albums(query="", artist_query="", title_query="", album_query="",
     albums = []
     for r in rows:
         d = dict(r)
+        various = d.pop("distinct_artists", 1) > 1
+        d["various"] = various
+        if various:
+            d["artist"] = None
         d["has_cover"] = bool(d["cover_hash"])
         albums.append(d)
 

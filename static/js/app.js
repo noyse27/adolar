@@ -119,6 +119,7 @@ const LANG = {
     album_tracks_short:   (n) => `${n} Titel`,
     back_to_albums:       "Zurück zu den Alben",
     album_tracks_count:   (n, album) => `${n} Titel · „${album}"`,
+    various_artists:      "Verschiedene Interpreten",
   },
   en: {
     loading:          "Loading…",
@@ -221,6 +222,7 @@ const LANG = {
     album_tracks_short:   (n) => `${n} tracks`,
     back_to_albums:       "Back to albums",
     album_tracks_count:   (n, album) => `${n} tracks · "${album}"`,
+    various_artists:      "Various Artists",
   },
 };
 
@@ -740,7 +742,7 @@ async function loadTracks(page = 1, forceCount = false) {
   if (!needCount) p.set("count", "0");
   if (drilled) {
     p.set("album_eq", drilled.album || "");
-    p.set("artist_eq", drilled.artist || "");
+    p.set("dir_eq", drilled.dir || "");
   } else {
     if (state.query)              p.set("q", state.query);
     if (state.filters.genre)      p.set("genre",   state.filters.genre);
@@ -811,7 +813,9 @@ function updateAlbumBackBar() {
 }
 
 function openAlbumTracks(album) {
-  state.albumView.drilled = { album: album.album, artist: album.artist };
+  // Identify the album by (album, folder), not artist — a various-artists
+  // compilation has no single artist to key on. See search_albums() in db.py.
+  state.albumView.drilled = { album: album.album, dir: album.dir };
   loadTracks(1);
 }
 
@@ -894,7 +898,10 @@ function renderAlbumGrid() {
     card.className = "album-card";
     card.title = t().album_open_hint;
 
-    const cover = makeCover({ has_cover: album.has_cover, cover_hash: album.cover_hash, artist: album.artist }, 160);
+    // Various-artists compilations have no single artist to color/initial the
+    // placeholder by — fall back to the album title so cards still look distinct.
+    const coverBasis = album.artist || album.album;
+    const cover = makeCover({ has_cover: album.has_cover, cover_hash: album.cover_hash, artist: coverBasis }, 160);
     // Replace (not add to) the track-cover class: album cards need their own
     // sizing rules, and keeping "track-cover(-placeholder)" around would let
     // the track-list's mobile breakpoint rules win the cascade over ours.
@@ -904,7 +911,7 @@ function renderAlbumGrid() {
       // makePlaceholder() inlines a fixed width/height via cssText — clear it
       // so the CSS (incl. the mobile 2-up breakpoint) controls sizing.
       cover.className = "album-cover-placeholder";
-      cover.style.cssText = `background:${artistColor(album.artist)}`;
+      cover.style.cssText = `background:${artistColor(coverBasis)}`;
     }
     card.appendChild(cover);
 
@@ -918,7 +925,8 @@ function renderAlbumGrid() {
 
     const info = document.createElement("div");
     info.className = "album-card-info";
-    const sub = [album.artist, t().album_tracks_short(album.track_count)].filter(Boolean).join(" · ");
+    const artistLabel = album.various ? t().various_artists : album.artist;
+    const sub = [artistLabel, t().album_tracks_short(album.track_count)].filter(Boolean).join(" · ");
     info.innerHTML = `<div class="album-card-title">${esc(album.album || "—")}</div>
                        <div class="album-card-sub">${esc(sub)}</div>`;
     card.appendChild(info);
