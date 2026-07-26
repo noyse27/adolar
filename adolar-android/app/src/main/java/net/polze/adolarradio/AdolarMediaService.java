@@ -4,33 +4,35 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.media.AudioAttributes;
-import android.media.AudioFocusRequest;
-import android.media.AudioManager;
-import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.PowerManager;
 import android.support.v4.media.MediaBrowserCompat;
 import android.support.v4.media.MediaDescriptionCompat;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
-import android.webkit.CookieManager;
+import android.util.Log;
 import android.view.KeyEvent;
+import android.webkit.CookieManager;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.media.MediaBrowserServiceCompat;
 import androidx.media.app.NotificationCompat.MediaStyle;
 import androidx.media.session.MediaButtonReceiver;
+import androidx.media3.common.AudioAttributes;
+import androidx.media3.common.C;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
+import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.source.MediaSource;
+import androidx.media3.exoplayer.source.ProgressiveMediaSource;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -49,7 +51,16 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Playback runs on ExoPlayer (Media3) rather than the platform MediaPlayer.
+ * ExoPlayer owns audio focus, "becoming noisy" handling, and the wake/WiFi
+ * locks needed during network streaming (see the Builder config in
+ * {@link #onCreate}), and its playlist queue provides genuinely reliable
+ * gapless track transitions — a hand-rolled dual-MediaPlayer approach was
+ * tried first and repeatedly left playback silent after a track change.
+ */
 public class AdolarMediaService extends MediaBrowserServiceCompat {
+    private static final String TAG = "AdolarMediaService";
     private static final String ROOT_ID = "adolar_root";
     private static final String STATION_PREFIX = "station:";
     static final String METADATA_KEY_ADOLAR4U_REASON =
@@ -63,23 +74,26 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     private final String listeningSession = "android-auto-" + UUID.randomUUID();
     private final AtomicInteger eventSequence = new AtomicInteger();
     private MediaSessionCompat mediaSession;
-    private MediaPlayer player;
-    private AudioManager audioManager;
-    private AudioFocusRequest audioFocusRequest;
+    private ExoPlayer player;
     private Track currentTrack;
+    // At most one track is ever queued ahead of the currently playing one;
+    // this is the source of truth for what it is once ExoPlayer transitions
+    // to it, so onMediaItemTransition never needs to inspect the MediaItem.
+    private Track queuedNextTrack;
     private int currentStationId = 1;
     private String currentStationName = "Adolar Radio";
     private String currentStationEngine = "shuffle";
     private int playbackRequest;
     private boolean foregroundStarted;
-    private boolean resumeOnAudioFocusGain;
-    private boolean playerPrepared;
+
     private final Runnable connectionHeartbeat = new Runnable() {
         @Override
         public void run() {
             if (AdolarPrefs.hasServerUrl(AdolarMediaService.this)) {
+                boolean playing = player.isPlaying();
+                long position = player.getCurrentPosition();
                 new Thread(
-                        AdolarMediaService.this::sendConnectionHeartbeat,
+                        () -> sendConnectionHeartbeat(playing, position),
                         "AdolarConnectionHeartbeat"
                 ).start();
             }
@@ -87,30 +101,67 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         }
     };
 
-    private final BroadcastReceiver noisyAudioReceiver = new BroadcastReceiver() {
+    private final Player.Listener playerListener = new Player.Listener() {
         @Override
-        public void onReceive(Context context, Intent intent) {
-            if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
-                mediaCallback.onPause();
+        public void onPlaybackStateChanged(int state) {
+            if (state == Player.STATE_ENDED) {
+                // The queue ran dry (preload wasn't ready in time); fetch fresh.
+                loadNextTrack();
+            } else if (state == Player.STATE_BUFFERING) {
+                updatePlaybackState(PlaybackStateCompat.STATE_BUFFERING, null);
             }
+        }
+
+        @Override
+        public void onIsPlayingChanged(boolean isPlaying) {
+            int state = player.getPlaybackState();
+            if (isPlaying) {
+                updatePlaybackState(PlaybackStateCompat.STATE_PLAYING, null);
+            } else if (state != Player.STATE_ENDED && state != Player.STATE_IDLE) {
+                updatePlaybackState(PlaybackStateCompat.STATE_PAUSED, null);
+            }
+        }
+
+        @Override
+        public void onMediaItemTransition(MediaItem mediaItem, int reason) {
+            if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
+                    && reason != Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
+                return;
+            }
+            if (queuedNextTrack == null) {
+                return;
+            }
+            finishCurrentTrack(
+                    true, reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ? "ended" : "manual_next"
+            );
+            Track promoted = queuedNextTrack;
+            queuedNextTrack = null;
+            currentTrack = promoted;
+            mediaSession.setActive(true);
+            updateMetadata(promoted);
+            sendListeningEvent(promoted, "started", null, 0, promoted.durationMs);
+            updatePlaybackState(PlaybackStateCompat.STATE_PLAYING, null);
+            queueNextTrack();
+        }
+
+        @Override
+        public void onPlayerError(PlaybackException error) {
+            Log.w(TAG, "player error", error);
+            finishCurrentTrack(false, "error");
+            player.clearMediaItems();
+            queuedNextTrack = null;
+            updatePlaybackState(
+                    PlaybackStateCompat.STATE_ERROR, "Wiedergabe fehlgeschlagen. Nächster Titel wird geladen."
+            );
+            retryCurrentRequestAfterDelay(playbackRequest);
         }
     };
 
     private final MediaSessionCompat.Callback mediaCallback = new MediaSessionCompat.Callback() {
         @Override
         public void onPlay() {
-            if (player != null && currentTrack != null) {
-                if (!playerPrepared) {
-                    // Still buffering; onPreparedListener starts playback once ready.
-                    return;
-                }
-                if (!requestAudioFocus()) {
-                    updatePlaybackState(PlaybackStateCompat.STATE_ERROR, "Audiofokus nicht verfügbar.");
-                    return;
-                }
-                resumeOnAudioFocusGain = false;
-                player.start();
-                updatePlaybackState(PlaybackStateCompat.STATE_PLAYING, null);
+            if (player.getMediaItemCount() > 0) {
+                player.play();
                 return;
             }
             loadNextTrack();
@@ -123,6 +174,9 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
                 updatePlaybackState(PlaybackStateCompat.STATE_ERROR, "Sender nicht gefunden.");
                 return;
             }
+            player.stop();
+            player.clearMediaItems();
+            queuedNextTrack = null;
             finishCurrentTrack(false, "track_change");
             currentStationId = station.id;
             currentStationName = station.name;
@@ -140,37 +194,32 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
 
         @Override
         public void onSkipToNext() {
+            if (queuedNextTrack != null && player.hasNextMediaItem()) {
+                player.seekToNextMediaItem();
+                return;
+            }
             finishCurrentTrack(false, "manual_next");
+            player.clearMediaItems();
             loadNextTrack();
         }
 
         @Override
         public void onSkipToPrevious() {
-            if (player != null && playerPrepared) {
-                player.seekTo(0);
-                updatePlaybackState(
-                        player.isPlaying() ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED,
-                        null
-                );
-            }
+            player.seekTo(0);
         }
 
         @Override
         public void onPause() {
-            resumeOnAudioFocusGain = false;
-            if (player != null && playerPrepared && player.isPlaying()) {
-                player.pause();
-                updatePlaybackState(PlaybackStateCompat.STATE_PAUSED, null);
-            }
+            player.pause();
         }
 
         @Override
         public void onStop() {
-            resumeOnAudioFocusGain = false;
             playbackRequest++;
             finishCurrentTrack(false, "stop");
-            releasePlayer();
-            abandonAudioFocus();
+            player.stop();
+            player.clearMediaItems();
+            queuedNextTrack = null;
             updatePlaybackState(PlaybackStateCompat.STATE_STOPPED, null);
             stopForeground(true);
             foregroundStarted = false;
@@ -182,13 +231,18 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     public void onCreate() {
         super.onCreate();
         currentStationId = AdolarPrefs.getStationId(this);
-        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        IntentFilter noisyFilter = new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(noisyAudioReceiver, noisyFilter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(noisyAudioReceiver, noisyFilter);
-        }
+        player = new ExoPlayer.Builder(this)
+                .setAudioAttributes(
+                        new AudioAttributes.Builder()
+                                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                                .setUsage(C.USAGE_MEDIA)
+                                .build(),
+                        /* handleAudioFocus= */ true
+                )
+                .setHandleAudioBecomingNoisy(true)
+                .setWakeMode(C.WAKE_MODE_NETWORK)
+                .build();
+        player.addListener(playerListener);
         createNotificationChannel();
         mediaSession = new MediaSessionCompat(this, "AdolarRadio");
         mediaSession.setFlags(
@@ -374,9 +428,8 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     }
 
     private void startTrack(Track track) {
-        final int trackRequest = playbackRequest;
-        releasePlayer();
         currentTrack = track;
+        queuedNextTrack = null;
         mediaSession.setActive(true);
         updateMetadata(track);
         // Marks the service as "started" so it survives the phone UI unbinding
@@ -386,55 +439,52 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         ContextCompat.startForegroundService(this, new Intent(this, AdolarMediaService.class));
         startForeground(PLAYBACK_NOTIFICATION_ID, buildNotification());
         foregroundStarted = true;
-        player = new MediaPlayer();
-        try {
-            player.setAudioAttributes(new AudioAttributes.Builder()
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .build());
-            player.setWakeMode(this, PowerManager.PARTIAL_WAKE_LOCK);
-            Map<String, String> headers = new HashMap<>();
-            String cookie = sessionCookie();
-            if (!cookie.isEmpty()) {
-                headers.put("Cookie", cookie);
-            }
-            player.setDataSource(
-                    this,
-                    Uri.parse(AdolarPrefs.apiUrl(this) + "/api/stream/" + track.id),
-                    headers
-            );
-            player.setOnPreparedListener(mediaPlayer -> {
-                playerPrepared = true;
-                if (!requestAudioFocus()) {
-                    finishCurrentTrack(false, "error");
-                    releasePlayer();
-                    updatePlaybackState(PlaybackStateCompat.STATE_ERROR, "Audiofokus nicht verfügbar.");
-                    stopForeground(true);
-                    foregroundStarted = false;
+        player.setMediaSource(buildMediaSource(track));
+        player.prepare();
+        player.setPlayWhenReady(true);
+        sendListeningEvent(track, "started", null, 0, track.durationMs);
+        queueNextTrack();
+    }
+
+    private MediaSource buildMediaSource(Track track) {
+        Map<String, String> headers = new HashMap<>();
+        String cookie = sessionCookie();
+        if (!cookie.isEmpty()) {
+            headers.put("Cookie", cookie);
+        }
+        DefaultHttpDataSource.Factory dataSourceFactory = new DefaultHttpDataSource.Factory()
+                .setDefaultRequestProperties(headers);
+        MediaItem mediaItem = new MediaItem.Builder()
+                .setUri(Uri.parse(AdolarPrefs.apiUrl(this) + "/api/stream/" + track.id))
+                .setMediaId(String.valueOf(track.id))
+                .build();
+        return new ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(mediaItem);
+    }
+
+    /**
+     * Fetches and queues the next track ahead of time so ExoPlayer's own
+     * playlist mechanism can buffer and transition to it seamlessly, instead
+     * of only starting the fetch once the current track ends.
+     */
+    private void queueNextTrack() {
+        if (!AdolarPrefs.hasServerUrl(this)) {
+            return;
+        }
+        final int owningRequest = playbackRequest;
+        new Thread(() -> {
+            Track track = fetchStationTrack(currentStationId);
+            mainHandler.post(() -> {
+                if (owningRequest != playbackRequest || track == null || queuedNextTrack != null) {
                     return;
                 }
-                resumeOnAudioFocusGain = false;
-                mediaPlayer.start();
-                sendListeningEvent(track, "started", null, 0, track.durationMs);
-                updatePlaybackState(PlaybackStateCompat.STATE_PLAYING, null);
+                try {
+                    player.addMediaSource(buildMediaSource(track));
+                    queuedNextTrack = track;
+                } catch (Exception exception) {
+                    Log.w(TAG, "queueNextTrack failed", exception);
+                }
             });
-            player.setOnCompletionListener(mediaPlayer -> {
-                finishCurrentTrack(true, "ended");
-                loadNextTrack();
-            });
-            player.setOnErrorListener((mediaPlayer, what, extra) -> {
-                finishCurrentTrack(false, "error");
-                releasePlayer();
-                updatePlaybackState(PlaybackStateCompat.STATE_ERROR, "Wiedergabe fehlgeschlagen. Nächster Titel wird geladen.");
-                retryCurrentRequestAfterDelay(trackRequest);
-                return true;
-            });
-            player.prepareAsync();
-        } catch (Exception exception) {
-            releasePlayer();
-            updatePlaybackState(PlaybackStateCompat.STATE_ERROR, "Stream konnte nicht gestartet werden.");
-            retryCurrentRequestAfterDelay(playbackRequest);
-        }
+        }, "AdolarNextTrackLoader").start();
     }
 
     private void retryCurrentRequestAfterDelay(int failedRequest) {
@@ -443,70 +493,6 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
                 loadNextTrack();
             }
         }, 1500);
-    }
-
-    private final AudioManager.OnAudioFocusChangeListener audioFocusListener = focusChange -> {
-        if (player == null || !playerPrepared) {
-            return;
-        }
-        if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
-            resumeOnAudioFocusGain = false;
-            if (player.isPlaying()) {
-                player.pause();
-            }
-            updatePlaybackState(PlaybackStateCompat.STATE_PAUSED, null);
-            abandonAudioFocus();
-        } else if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-            if (player.isPlaying()) {
-                resumeOnAudioFocusGain = true;
-                player.pause();
-                updatePlaybackState(PlaybackStateCompat.STATE_PAUSED, null);
-            }
-        } else if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) {
-            player.setVolume(0.25f, 0.25f);
-        } else if (focusChange == AudioManager.AUDIOFOCUS_GAIN) {
-            player.setVolume(1f, 1f);
-            if (resumeOnAudioFocusGain) {
-                resumeOnAudioFocusGain = false;
-                player.start();
-                updatePlaybackState(PlaybackStateCompat.STATE_PLAYING, null);
-            }
-        }
-    };
-
-    private boolean requestAudioFocus() {
-        if (audioManager == null) {
-            return false;
-        }
-        int result;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (audioFocusRequest == null) {
-                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                        .setAudioAttributes(new AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_MEDIA)
-                                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                                .build())
-                        .setOnAudioFocusChangeListener(audioFocusListener, mainHandler)
-                        .build();
-            }
-            result = audioManager.requestAudioFocus(audioFocusRequest);
-        } else {
-            result = audioManager.requestAudioFocus(
-                    audioFocusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN
-            );
-        }
-        return result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
-    }
-
-    private void abandonAudioFocus() {
-        if (audioManager == null) {
-            return;
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
-            audioManager.abandonAudioFocusRequest(audioFocusRequest);
-        } else {
-            audioManager.abandonAudioFocus(audioFocusListener);
-        }
     }
 
     private void createNotificationChannel() {
@@ -537,6 +523,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
                 ? getString(R.string.notification_unknown_track)
                 : currentTrack.title;
         String artist = currentTrack == null ? currentStationName : currentTrack.artist;
+        boolean playing = player.isPlaying();
         return new NotificationCompat.Builder(this, PLAYBACK_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_car_attribution)
                 .setContentTitle(title)
@@ -545,12 +532,12 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
                 .setContentIntent(contentPendingIntent)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setOnlyAlertOnce(true)
-                .setOngoing(player != null && player.isPlaying())
+                .setOngoing(playing)
                 .addAction(mediaAction(KeyEvent.KEYCODE_MEDIA_PREVIOUS, android.R.drawable.ic_media_previous, "Zurück"))
                 .addAction(mediaAction(
-                        player != null && player.isPlaying() ? KeyEvent.KEYCODE_MEDIA_PAUSE : KeyEvent.KEYCODE_MEDIA_PLAY,
-                        player != null && player.isPlaying() ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play,
-                        player != null && player.isPlaying() ? "Pause" : "Wiedergabe"
+                        playing ? KeyEvent.KEYCODE_MEDIA_PAUSE : KeyEvent.KEYCODE_MEDIA_PLAY,
+                        playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play,
+                        playing ? "Pause" : "Wiedergabe"
                 ))
                 .addAction(mediaAction(KeyEvent.KEYCODE_MEDIA_NEXT, android.R.drawable.ic_media_next, "Weiter"))
                 .setStyle(mediaStyle)
@@ -570,15 +557,9 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         if (track == null) {
             return;
         }
-        long position = 0;
-        if (player != null) {
-            try {
-                position = player.getCurrentPosition();
-            } catch (IllegalStateException ignored) {
-                position = 0;
-            }
-        }
-        sendListeningEvent(track, completed ? "completed" : "skipped", reason, position, track.durationMs);
+        sendListeningEvent(
+                track, completed ? "completed" : "skipped", reason, player.getCurrentPosition(), track.durationMs
+        );
         currentTrack = null;
     }
 
@@ -647,7 +628,8 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         return cookie == null ? "" : cookie;
     }
 
-    private void sendConnectionHeartbeat() {
+    private void sendConnectionHeartbeat(boolean playing, long position) {
+        Log.d(TAG, "heartbeat tick, playing=" + playing + " position=" + position);
         HttpURLConnection connection = null;
         try {
             connection = openConnection(
@@ -668,15 +650,6 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         } finally {
             if (connection != null) connection.disconnect();
         }
-    }
-
-    private void releasePlayer() {
-        if (player != null) {
-            player.reset();
-            player.release();
-            player = null;
-        }
-        playerPrepared = false;
     }
 
     private void updateMetadata(Track track) {
@@ -700,14 +673,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     }
 
     private void updatePlaybackState(int state, String error) {
-        long position = PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN;
-        if (player != null) {
-            try {
-                position = player.getCurrentPosition();
-            } catch (IllegalStateException ignored) {
-                position = PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN;
-            }
-        }
+        long position = player.getCurrentPosition();
         PlaybackStateCompat.Builder builder = new PlaybackStateCompat.Builder()
                 .setActions(
                         PlaybackStateCompat.ACTION_PLAY
@@ -747,13 +713,10 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     public void onDestroy() {
         mainHandler.removeCallbacks(connectionHeartbeat);
         playbackRequest++;
-        resumeOnAudioFocusGain = false;
         finishCurrentTrack(false, "stop");
-        releasePlayer();
-        abandonAudioFocus();
+        player.release();
         stopForeground(true);
         foregroundStarted = false;
-        unregisterReceiver(noisyAudioReceiver);
         if (mediaSession != null) {
             mediaSession.release();
             mediaSession = null;
