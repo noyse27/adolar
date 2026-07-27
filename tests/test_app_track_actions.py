@@ -34,6 +34,10 @@ class TrackActionsTestBase(unittest.TestCase):
                 app_module.db, "CONTROL_DB_PATH", os.path.join(self.temp.name, "control.db"),
             ),
             mock.patch.object(app_module, "MUSIC_ROOT", self.music_root),
+            mock.patch.object(
+                app_module, "LIBRARY_REGISTRY_PATH",
+                os.path.join(self.temp.name, "libraries.json"),
+            ),
         ]
         for p in self.patches:
             p.start()

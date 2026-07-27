@@ -21,6 +21,10 @@ class PagesTestBase(unittest.TestCase):
             mock.patch.object(
                 app_module.db, "CONTROL_DB_PATH", os.path.join(self.temp.name, "control.db"),
             ),
+            mock.patch.object(
+                app_module, "LIBRARY_REGISTRY_PATH",
+                os.path.join(self.temp.name, "libraries.json"),
+            ),
         ]
         for p in self.patches:
             p.start()

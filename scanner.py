@@ -6,6 +6,8 @@ import time
 
 from mutagen import File as MutagenFile
 
+import db
+import library_context
 import tasks
 from db import save_cover, upsert_track
 
@@ -21,6 +23,16 @@ _status = {
     "finished_at": None,
 }
 _lock = threading.Lock()
+
+
+def _library_thread(target, music_root: str | None = None) -> threading.Thread:
+    """Create a worker pinned to the caller's current library snapshot."""
+    db_path = db.current_db_path()
+    root = library_context.music_root(music_root or "")
+    return threading.Thread(
+        target=library_context.wrapped(target, db_path, root),
+        daemon=True,
+    )
 
 
 def status():
@@ -354,7 +366,7 @@ def run_thumb_generation(trigger: str = "manual"):
                 detail=f"{generated} von {total} erzeugt" if total else None,
             )
 
-    t = threading.Thread(target=_worker, daemon=True)
+    t = _library_thread(_worker)
     t.start()
 
 
@@ -422,7 +434,7 @@ def run_bpm_scan(limit: int = 0, trigger: str = "manual"):
                 detail=f"{analysed} von {total} Titeln" if total else None,
             )
 
-    t = threading.Thread(target=_bpm_worker, daemon=True)
+    t = _library_thread(_bpm_worker)
     t.start()
 
 
@@ -482,5 +494,5 @@ def run_scan(music_root: str, trigger: str = "manual"):
             # Generate missing cover thumbnails in background
             run_thumb_generation(trigger="auto")
 
-    t = threading.Thread(target=_worker, daemon=True)
+    t = _library_thread(_worker, music_root)
     t.start()

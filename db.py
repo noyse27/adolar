@@ -7,6 +7,7 @@ from contextlib import contextmanager
 
 import adolar4u
 import errors
+import library_context
 import smart_shuffle
 
 DB_PATH = os.environ.get("DB_PATH", "/data/adolar.db")
@@ -20,10 +21,16 @@ DB_PATH = os.environ.get("DB_PATH", "/data/adolar.db")
 CONTROL_DB_PATH = os.environ.get("CONTROL_DB_PATH", "/data/control.db")
 
 
+def current_db_path() -> str:
+    """Content database selected for this request/background job."""
+    return library_context.content_db_path(DB_PATH)
+
+
 def get_connection():
-    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+    content_path = current_db_path()
+    os.makedirs(os.path.dirname(content_path) or ".", exist_ok=True)
     os.makedirs(os.path.dirname(CONTROL_DB_PATH) or ".", exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(content_path)
     conn.row_factory = sqlite3.Row
     conn.execute("ATTACH DATABASE ? AS control", (CONTROL_DB_PATH,))
     conn.execute("PRAGMA foreign_keys=ON")

@@ -22,6 +22,10 @@ class ScanRouteTestBase(unittest.TestCase):
                 app_module.db, "CONTROL_DB_PATH", os.path.join(self.temp.name, "control.db"),
             ),
             mock.patch.object(app_module, "MUSIC_ROOT", self.music_root),
+            mock.patch.object(
+                app_module, "LIBRARY_REGISTRY_PATH",
+                os.path.join(self.temp.name, "libraries.json"),
+            ),
         ]
         for p in self.patches:
             p.start()
@@ -71,10 +75,13 @@ class BpmTagsRouteTests(ScanRouteTestBase):
         self.assertEqual(response.status_code, 403)
 
     def test_returns_started_immediately(self):
-        with self._login(role="admin"):
+        with self._login(role="admin"), mock.patch.object(
+            app_module, "_start_library_thread",
+        ) as start_thread:
             response = self.client.post("/api/scan/bpm-tags")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["status"], "started")
+        start_thread.assert_called_once()
 
 
 class BpmScanRouteTests(ScanRouteTestBase):

@@ -102,9 +102,29 @@ class LibraryManagementTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         lib = response.get_json()
         self.assertEqual(lib["music_path"], new_music_path)
-        self.assertEqual(app_module.MUSIC_ROOT, new_music_path)
-        self.assertEqual(app_module.db.DB_PATH, lib["db_path"])
+        active = app_module.libraries.get_active(
+            app_module.LIBRARY_REGISTRY_PATH,
+            app_module.MUSIC_ROOT,
+            app_module.db.DB_PATH,
+        )
+        self.assertEqual(active, lib)
+        # Process defaults deliberately remain unchanged; every worker reads
+        # the shared registry at the start of its next request.
+        self.assertEqual(app_module.MUSIC_ROOT, self.music_root)
+        self.assertEqual(app_module.db.DB_PATH, self.db_path)
         self.assertTrue(os.path.exists(lib["db_path"]))
+
+        with (
+            app_module.library_context.bind(lib["db_path"], lib["music_path"]),
+            app_module.db.db() as conn,
+        ):
+            conn.execute("INSERT INTO tracks (path, title) VALUES ('/new.mp3', 'New')")
+        # This next request models another Gunicorn worker: its process
+        # defaults are still the original library, but the shared registry
+        # selects the newly active content database.
+        with self._as(self.admin):
+            status = self.client.get("/api/scan/status").get_json()
+        self.assertEqual(status["total_tracks"], 1)
 
     def test_activate_switches_back_to_original_library(self):
         new_music_path = os.path.join(self.temp.name, "music2")
@@ -119,8 +139,14 @@ class LibraryManagementTests(unittest.TestCase):
             )
             response = self.client.post(f"/api/admin/libraries/{original_id}/activate")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(app_module.MUSIC_ROOT, self.music_root)
-        self.assertEqual(app_module.db.DB_PATH, self.db_path)
+        active = app_module.libraries.get_active(
+            app_module.LIBRARY_REGISTRY_PATH,
+            app_module.MUSIC_ROOT,
+            app_module.db.DB_PATH,
+        )
+        self.assertEqual(active["id"], original_id)
+        self.assertEqual(active["music_path"], self.music_root)
+        self.assertEqual(active["db_path"], self.db_path)
 
     def test_activate_unknown_library_returns_404(self):
         with self._as(self.admin):
@@ -147,7 +173,12 @@ class LibraryManagementTests(unittest.TestCase):
         data = response.get_json()
         self.assertEqual(data["tracks_updated"], 1)
         resolved_new_path = os.path.realpath(new_path)
-        self.assertEqual(app_module.MUSIC_ROOT, resolved_new_path)
+        active = app_module.libraries.get_active(
+            app_module.LIBRARY_REGISTRY_PATH,
+            app_module.MUSIC_ROOT,
+            app_module.db.DB_PATH,
+        )
+        self.assertEqual(active["music_path"], resolved_new_path)
         with app_module.db.db() as conn:
             path = conn.execute("SELECT path FROM tracks WHERE id=1").fetchone()["path"]
         self.assertTrue(path.startswith(resolved_new_path))

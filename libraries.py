@@ -1,8 +1,9 @@
 """Registry of known music libraries (music path + content database per library).
 
 Stored as a small JSON file outside any content database, so it survives
-switching which content database is active. The active library's music path
-and database path are what app.py assigns to MUSIC_ROOT and db.DB_PATH.
+switching which content database is active and is visible to every Gunicorn
+worker. app.py reads the active entry at the start of each request and binds
+its music/database paths as an immutable request-local snapshot.
 """
 
 import json
