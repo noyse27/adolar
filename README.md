@@ -1,6 +1,6 @@
 # Adolar
 
-Current version: **1.5.0**
+Current version: **1.6.0**
 
 A self-hosted music archive web app for Synology NAS (or any Docker host). Browse, search, and stream your local MP3/FLAC/M4A collection from any browser — no cloud required.
 
@@ -13,6 +13,7 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 
 - **Full-text search** — title, artist, album, genre (SQLite FTS5), spinning loader indicator, 500ms debounce
 - **Facet filters** — dedicated artist/title/album fields plus genre, decade, year range, duration, format, bitrate, and BPM range; active filters combine with AND logic
+- **Album-first browsing** — the album search shows a grid of matching albums instead of every track; double-click (or the open button) drills into one album's tracks in order, with a back button to return; various-artists compilations are grouped as a single card using a real album-artist tag, falling back to a folder heuristic until a library has been rescanned
 - **Mobile player mode** — phone-first layout with full-width track list, off-canvas filters, and compact bottom player
 - **Now Playing view** — focused full-screen playback view with large cover, synchronized controls, queue, radio context, and live date/time
 - **Cover art** — 80×80 WebP thumbnails cached on filesystem, colored initials fallback; full-size for Radio
@@ -42,11 +43,18 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Playlist editor** — visual editor with track search, rule-based smart filters, drag-and-drop ordering, random fill, and portable `.adolarplaylist` import/export
 - **Database backups** — consistent SQLite snapshots with integrity check, SHA-256 checksum, jingle archive, daily automatic runs, and retention policy
 - **Connection monitor** — admin overview of connected clients with heartbeats and masked IP addresses
+- **Background job monitor** — admin System Monitor shows currently running and recently finished library scans, BPM analysis, thumbnail generation, database optimization, and backups, with progress and manual/automatic trigger
 - **Local Favorites** — a star works without Last.fm; optionally and by default, adding a favorite also loves it on the connected Last.fm account
 - **Private Adolar4U learning journal** — records versioned score components, candidate groups, profile snapshots, and listening outcomes; a personal ZIP export provides analysis-ready CSV and JSON files
 - **Bookmark button** — add any track to a personal playlist directly from the track list; create new playlists on the fly
 - **Radio favorites** — the Radio companion uses the same personal Favorites list as the Web player
 - **DE / EN interface** — language switch in topbar
+
+## What's new in 1.6.0
+
+- Album-first browsing: the album search filter now shows a grid of matching albums instead of every matching track; double-click opens one album's tracks in order, with a back button to return to the grid
+- Various-artists compilations grouped correctly as a single album card using a real album-artist tag read from file metadata, instead of exploding into one card per contributing artist; existing libraries fall back to a folder-based heuristic until their next rescan populates the new tag
+- Admin System Monitor now shows currently running and recently finished background jobs — library scan, BPM tag reading, BPM analysis, thumbnail generation, database optimize, and backups — with progress, start time, and whether each was manually or automatically triggered
 
 ## What's new in 1.5.0
 
