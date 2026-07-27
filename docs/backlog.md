@@ -1,0 +1,38 @@
+# Backlog
+
+Low-priority ideas that are currently hard or blocked, not committed work. Unlike
+the roadmaps for individual features, entries here have no schedule. Revisit
+them occasionally to check whether the blocker has gone away; otherwise leave
+them alone.
+
+Each entry: what the idea is, why it's blocked or hard right now, and what
+would have to change for it to become worth doing.
+
+## Spotify integration for new-release discovery
+
+**Idea:** Surface real "new releases" alongside the static local MP3 library —
+either by loading/playing Spotify playlists (e.g. an "Adolar Disco"), or by
+pulling Spotify's Release Radar into the Adolar4U suggestion list.
+
+**Why blocked:**
+
+- Spotify removed API access to algorithmic/editorial playlists (Release Radar,
+  Discover Weekly, Daily Mix) for newly registered apps in November 2024. Only
+  apps with pre-existing extended-quota access keep it.
+- Actual audio playback of Spotify tracks can't happen inside Adolar's own
+  player (DRM); at best Adolar could remote-control an already-running Spotify
+  Connect device, which requires the user to have Spotify Premium.
+- There is no public Spotify endpoint to submit external/local plays back into
+  Spotify's own recommendation system (no Last.fm-style scrobble API).
+
+**Recheck trigger:** Spotify reopens algorithmic-playlist API access, or offers
+a scrobble-equivalent endpoint. Unlikely but worth a periodic check.
+
+**Fallback that isn't blocked:** New releases from artists already in the
+library can be detected without the restricted endpoints — Spotify's artist
+discography endpoint (albums by artist, sorted by release date) is not
+algorithmic and remains open. This only covers "new album from an artist you
+already know," not genuine discovery, but doesn't need Premium or a Connect
+device. ListenBrainz (MusicBrainz Foundation) is a fully open alternative with
+a real scrobble API and its own recommendation system, if local-play-based
+recommendations are wanted independent of Spotify.
