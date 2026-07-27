@@ -633,6 +633,12 @@
         <div id="monitor-ram-detail" style="font-size:11px;color:var(--text-tertiary);margin-top:7px">–</div>
       </div>
     </div>
+    <div class="monitor-section-title">Aktuelle Aufgaben</div>
+    <div id="monitor-tasks-current" class="monitor-table-wrap"><div class="monitor-empty">Wird geladen…</div></div>
+    <div class="monitor-section-title" id="monitor-tasks-recent-toggle" onclick="toggleMonitorRecentTasks()" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:5px">
+      Letzte Aufgaben <i class="ti ti-chevron-down" id="monitor-tasks-recent-chevron" style="font-size:11px"></i>
+    </div>
+    <div id="monitor-tasks-recent" class="monitor-table-wrap" style="display:none"><div class="monitor-empty">Wird geladen…</div></div>
     <div class="monitor-section-title">Aktuelle Verbindungen <span style="font-weight:400;text-transform:none;letter-spacing:0">(in den letzten 2 Minuten aktiv)</span></div>
     <div id="monitor-current" class="monitor-table-wrap"><div class="monitor-empty">Wird geladen…</div></div>
     <div class="monitor-section-title">Letzte 10 Verbindungen</div>

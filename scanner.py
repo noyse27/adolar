@@ -6,6 +6,7 @@ import time
 
 from mutagen import File as MutagenFile
 
+import tasks
 from db import save_cover, upsert_track
 
 log = logging.getLogger(__name__)
@@ -304,9 +305,13 @@ def write_love_tag(path: str, loved: bool):
         audio.save()
 
 
-def run_thumb_generation():
+def run_thumb_generation(trigger: str = "manual"):
     """Generate missing cover thumbnails in the background after a scan."""
     def _worker():
+        task_id = tasks.start("thumbnails", trigger)
+        failed = False
+        generated = 0
+        total = 0
         try:
             import io as _io
             import os as _os
@@ -320,9 +325,11 @@ def run_thumb_generation():
             rows = conn.execute("SELECT hash, data, mime FROM covers").fetchall()
             conn.close()
 
+            total = len(rows)
+            tasks.update(task_id, total=total)
             _os.makedirs(_THUMB_DIR, exist_ok=True)
-            generated = 0
-            for row in rows:
+            for i, row in enumerate(rows):
+                tasks.update(task_id, current=i + 1)
                 tp = _thumb_path(row["hash"])
                 if _os.path.exists(tp):
                     continue
@@ -340,17 +347,27 @@ def run_thumb_generation():
             log.info("Thumbnail generation: %d generated", generated)
         except Exception as e:
             log.error("Thumbnail generation failed: %s", e)
+            failed = True
+        finally:
+            tasks.finish(
+                task_id, status="failed" if failed else "completed",
+                detail=f"{generated} von {total} erzeugt" if total else None,
+            )
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
 
 
-def run_bpm_scan(limit: int = 0):
+def run_bpm_scan(limit: int = 0, trigger: str = "manual"):
     """Analyse BPM for all tracks that don't have one yet.
     Runs in background after the regular scan.
     limit=0 means no limit (scan all).
     """
     def _bpm_worker():
+        task_id = tasks.start("bpm_analyze", trigger)
+        failed = False
+        analysed = 0
+        total = 0
         try:
             import librosa
 
@@ -364,8 +381,11 @@ def run_bpm_scan(limit: int = 0):
             finally:
                 conn.close()
 
+            total = len(rows)
+            tasks.update(task_id, total=total)
             log.info("BPM scan: %d tracks to analyse", len(rows))
-            for row in rows:
+            for i, row in enumerate(rows):
+                tasks.update(task_id, current=i + 1)
                 try:
                     y, sr = librosa.load(row["path"], mono=True, duration=60)
                     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
@@ -387,24 +407,34 @@ def run_bpm_scan(limit: int = 0):
                         conn2.commit()
                     finally:
                         conn2.close()
+                    analysed += 1
                 except Exception as e:
                     log.debug("BPM failed for %s: %s", row["path"], e)
         except ImportError:
             log.warning("librosa not installed — BPM scan skipped")
+            failed = True
         except Exception as e:
             log.error("BPM scan error: %s", e)
+            failed = True
+        finally:
+            tasks.finish(
+                task_id, status="failed" if failed else "completed",
+                detail=f"{analysed} von {total} Titeln" if total else None,
+            )
 
     t = threading.Thread(target=_bpm_worker, daemon=True)
     t.start()
 
 
-def run_scan(music_root: str):
+def run_scan(music_root: str, trigger: str = "manual"):
     if _status["running"]:
         return
 
     def _worker():
         _update(running=True, progress=0, total=0, errors=0, skipped=0,
                 started_at=time.time(), finished_at=None, current_file="")
+        task_id = tasks.start("scan", trigger)
+        failed = False
         try:
             # Load existing mtimes once — avoids per-file DB round-trips
             from db import get_connection
@@ -419,9 +449,11 @@ def run_scan(music_root: str):
 
             files = list(_collect_mp3s(music_root))
             _update(total=len(files))
+            tasks.update(task_id, total=len(files))
             skipped = 0
             for i, path in enumerate(files):
                 _update(current_file=path, progress=i + 1)
+                tasks.update(task_id, current=i + 1)
                 try:
                     mtime = os.stat(path).st_mtime
                 except OSError:
@@ -438,13 +470,17 @@ def run_scan(music_root: str):
                     with _lock:
                         _status["errors"] += 1
         except Exception as e:
+            failed = True
             log.error("Scanner error: %s", e)
         finally:
             _update(running=False, finished_at=time.time(), current_file="")
+            detail = f"{_status['progress']} von {_status['total']} Dateien" \
+                if _status["total"] else None
+            tasks.finish(task_id, status="failed" if failed else "completed", detail=detail)
             # Kick off background BPM analysis for new tracks
-            run_bpm_scan()
+            run_bpm_scan(trigger="auto")
             # Generate missing cover thumbnails in background
-            run_thumb_generation()
+            run_thumb_generation(trigger="auto")
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()

@@ -250,6 +250,22 @@ def init_db():
                 created_at TEXT DEFAULT (datetime('now'))
             );
             CREATE INDEX IF NOT EXISTS control.idx_audit_created ON audit_log(created_at DESC);
+
+            -- Bounded history of finished background jobs (scan, BPM, thumbnails,
+            -- optimize) for the admin System Monitor. See tasks.py. Database
+            -- backups are not stored here — they track their own status/history
+            -- in backup_service.py; the monitor endpoint merges both.
+            CREATE TABLE IF NOT EXISTS control.task_history (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_type   TEXT    NOT NULL,
+                trigger_type TEXT   NOT NULL DEFAULT 'manual',
+                status      TEXT    NOT NULL,
+                started_at  REAL    NOT NULL,
+                finished_at REAL    NOT NULL,
+                detail      TEXT
+            );
+            CREATE INDEX IF NOT EXISTS control.idx_task_history_finished
+            ON task_history(finished_at DESC);
         """)
 
         # ── Content schema: tracks/playlists/radio — swaps with the active library ──

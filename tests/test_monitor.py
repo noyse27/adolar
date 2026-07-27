@@ -11,11 +11,17 @@ os.environ.setdefault("CONTROL_DB_PATH", os.path.join(_temp_dir.name, "adolar-mo
 import app as app_module
 
 
-class MonitorTests(unittest.TestCase):
+class MonitorTestBase(unittest.TestCase):
+    """Shared fixture only — no test_* methods, so subclassing this doesn't
+    re-run another class's tests under a second name."""
+
     @classmethod
     def setUpClass(cls):
         app_module.db.init_db()
-        cls.user_id = app_module._auth.create_user("monitor-admin", "password123", role="admin")
+        # Both MonitorTests and MonitorTasksTests share this module's single
+        # on-disk test database, so the admin username must be unique per class.
+        cls.username = f"monitor-admin-{cls.__name__}"
+        cls.user_id = app_module._auth.create_user(cls.username, "password123", role="admin")
         with app_module.db.db() as conn:
             conn.execute(
                 "UPDATE users SET must_change_password=0 WHERE id=?", (cls.user_id,)
@@ -26,6 +32,15 @@ class MonitorTests(unittest.TestCase):
         with app_module.db.db() as conn:
             conn.execute("DELETE FROM sessions")
             conn.execute("DELETE FROM connection_log")
+            conn.execute("DELETE FROM control.task_history")
+        app_module.tasks._running.clear()
+
+    def _login_as_monitor_admin(self):
+        token = app_module._auth.create_session(self.user_id, remember=False)
+        self.client.set_cookie(app_module._auth.SESSION_COOKIE, token)
+
+
+class MonitorTests(MonitorTestBase):
 
     def test_monitor_requires_admin(self):
         response = self.client.get("/api/admin/monitor")
@@ -52,7 +67,7 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(payload["system"]["cpu_percent"], 12.5)
         self.assertEqual(len(payload["current_connections"]), 1)
         connection = payload["current_connections"][0]
-        self.assertEqual(connection["username"], "monitor-admin")
+        self.assertEqual(connection["username"], self.username)
         self.assertEqual(connection["product"], "android")
         self.assertEqual(connection["ip_address"], "192.xxx.xxx.42")
         self.assertNotIn("192.168.10.42", response.get_data(as_text=True))
@@ -103,8 +118,78 @@ class MonitorTests(unittest.TestCase):
                 WHERE s.token=?
             """, (token,)).fetchone()
         self.assertIsNotNone(row["connection_id"])
-        self.assertEqual(row["username"], "monitor-admin")
+        self.assertEqual(row["username"], self.username)
         self.assertEqual(row["product"], "adolar_web")
+
+
+class MonitorTasksTests(MonitorTestBase):
+    """current_tasks/recent_tasks on /api/admin/monitor: the ad-hoc job
+    registry (tasks.py) merged with backup_service's own status/history."""
+
+    def test_a_running_scan_appears_in_current_tasks_with_its_progress(self):
+        self._login_as_monitor_admin()
+        task_id = app_module.tasks.start("scan", trigger="manual")
+        app_module.tasks.update(task_id, current=42, total=1000)
+        response = self.client.get("/api/admin/monitor")
+        [task] = response.get_json()["current_tasks"]
+        self.assertEqual(task["task_type"], "scan")
+        self.assertEqual(task["trigger"], "manual")
+        self.assertEqual(task["current"], 42)
+        self.assertEqual(task["total"], 1000)
+        app_module.tasks.finish(task_id)
+
+    def test_a_finished_task_appears_in_recent_tasks(self):
+        self._login_as_monitor_admin()
+        task_id = app_module.tasks.start("db_optimize")
+        app_module.tasks.finish(task_id, status="completed", detail="ok")
+        response = self.client.get("/api/admin/monitor")
+        [entry] = response.get_json()["recent_tasks"]
+        self.assertEqual(entry["task_type"], "db_optimize")
+        self.assertEqual(entry["status"], "completed")
+        self.assertEqual(entry["detail"], "ok")
+
+    def test_a_running_backup_is_merged_into_current_tasks(self):
+        self._login_as_monitor_admin()
+        with mock.patch.object(
+            app_module.backup_service, "read_status",
+            return_value={"state": "running", "source": "automatic",
+                          "started_at": "2026-01-01T10:00:00+00:00"},
+        ), mock.patch.object(app_module.backup_service, "is_backup_running", return_value=True), \
+           mock.patch.object(app_module.backup_service, "list_backups", return_value=[]):
+            response = self.client.get("/api/admin/monitor")
+        tasks_by_type = {t["task_type"]: t for t in response.get_json()["current_tasks"]}
+        self.assertIn("backup", tasks_by_type)
+        self.assertEqual(tasks_by_type["backup"]["trigger"], "automatic")
+
+    def test_a_completed_backup_is_merged_into_recent_tasks(self):
+        self._login_as_monitor_admin()
+        with mock.patch.object(
+            app_module.backup_service, "read_status", return_value={"state": "idle"},
+        ), mock.patch.object(
+            app_module.backup_service, "list_backups",
+            return_value=[{"backup_id": "adolar-20260101-100000", "source": "manual",
+                           "created_at": "2026-01-01T10:00:00+00:00", "size": 1234}],
+        ):
+            response = self.client.get("/api/admin/monitor")
+        backups = [t for t in response.get_json()["recent_tasks"] if t["task_type"] == "backup"]
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0]["trigger"], "manual")
+        self.assertEqual(backups[0]["status"], "completed")
+
+    def test_an_interrupted_backup_is_reported_as_failed_in_recent_tasks(self):
+        self._login_as_monitor_admin()
+        with mock.patch.object(
+            app_module.backup_service, "read_status",
+            return_value={"state": "failed", "source": "manual",
+                          "started_at": "2026-01-01T10:00:00+00:00",
+                          "failed_at": "2026-01-01T10:00:05+00:00",
+                          "error": "Datenbank nicht gefunden"},
+        ), mock.patch.object(app_module.backup_service, "list_backups", return_value=[]):
+            response = self.client.get("/api/admin/monitor")
+        backups = [t for t in response.get_json()["recent_tasks"] if t["task_type"] == "backup"]
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0]["status"], "failed")
+        self.assertEqual(backups[0]["detail"], "Datenbank nicht gefunden")
 
 
 if __name__ == "__main__":

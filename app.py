@@ -29,6 +29,7 @@ import lastfm
 import libraries
 import scanner
 import smart_shuffle
+import tasks
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -1130,11 +1131,84 @@ def api_client_heartbeat():
     return jsonify({"ok": True})
 
 
+def _iso_to_epoch(value: str | None) -> float | None:
+    if not value:
+        return None
+    import datetime
+    try:
+        return datetime.datetime.fromisoformat(value).timestamp()
+    except ValueError:
+        return None
+
+
+def _backup_task_view() -> tuple[dict | None, list[dict]]:
+    """Merge backup_service's own status/history into the shape tasks.py
+    uses, so the monitor can show scan/BPM/thumbnail/optimize/backup jobs in
+    one list. Backups keep their own file-based tracking (see backup_service.py
+    and _run_backup_job) rather than going through tasks.py, since that also
+    has to work for a separate scheduler process/thread."""
+    try:
+        root = _backup_root()
+        status = backup_service.read_status(root)
+        backups = backup_service.list_backups(root)
+    except OSError:
+        return None, []
+
+    current = None
+    if status.get("state") == "running" and backup_service.is_backup_running(root):
+        current = {
+            "task_type": "backup",
+            "trigger": status.get("source", "manual"),
+            "started_at": _iso_to_epoch(status.get("started_at")),
+            "current": None,
+            "total": None,
+            "detail": None,
+        }
+
+    recent = [
+        {
+            "task_type": "backup",
+            "trigger": b.get("source", "manual"),
+            "status": "completed",
+            "started_at": _iso_to_epoch(b.get("created_at")),
+            "finished_at": _iso_to_epoch(b.get("created_at")),
+            "detail": None,
+        }
+        for b in backups
+    ]
+    # Surface a failed/interrupted attempt too, if it's newer than the last
+    # successful backup (otherwise a stale failure would linger forever).
+    if status.get("state") in ("failed",) or (
+        status.get("state") == "running" and not backup_service.is_backup_running(root)
+    ):
+        failed_at = _iso_to_epoch(status.get("failed_at") or status.get("started_at"))
+        newest_ok = recent[0]["finished_at"] if recent else None
+        if failed_at and (not newest_ok or failed_at > newest_ok):
+            recent.insert(0, {
+                "task_type": "backup",
+                "trigger": status.get("source", "manual"),
+                "status": "failed",
+                "started_at": _iso_to_epoch(status.get("started_at")),
+                "finished_at": failed_at,
+                "detail": status.get("error"),
+            })
+
+    return current, recent
+
+
 @app.get("/api/admin/monitor")
 @_auth.admin_required
 def api_admin_monitor():
     memory = psutil.virtual_memory()
     current, recent = _monitor_connections()
+
+    backup_current, backup_recent = _backup_task_view()
+    current_tasks = tasks.running() + ([backup_current] if backup_current else [])
+    recent_tasks = sorted(
+        tasks.recent(10) + backup_recent,
+        key=lambda t: t.get("finished_at") or 0, reverse=True,
+    )[:10]
+
     return jsonify({
         "system": {
             "cpu_percent": round(psutil.cpu_percent(interval=None), 1),
@@ -1146,6 +1220,8 @@ def api_admin_monitor():
         },
         "current_connections": current,
         "recent_connections": recent,
+        "current_tasks": current_tasks,
+        "recent_tasks": recent_tasks,
         "active_window_seconds": 120,
         "sampled_at": _time.time(),
     })
@@ -1398,10 +1474,13 @@ def api_database_optimize():
     Runs synchronously (VACUUM on a typical library database takes seconds,
     not minutes) so the response reflects the actual result.
     """
+    task_id = tasks.start("db_optimize", "manual")
     try:
         result = db.optimize_database()
     except sqlite3.OperationalError as exc:
+        tasks.finish(task_id, status="failed", detail=str(exc))
         return _client_error("Datenbank-Optimierung fehlgeschlagen.", exc, 503)
+    tasks.finish(task_id, status="completed")
     db.log_audit(g.user["id"], "database.optimized", None, json.dumps(result))
     return jsonify(result)
 
@@ -2535,13 +2614,19 @@ def api_bpm_tags():
     """Read BPM from file tags (TBPM etc.) and update DB — fast, no audio analysis."""
     import threading
     def _worker():
+        task_id = tasks.start("bpm_tags", "manual")
+        failed = False
         updated = 0
+        total = 0
         try:
             from db import get_connection
             conn = get_connection()
             rows = conn.execute("SELECT id, path FROM tracks").fetchall()
             conn.close()
-            for row in rows:
+            total = len(rows)
+            tasks.update(task_id, total=total)
+            for i, row in enumerate(rows):
+                tasks.update(task_id, current=i + 1)
                 try:
                     bpm = scanner._read_bpm_tag(row["path"])
                     if bpm and bpm > 0:
@@ -2554,6 +2639,12 @@ def api_bpm_tags():
                     pass
         except Exception as e:
             logging.getLogger(__name__).error("bpm-tags: %s", e)
+            failed = True
+        finally:
+            tasks.finish(
+                task_id, status="failed" if failed else "completed",
+                detail=f"{updated} von {total} aktualisiert" if total else None,
+            )
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
     return jsonify({"status": "started", "updated": 0, "note": "running in background"})

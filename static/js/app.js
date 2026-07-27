@@ -2643,6 +2643,77 @@ function renderMonitorConnections(target, rows, isCurrent) {
   </table>`;
 }
 
+function monitorTaskTypeName(taskType) {
+  return ({
+    scan: "Bibliotheksscan",
+    bpm_tags: "BPM-Tags einlesen",
+    bpm_analyze: "BPM berechnen",
+    thumbnails: "Cover-Thumbnails generieren",
+    db_optimize: "Datenbank optimieren",
+    backup: "Datensicherung",
+  })[taskType] || taskType;
+}
+
+function monitorTriggerName(trigger) {
+  return trigger === "manual" ? "Manuell" : "Automatisch";
+}
+
+function monitorTaskStatusName(status) {
+  return ({
+    completed: "Abgeschlossen",
+    failed: "Fehlgeschlagen",
+    aborted: "Abgebrochen",
+  })[status] || status;
+}
+
+function renderMonitorCurrentTasks(target, rows) {
+  if (!rows.length) {
+    target.innerHTML = `<div class="monitor-empty">Keine laufende Aufgabe.</div>`;
+    return;
+  }
+  target.innerHTML = `<table class="monitor-table">
+    <thead><tr><th>Aufgabe</th><th>Stand</th><th>Gestartet</th><th>Typ</th></tr></thead>
+    <tbody>${rows.map(row => {
+      let progress = "läuft…";
+      if (row.total) {
+        const pct = Math.round((100 * (row.current || 0)) / row.total);
+        progress = `${row.current || 0} von ${row.total} (${pct} %)`;
+      } else if (row.detail) {
+        progress = esc(row.detail);
+      }
+      return `<tr>
+        <td><span class="monitor-live"></span>${esc(monitorTaskTypeName(row.task_type))}</td>
+        <td>${progress}</td>
+        <td>${row.started_at ? esc(formatMonitorDate(row.started_at)) : "–"}</td>
+        <td>${esc(monitorTriggerName(row.trigger))}</td>
+      </tr>`;
+    }).join("")}</tbody>
+  </table>`;
+}
+
+function renderMonitorRecentTasks(target, rows) {
+  if (!rows.length) {
+    target.innerHTML = `<div class="monitor-empty">Noch keine Aufgabe erfasst.</div>`;
+    return;
+  }
+  target.innerHTML = `<table class="monitor-table">
+    <thead><tr><th>Aufgabe</th><th>Status</th><th>Datum / Uhrzeit</th></tr></thead>
+    <tbody>${rows.map(row => `<tr>
+      <td>${esc(monitorTaskTypeName(row.task_type))}</td>
+      <td>${esc(monitorTaskStatusName(row.status))}${row.detail ? ` · ${esc(row.detail)}` : ""}</td>
+      <td>${row.finished_at ? esc(formatMonitorDate(row.finished_at)) : "–"}</td>
+    </tr>`).join("")}</tbody>
+  </table>`;
+}
+
+function toggleMonitorRecentTasks() {
+  const panel = $("monitor-tasks-recent");
+  const chevron = $("monitor-tasks-recent-chevron");
+  const open = panel.style.display === "block";
+  panel.style.display = open ? "none" : "block";
+  chevron.className = open ? "ti ti-chevron-down" : "ti ti-chevron-up";
+}
+
 async function loadMonitor() {
   if ($("monitor-modal").style.display !== "flex") return;
   try {
@@ -2656,6 +2727,8 @@ async function loadMonitor() {
     $("monitor-ram-value").textContent = `${system.memory_percent.toFixed(1)} %`;
     $("monitor-ram-bar").style.width = `${Math.min(100, system.memory_percent)}%`;
     $("monitor-ram-detail").textContent = `${formatMonitorBytes(system.memory_used)} / ${formatMonitorBytes(system.memory_total)}`;
+    renderMonitorCurrentTasks($("monitor-tasks-current"), data.current_tasks || []);
+    renderMonitorRecentTasks($("monitor-tasks-recent"), data.recent_tasks || []);
     renderMonitorConnections($("monitor-current"), data.current_connections || [], true);
     renderMonitorConnections($("monitor-recent"), data.recent_connections || [], false);
     $("monitor-status").textContent = `Aktualisiert: ${formatMonitorDate(data.sampled_at)} · automatisch alle 3 Sekunden`;
