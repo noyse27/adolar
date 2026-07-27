@@ -27,6 +27,7 @@ import db
 import errors
 import lastfm
 import libraries
+import library_context
 import scanner
 import smart_shuffle
 import tasks
@@ -43,7 +44,6 @@ APP_VERSION = "1.6.0"
 _cors_origins = os.environ.get("CORS_ORIGINS", "")
 CORS(app, origins=_cors_origins.split() if _cors_origins else [])
 
-app.before_request(_auth.before_request)
 if _auth.DEV_ADMIN_ENABLED:
     logging.getLogger(__name__).warning(
         "ADOLAR_DEV_ADMIN is active: every request runs as 'dev-admin' without "
@@ -63,10 +63,58 @@ LIBRARIES_DIR = os.path.join(DATA_ROOT, "libraries")
 # fallback instead of silently trying the Docker-only "/data/adolar.db".
 db.DB_PATH = os.environ.get("DB_PATH") or os.path.join(DATA_ROOT, "adolar.db")
 # Anchored to DATA_ROOT (not left on db.py's own "/data/control.db" default)
-# so it sits next to whichever DB_PATH was configured, and stays put when a
-# library switch later reassigns db.DB_PATH to a different file.
+# so it sits next to whichever DB_PATH was configured. Library switches only
+# change request-local content snapshots; the control path always stays put.
 db.CONTROL_DB_PATH = os.environ.get("CONTROL_DB_PATH") or os.path.join(DATA_ROOT, "control.db")
 BACKUP_TIMEZONE = os.environ.get("TZ", "Europe/Berlin")
+
+
+def _current_music_root() -> str:
+    return library_context.music_root(MUSIC_ROOT)
+
+
+def _active_library_snapshot() -> dict:
+    """Read the registry's shared active-library state."""
+    return libraries.get_active(LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH)
+
+
+@app.before_request
+def _bind_request_library():
+    # Take one stable snapshot before auth or route code opens a database.
+    # Other Gunicorn workers observe a switch through the shared registry on
+    # their next request, while requests already in flight stay on their
+    # original library instead of mixing two databases.
+    active = _active_library_snapshot()
+    manager = library_context.bind(active["db_path"], active["music_path"])
+    manager.__enter__()
+    g.library = active
+    g.library_context_manager = manager
+
+
+@app.teardown_request
+def _unbind_request_library(_error=None):
+    manager = g.pop("library_context_manager", None)
+    if manager is not None:
+        manager.__exit__(None, None, None)
+
+
+# Authentication queries must run after the request's library snapshot is
+# bound because every connection attaches control.db to a content database.
+app.before_request(_auth.before_request)
+
+
+def _start_library_thread(target, *, args=(), name: str | None = None):
+    """Start a daemon thread pinned to the caller's current library."""
+    db_path, root = library_context.snapshot(db.DB_PATH, MUSIC_ROOT)
+    thread = threading.Thread(
+        target=library_context.wrapped(target, db_path, root),
+        args=args,
+        daemon=True,
+        name=name,
+    )
+    thread.start()
+    return thread
+
 
 # Seed defaults for the first run only; after that the admin-editable values
 # in the settings table (see _backup_*() below) take over. This lets the
@@ -174,10 +222,11 @@ def _disco_active() -> bool:
 
 def _safe_path(path: str) -> str | None:
     """Resolve path and verify it stays within MUSIC_ROOT. Returns None if outside."""
+    music_root = _current_music_root()
     if not os.path.isabs(path):
-        path = os.path.join(MUSIC_ROOT, path)
+        path = os.path.join(music_root, path)
     real   = os.path.realpath(path)
-    root   = os.path.realpath(MUSIC_ROOT)
+    root   = os.path.realpath(music_root)
     if not real.startswith(root + os.sep) and real != root:
         return None
     return real
@@ -1232,7 +1281,7 @@ def api_admin_monitor():
 def _run_backup_job(source: str, actor_id: int | None = None):
     try:
         result = backup_service.create_backup(
-            db.DB_PATH,
+            db.current_db_path(),
             _backup_root(),
             control_db_path=db.CONTROL_DB_PATH,
             jingle_root=JINGLE_ROOT,
@@ -1253,12 +1302,11 @@ def _run_backup_job(source: str, actor_id: int | None = None):
 def _start_backup_job(source: str, actor_id: int | None = None) -> bool:
     if backup_service.is_backup_running(_backup_root()):
         return False
-    threading.Thread(
-        target=_run_backup_job,
+    _start_library_thread(
+        _run_backup_job,
         args=(source, actor_id),
-        daemon=True,
         name=f"adolar-backup-{source}",
-    ).start()
+    )
     return True
 
 
@@ -1377,14 +1425,15 @@ def api_backups_delete(backup_id):
 @app.get("/api/admin/libraries")
 @_auth.admin_required
 def api_libraries_list():
-    libs, active_id = libraries.list_libraries(LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH)
+    libs, active_id = libraries.list_libraries(
+        LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH,
+    )
     return jsonify({"libraries": libs, "active_id": active_id})
 
 
 @app.post("/api/admin/libraries")
 @_auth.admin_required
 def api_libraries_create():
-    global MUSIC_ROOT
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     music_path_input = (data.get("music_path") or "").strip()
@@ -1400,34 +1449,31 @@ def api_libraries_create():
     except errors.ValidationError as exc:
         return _client_error(exc.user_message, exc)
     lib = libraries.add_library(
-        LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH, LIBRARIES_DIR, name, music_path,
+        LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH,
+        LIBRARIES_DIR, name, music_path,
     )
-    db.DB_PATH = lib["db_path"]
-    MUSIC_ROOT = lib["music_path"]
-    db.init_db()
-    db.log_audit(g.user["id"], "library.created", lib["id"], json.dumps(lib))
+    with library_context.bind(lib["db_path"], lib["music_path"]):
+        db.init_db()
+        db.log_audit(g.user["id"], "library.created", lib["id"], json.dumps(lib))
     return jsonify(lib), 201
 
 
 @app.post("/api/admin/libraries/<library_id>/activate")
 @_auth.admin_required
 def api_libraries_activate(library_id):
-    global MUSIC_ROOT
     try:
         lib = libraries.set_active(LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH, library_id)
     except errors.ValidationError as exc:
         return _client_error(exc.user_message, exc, 404)
-    db.DB_PATH = lib["db_path"]
-    MUSIC_ROOT = lib["music_path"]
-    db.init_db()
-    db.log_audit(g.user["id"], "library.activated", lib["id"])
+    with library_context.bind(lib["db_path"], lib["music_path"]):
+        db.init_db()
+        db.log_audit(g.user["id"], "library.activated", lib["id"])
     return jsonify(lib)
 
 
 @app.put("/api/admin/libraries/<library_id>/move")
 @_auth.admin_required
 def api_libraries_move(library_id):
-    global MUSIC_ROOT
     _libs, active_id = libraries.list_libraries(LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH)
     data = request.get_json(silent=True) or {}
     new_music_path_input = (data.get("new_music_path") or "").strip()
@@ -1441,12 +1487,11 @@ def api_libraries_move(library_id):
             raise errors.ValidationError("Der neue Pfad existiert nicht oder ist kein Verzeichnis.")
     except errors.ValidationError as exc:
         return _client_error(exc.user_message, exc)
-    old_music_path = MUSIC_ROOT
+    old_music_path = _current_music_root()
     updated = db.migrate_track_paths(old_music_path, new_music_path)
     lib = libraries.update_music_path(
         LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH, library_id, new_music_path,
     )
-    MUSIC_ROOT = lib["music_path"]
     db.log_audit(
         g.user["id"], "library.moved", library_id,
         json.dumps({"old_path": old_music_path, "new_path": new_music_path, "tracks_updated": updated}),
@@ -1987,8 +2032,7 @@ def api_play_count_tags_status():
 def api_play_count_tags_sync():
     if _play_count_tag_sync["running"]:
         return jsonify({"error": "already running"}), 409
-    import threading
-    threading.Thread(target=_flush_play_count_tags, daemon=True).start()
+    _start_library_thread(_flush_play_count_tags)
     return jsonify({"ok": True})
 
 
@@ -2431,10 +2475,7 @@ def api_lastfm_loved_sync():
         return jsonify({"error": "not connected"}), 401
     if not db.claim_lastfm_sync_job(g.user["id"], "loved"):
         return jsonify({"error": "already running"}), 409
-    import threading
-    threading.Thread(
-        target=_sync_lastfm_loved_tracks, args=(g.user["id"],), daemon=True,
-    ).start()
+    _start_library_thread(_sync_lastfm_loved_tracks, args=(g.user["id"],))
     return jsonify({"ok": True, "message": "sync started"}), 202
 
 
@@ -2504,10 +2545,7 @@ def api_lastfm_pc_sync():
         return jsonify({"error": "not connected"}), 401
     if not db.claim_lastfm_sync_job(g.user["id"], "playcounts"):
         return jsonify({"error": "already running"}), 409
-    import threading
-    threading.Thread(
-        target=_sync_lastfm_playcounts, args=(g.user["id"],), daemon=True
-    ).start()
+    _start_library_thread(_sync_lastfm_playcounts, args=(g.user["id"],))
     return jsonify({"ok": True, "message": "sync started"})
 
 
@@ -2602,9 +2640,10 @@ def api_lastfm_settings():
 @app.post("/api/scan/start")
 @_auth.admin_required
 def api_scan_start():
-    if not os.path.isdir(MUSIC_ROOT):
-        return jsonify({"error": f"MUSIC_ROOT not found: {MUSIC_ROOT}"}), 400
-    scanner.run_scan(MUSIC_ROOT)
+    music_root = _current_music_root()
+    if not os.path.isdir(music_root):
+        return jsonify({"error": f"MUSIC_ROOT not found: {music_root}"}), 400
+    scanner.run_scan(music_root)
     return jsonify({"status": "started"})
 
 
@@ -2612,7 +2651,6 @@ def api_scan_start():
 @_auth.admin_required
 def api_bpm_tags():
     """Read BPM from file tags (TBPM etc.) and update DB — fast, no audio analysis."""
-    import threading
     def _worker():
         task_id = tasks.start("bpm_tags", "manual")
         failed = False
@@ -2645,8 +2683,7 @@ def api_bpm_tags():
                 task_id, status="failed" if failed else "completed",
                 detail=f"{updated} von {total} aktualisiert" if total else None,
             )
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
+    _start_library_thread(_worker)
     return jsonify({"status": "started", "updated": 0, "note": "running in background"})
 
 
@@ -2685,11 +2722,13 @@ def _play_count_tag_scheduler():
     """Flush pending archive counts once per local calendar day after 03:00."""
     import datetime
     while True:
-        now = datetime.datetime.now()
-        if now.hour >= 3:
-            job_key = f"play_count_tag_job:{now.date().isoformat()}"
-            if db.claim_once(job_key):
-                _flush_play_count_tags()
+        active = _active_library_snapshot()
+        with library_context.bind(active["db_path"], active["music_path"]):
+            now = datetime.datetime.now()
+            if now.hour >= 3:
+                job_key = f"play_count_tag_job:{now.date().isoformat()}"
+                if db.claim_once(job_key):
+                    _flush_play_count_tags()
         _time.sleep(300)
 
 
@@ -2704,12 +2743,14 @@ def _database_backup_scheduler():
     """
     import datetime
     while True:
-        if _backup_auto_enabled():
-            now = datetime.datetime.now(ZoneInfo(BACKUP_TIMEZONE))
-            if now.hour >= _backup_hour():
-                job_key = f"database_backup_job:{now.date().isoformat()}"
-                if db.claim_once(job_key):
-                    _run_backup_job("automatic")
+        active = _active_library_snapshot()
+        with library_context.bind(active["db_path"], active["music_path"]):
+            if _backup_auto_enabled():
+                now = datetime.datetime.now(ZoneInfo(BACKUP_TIMEZONE))
+                if now.hour >= _backup_hour():
+                    job_key = f"database_backup_job:{now.date().isoformat()}"
+                    if db.claim_once(job_key):
+                        _run_backup_job("automatic")
         _time.sleep(300)
 
 

@@ -18,8 +18,12 @@ class PlaylistEditorTests(unittest.TestCase):
         self.control_db_patch = mock.patch.object(
             app_module.db, "CONTROL_DB_PATH", os.path.join(self.temp.name, "playlist-editor-control.db")
         )
+        self.registry_patch = mock.patch.object(
+            app_module, "LIBRARY_REGISTRY_PATH", os.path.join(self.temp.name, "libraries.json")
+        )
         self.db_patch.start()
         self.control_db_patch.start()
+        self.registry_patch.start()
         app_module.db.init_db()
         with app_module.db.db() as conn:
             conn.execute(
@@ -52,6 +56,7 @@ class PlaylistEditorTests(unittest.TestCase):
         self.client.set_cookie("adolar_session", "playlist-editor-token")
 
     def tearDown(self):
+        self.registry_patch.stop()
         self.db_patch.stop()
         self.control_db_patch.stop()
         self.temp.cleanup()
