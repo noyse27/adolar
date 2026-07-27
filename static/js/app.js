@@ -2779,17 +2779,29 @@ function closeDatabaseManager() {
   }
 }
 
+function populateLibrarySelect(select, libraries, activeId) {
+  // Values returned by the API must remain data, never HTML. Building option
+  // nodes through DOM properties avoids attribute injection without relying
+  // on context-sensitive string escaping.
+  const options = libraries.map(lib => {
+    const option = document.createElement("option");
+    option.value = String(lib.id ?? "");
+    option.textContent = String(lib.name ?? "");
+    option.selected = lib.id === activeId;
+    return option;
+  });
+  select.replaceChildren(...options);
+}
+
 async function loadDatabaseLibraryPicker() {
   const select = $("db-library-select");
   try {
     const response = await fetch("/api/admin/libraries");
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Bibliotheken nicht erreichbar");
-    select.innerHTML = data.libraries.map(lib =>
-      `<option value="${esc(lib.id)}" ${lib.id === data.active_id ? "selected" : ""}>${esc(lib.name)}</option>`,
-    ).join("");
+    populateLibrarySelect(select, data.libraries, data.active_id);
   } catch (error) {
-    select.innerHTML = `<option>${esc(error.message)}</option>`;
+    populateLibrarySelect(select, [{id: "", name: error.message}], null);
   }
 }
 
@@ -2844,9 +2856,7 @@ async function loadLibraryState() {
     const switchSection = $("lib-switch-section");
     if (data.libraries.length > 1) {
       switchSection.style.display = "block";
-      $("lib-switch-select").innerHTML = data.libraries.map(lib =>
-        `<option value="${esc(lib.id)}" ${lib.id === data.active_id ? "selected" : ""}>${esc(lib.name)}</option>`,
-      ).join("");
+      populateLibrarySelect($("lib-switch-select"), data.libraries, data.active_id);
     } else {
       switchSection.style.display = "none";
     }
