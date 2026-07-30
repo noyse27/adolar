@@ -62,8 +62,11 @@ def _recommendation_rows(conn, user_id: int, start: float) -> list[dict]:
                    MAX(event_type='started') AS started,
                    MAX(event_type='completed') AS completed,
                    MAX(event_type='skipped') AS skipped,
-                   MAX(CASE WHEN event_type IN ('completed','skipped')
-                            THEN completion_ratio END) AS completion_ratio
+                   MAX(CASE
+                           WHEN event_type='completed' AND reason='ended' THEN 1.0
+                           WHEN event_type IN ('completed','skipped')
+                               THEN completion_ratio
+                       END) AS completion_ratio
             FROM adolar4u_listening_events
             WHERE user_id=? AND recommendation_id IS NOT NULL
             GROUP BY recommendation_id
@@ -278,4 +281,3 @@ Der Export enthält keine Passwörter, Last.fm-Sitzungsschlüssel oder Dateipfad
     archive.seek(0)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     return archive, f"adolar4u-lerndaten-{stamp}-{days}tage.zip"
-

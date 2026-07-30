@@ -490,6 +490,10 @@ const playBtn    = $("play-btn");
 const progress   = $("progress");
 
 // ── Radio state ───────────────────────────────────────────
+// Small batches keep the queue responsive to fresh listening events (skips,
+// completions, recency) instead of locking in a large stretch of tracks
+// scored from one stale profile snapshot — see docs/adolar4u-roadmap.md.
+const RADIO_REFILL_BATCH = 5;
 const radio = { active: false, browsingLibrary: false, queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false };
 radio.stationId = 1;
 radio.stationName = "Adolar Radio";
@@ -1901,10 +1905,10 @@ async function startRadio(station = null, initialPlaylist = null) {
   $("result-count").textContent = `${radio.stationName || t().radio} – ...`;
   playTrack(0);
 
-  // Background fill to 25 — guarded by session token
+  // Background fill by RADIO_REFILL_BATCH — guarded by session token
   const mySession = radio.session;
   const remaining = initialPlaylist?.slice(5) || null;
-  (remaining ? Promise.resolve(remaining) : loadRadioQueue(20, initial.map(t => t.id))).then(more => {
+  (remaining ? Promise.resolve(remaining) : loadRadioQueue(RADIO_REFILL_BATCH, initial.map(t => t.id))).then(more => {
     if (!radio.active || radio.session !== mySession) return;
     radio.queue.push(...more);
     if (!radio.browsingLibrary) {
@@ -1982,7 +1986,7 @@ async function radioNext() {
 
   if (isJingle(state.currentTrack)) {
     if (!radio.queue.length) {
-      const fresh = await loadRadioQueue(20, radio.playedIds.slice(-100));
+      const fresh = await loadRadioQueue(RADIO_REFILL_BATCH, radio.playedIds.slice(-100));
       radio.queue.push(...fresh);
     }
     if (!radio.queue.length) { stopRadio(); return; }
@@ -2008,9 +2012,9 @@ async function radioNext() {
     radio.tracksSinceJingle++;
   }
 
-  // refill: when queue drops to 5, load 20 more
-  if (radio.queue.length <= 5) {
-    const fresh = await loadRadioQueue(20, radio.playedIds.slice(-100));
+  // refill: when queue drops to RADIO_REFILL_BATCH, load that many more
+  if (radio.queue.length <= RADIO_REFILL_BATCH) {
+    const fresh = await loadRadioQueue(RADIO_REFILL_BATCH, radio.playedIds.slice(-100));
     radio.queue.push(...fresh);
     // trim playedIds to last 100 to avoid unbounded growth
     if (radio.playedIds.length > 100) radio.playedIds = radio.playedIds.slice(-100);
