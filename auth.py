@@ -163,6 +163,91 @@ def purge_expired_sessions():
     with db.db() as conn:
         conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (time.time(),))
 
+# ── API tokens (admin tools, e.g. Adolar Taggster) ────────────────────────────
+# Separate from session cookies: no expiry, explicit revocation, sent as
+# 'Authorization: Bearer <token>'. See before_request().
+
+def get_user_by_api_token(token: str) -> dict | None:
+    with db.db() as conn:
+        row = conn.execute(
+            """SELECT u.id, u.username, u.role, u.allow_download, u.allow_playlists,
+                      u.allow_radio_stations, u.allow_lyrics_edit,
+                      u.contributes_playcount, u.is_active,
+                      u.must_change_password
+               FROM api_tokens t JOIN users u ON u.id = t.user_id
+               WHERE t.token=? AND t.revoked_at IS NULL AND u.is_active=1""",
+            (token,)
+        ).fetchone()
+    return dict(row) if row else None
+
+def create_api_token(user_id: int, name: str = "") -> str:
+    """Create and return a new API token. The plaintext token is only ever
+    available here at creation time — it is not retrievable afterwards."""
+    token = secrets.token_urlsafe(32)
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO api_tokens (token, user_id, name, created_at) VALUES (?,?,?,?)",
+            (token, user_id, name or None, time.time())
+        )
+    return token
+
+def touch_api_token(token: str, ip_address: str = "") -> None:
+    """Update last_used_at and keep a connection_log entry for this token so
+    it shows up in the admin 'Aktuelle Verbindungen' view, identified as
+    product 'taggster'. One connection_log row per token, refreshed on every
+    use (unlike sessions, which get a fresh row per login).
+
+    A connection only counts as "current" (see app._monitor_connections) if
+    it has a client_key set OR a linked non-expired session — API tokens have
+    neither by default, so a stable client_key is required here, matching the
+    same mechanism the companion/radio heartbeat uses (app._record_client_heartbeat).
+    """
+    now = time.time()
+    with db.db() as conn:
+        row = conn.execute(
+            "SELECT id, connection_id, user_id FROM api_tokens WHERE token=?", (token,)
+        ).fetchone()
+        if not row:
+            return
+        conn.execute("UPDATE api_tokens SET last_used_at=? WHERE token=?", (now, token))
+        if row["connection_id"]:
+            conn.execute(
+                "UPDATE connection_log SET last_seen_at=?, ip_address=? WHERE id=?",
+                (now, ip_address, row["connection_id"])
+            )
+        else:
+            user = conn.execute("SELECT username FROM users WHERE id=?", (row["user_id"],)).fetchone()
+            client_key = f"taggster-token-{row['id']}"
+            cur = conn.execute(
+                """INSERT INTO connection_log
+                       (user_id, username, product, ip_address, connected_at, last_seen_at, client_key)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (row["user_id"], user["username"] if user else "Unbekannt", "taggster",
+                 ip_address, now, now, client_key),
+            )
+            conn.execute(
+                "UPDATE api_tokens SET connection_id=? WHERE token=?", (cur.lastrowid, token)
+            )
+
+def revoke_api_token(token_id: int, user_id: int):
+    """Revoke a token by its id, scoped to the owning user so one admin
+    cannot revoke another admin's token by guessing an id."""
+    with db.db() as conn:
+        conn.execute(
+            "UPDATE api_tokens SET revoked_at=? WHERE id=? AND user_id=?",
+            (time.time(), token_id, user_id)
+        )
+
+def list_api_tokens(user_id: int) -> list[dict]:
+    """List a user's active tokens — never includes the plaintext token value."""
+    with db.db() as conn:
+        rows = conn.execute(
+            """SELECT id, name, created_at, last_used_at FROM api_tokens
+               WHERE user_id=? AND revoked_at IS NULL ORDER BY created_at DESC""",
+            (user_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
 def get_all_users() -> list[dict]:
     with db.db() as conn:
         rows = conn.execute(
@@ -348,6 +433,18 @@ def before_request():
                     return jsonify({"error": "must_change_password"}), 403
                 return redirect("/change-password")
             return
+
+    # API token (Bearer) — used by external admin tools instead of a browser
+    # session cookie. No must-change-password gate: that's a web-UI concept.
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        api_token = auth_header[7:].strip()
+        if api_token:
+            user = get_user_by_api_token(api_token)
+            if user:
+                g.user = user
+                touch_api_token(api_token, ip_address=_get_client_ip())
+                return
 
     if _is_public(request.path):
         return

@@ -229,6 +229,21 @@ def init_db():
                 connection_id INTEGER
             );
 
+            -- Long-lived API tokens for admin tools (e.g. Adolar Taggster) that
+            -- authenticate via 'Authorization: Bearer <token>' instead of a
+            -- session cookie. Separate from sessions — no expiry, revoked
+            -- explicitly. See auth.create_api_token / get_user_by_api_token.
+            CREATE TABLE IF NOT EXISTS control.api_tokens (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                token         TEXT    NOT NULL UNIQUE,
+                user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name          TEXT,
+                created_at    REAL    NOT NULL DEFAULT (unixepoch()),
+                last_used_at  REAL,
+                revoked_at    REAL,
+                connection_id INTEGER
+            );
+
             CREATE TABLE IF NOT EXISTS control.connection_log (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -446,6 +461,7 @@ def init_db():
             "ALTER TABLE playlists ADD COLUMN system_key TEXT",
             "ALTER TABLE sessions ADD COLUMN connection_id INTEGER",
             "ALTER TABLE connection_log ADD COLUMN client_key TEXT",
+            "ALTER TABLE api_tokens ADD COLUMN connection_id INTEGER",
         ]:
             with contextlib.suppress(Exception):
                 conn.execute(migration)

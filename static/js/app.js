@@ -4689,6 +4689,7 @@ async function openUserMgmt() {
   await refreshAdolar4UAdminSettings();
   await refreshLyricsAdminSettings();
   await refreshBlockedIps();
+  await refreshApiTokens();
   await refreshAuditLog();
 }
 function closeUserMgmt() {
@@ -5252,6 +5253,52 @@ async function refreshBlockedIps() {
       await refreshBlockedIps();
     };
   });
+}
+
+async function refreshApiTokens() {
+  const r = await fetch("/api/admin/tokens");
+  if (!r.ok) return;
+  const data = await r.json();
+  const tokens = data.tokens || [];
+  const el = $("apitokens-list");
+  el.innerHTML = tokens.length ? "" : `<div style="font-size:12px;color:var(--text-tertiary)">Noch keine Tokens erzeugt.</div>`;
+  tokens.forEach(t => {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px;color:var(--text-secondary);border-bottom:0.5px solid var(--border-subtle)";
+    row.innerHTML = `
+      <i class="ti ti-key" style="color:var(--text-tertiary);font-size:12px"></i>
+      <span style="flex:1">${esc(t.name || "(ohne Bezeichnung)")}</span>
+      <span style="color:var(--text-tertiary);font-size:11px">${t.last_used_at ? "zuletzt genutzt: " + esc(new Date(t.last_used_at*1000).toLocaleString()) : "noch nicht genutzt"}</span>
+      <button data-id="${t.id}" class="revoke-token-btn"
+              style="background:none;border:0.5px solid var(--border-subtle);border-radius:5px;color:#e03e3e;cursor:pointer;padding:2px 7px;font-size:11px">
+        Widerrufen
+      </button>
+    `;
+    el.appendChild(row);
+  });
+  el.querySelectorAll(".revoke-token-btn").forEach(btn => {
+    btn.onclick = async () => {
+      await fetch(`/api/admin/tokens/${btn.dataset.id}`, {method: "DELETE"});
+      await refreshApiTokens();
+    };
+  });
+}
+
+async function createApiToken() {
+  const name = $("new-token-name").value.trim();
+  const r = await fetch("/api/admin/tokens", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({name})
+  });
+  const d = await r.json();
+  if (d.token) {
+    const box = $("apitoken-created");
+    box.style.display = "block";
+    box.style.cssText += "margin-top:8px;padding:8px;border-radius:6px;background:var(--bg-secondary);font-size:12px;color:var(--text-primary);word-break:break-all";
+    box.innerHTML = `Neuer Token (jetzt kopieren — wird nicht erneut angezeigt):<br><code>${esc(d.token)}</code>`;
+    $("new-token-name").value = "";
+    await refreshApiTokens();
+  }
 }
 
 async function refreshAuditLog() {
