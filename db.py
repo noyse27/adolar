@@ -277,6 +277,11 @@ def init_db():
 
         # ── Content schema: tracks/playlists/radio — swaps with the active library ──
         conn.executescript("""
+            CREATE TABLE IF NOT EXISTS library_state (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS tracks (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 path        TEXT    NOT NULL UNIQUE,
@@ -1622,7 +1627,25 @@ def update_bpm(track_id: int, bpm: float) -> bool:
 def get_scanner_status():
     with db() as conn:
         total = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
-    return {"total_tracks": total}
+        row = conn.execute(
+            "SELECT value FROM library_state WHERE key='last_scan_finished_at'"
+        ).fetchone()
+    try:
+        finished_at = float(row["value"]) if row else None
+    except (TypeError, ValueError):
+        finished_at = None
+    return {"total_tracks": total, "finished_at": finished_at}
+
+
+def set_last_scan_finished_at(finished_at: float) -> None:
+    """Persist the latest scan completion time in the active library database."""
+    with db() as conn:
+        conn.execute(
+            """INSERT INTO library_state (key, value)
+               VALUES ('last_scan_finished_at', ?)
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+            (str(float(finished_at)),),
+        )
 
 
 def upsert_track(data: dict):

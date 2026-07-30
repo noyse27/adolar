@@ -438,7 +438,14 @@ def run_bpm_scan(limit: int = 0, trigger: str = "manual"):
     t.start()
 
 
-def run_scan(music_root: str, trigger: str = "manual"):
+def run_scan(music_root: str, trigger: str = "manual", run_followups: bool = True):
+    """Scan music_root (recursively) for new/changed MP3s.
+
+    run_followups=False skips the trailing full-library BPM/thumbnail
+    sweeps — used for folder-scoped triggers from external tools (e.g.
+    Adolar Taggster after a single edit), where those whole-table sweeps
+    would be needlessly expensive on a large library.
+    """
     if _status["running"]:
         return
 
@@ -485,14 +492,20 @@ def run_scan(music_root: str, trigger: str = "manual"):
             failed = True
             log.error("Scanner error: %s", e)
         finally:
-            _update(running=False, finished_at=time.time(), current_file="")
+            finished_at = time.time()
+            _update(running=False, finished_at=finished_at, current_file="")
+            try:
+                db.set_last_scan_finished_at(finished_at)
+            except Exception as e:
+                log.error("Could not persist scan completion time: %s", e)
             detail = f"{_status['progress']} von {_status['total']} Dateien" \
                 if _status["total"] else None
             tasks.finish(task_id, status="failed" if failed else "completed", detail=detail)
-            # Kick off background BPM analysis for new tracks
-            run_bpm_scan(trigger="auto")
-            # Generate missing cover thumbnails in background
-            run_thumb_generation(trigger="auto")
+            if run_followups:
+                # Kick off background BPM analysis for new tracks
+                run_bpm_scan(trigger="auto")
+                # Generate missing cover thumbnails in background
+                run_thumb_generation(trigger="auto")
 
     t = _library_thread(_worker, music_root)
     t.start()
