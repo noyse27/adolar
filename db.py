@@ -42,6 +42,11 @@ def get_connection():
     # contributing artist. Tracks of one release share a folder, so group by
     # that instead; ALBUM_DIR gives search_albums() a stable key for it.
     conn.create_function("ALBUM_DIR", 1, lambda p: os.path.dirname(p) if p else "")
+    # SQLite's built-in LOWER()/COLLATE NOCASE only fold ASCII — a Cyrillic
+    # (or any non-Latin) query on artist/title/album would never match a
+    # correctly-cased tag otherwise. Registered under a distinct name (not
+    # overriding LOWER) so this only affects the queries that opt into it.
+    conn.create_function("ULOWER", 1, lambda s: s.casefold() if s is not None else None)
     return conn
 
 
@@ -695,16 +700,16 @@ def _track_filter_conditions(query="", artist_query="", title_query="", album_qu
         params.append(fts_query)
 
     if artist_query:
-        conditions.append("LOWER(COALESCE(t.artist, '')) LIKE ? ESCAPE '\\'")
+        conditions.append("ULOWER(COALESCE(t.artist, '')) LIKE ? ESCAPE '\\'")
         params.append(_like_pattern(artist_query.casefold()))
     if title_query:
-        conditions.append("LOWER(COALESCE(t.title, '')) LIKE ? ESCAPE '\\'")
+        conditions.append("ULOWER(COALESCE(t.title, '')) LIKE ? ESCAPE '\\'")
         params.append(_like_pattern(title_query.casefold()))
     if album_query:
-        conditions.append("LOWER(COALESCE(t.album, '')) LIKE ? ESCAPE '\\'")
+        conditions.append("ULOWER(COALESCE(t.album, '')) LIKE ? ESCAPE '\\'")
         params.append(_like_pattern(album_query.casefold()))
     if album_eq:
-        conditions.append("LOWER(COALESCE(t.album, '')) = ?")
+        conditions.append("ULOWER(COALESCE(t.album, '')) = ?")
         params.append(album_eq.strip().casefold())
     if dir_eq is not None:
         # Exact-match the album's folder (see ALBUM_DIR in get_connection) —
