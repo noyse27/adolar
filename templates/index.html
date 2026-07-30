@@ -639,6 +639,22 @@
       </details>
 
       <details class="settings-section">
+        <summary><span><i class="ti ti-key"></i> API-Zugriff</span><i class="ti ti-chevron-down settings-chevron"></i></summary>
+        <div class="settings-section-body">
+          <p class="settings-hint">Tokens für externe Admin-Werkzeuge (z.B. Adolar Taggster). Der Token wird nur einmal bei der Erzeugung angezeigt — danach nicht mehr abrufbar, nur widerrufbar.</p>
+          <div id="apitokens-list"></div>
+          <div class="settings-subsection">
+            <div class="settings-subsection-title">Neuer Token</div>
+            <div class="settings-new-user">
+              <input id="new-token-name" type="text" placeholder="Bezeichnung (z.B. Taggster)">
+              <button onclick="createApiToken()">Erzeugen</button>
+            </div>
+            <div id="apitoken-created" style="display:none"></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="settings-section">
         <summary><span><i class="ti ti-sparkles"></i> Adolar4U</span><i class="ti ti-chevron-down settings-chevron"></i></summary>
         <div class="settings-section-body">
           <div class="settings-grid">

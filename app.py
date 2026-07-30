@@ -480,6 +480,34 @@ def api_me():
         "contributes_playcount": bool(g.user["contributes_playcount"]),
     })
 
+
+# ── API tokens for admin tools (e.g. Adolar Taggster) ─────────────────────────
+# Bearer-token auth, separate from the browser session cookie — see auth.py
+# before_request(). The plaintext token is only ever returned by the create
+# call; afterwards only id/name/timestamps are exposed.
+
+@app.get("/api/admin/tokens")
+@_auth.admin_required
+def api_tokens_list():
+    return jsonify({"tokens": _auth.list_api_tokens(g.user["id"])})
+
+@app.post("/api/admin/tokens")
+@_auth.admin_required
+def api_tokens_create():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    token = _auth.create_api_token(g.user["id"], name)
+    db.log_audit(g.user["id"], "api_token.created", details=json.dumps({"name": name}))
+    return jsonify({"token": token})
+
+@app.delete("/api/admin/tokens/<int:token_id>")
+@_auth.admin_required
+def api_tokens_revoke(token_id):
+    _auth.revoke_api_token(token_id, g.user["id"])
+    db.log_audit(g.user["id"], "api_token.revoked", target=str(token_id))
+    return jsonify({"ok": True})
+
+
 # ── User management (admin only) ──────────────────────────────────────────────
 
 @app.get("/api/users")
