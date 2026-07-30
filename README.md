@@ -1,6 +1,6 @@
 # Adolar
 
-Current version: **1.7.0**
+Current version: **1.7.1**
 
 A self-hosted music archive web app for Synology NAS (or any Docker host). Browse, search, and stream your local MP3/FLAC/M4A collection from any browser — no cloud required.
 
@@ -49,6 +49,13 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Bookmark button** — add any track to a personal playlist directly from the track list; create new playlists on the fly
 - **Radio favorites** — the Radio companion uses the same personal Favorites list as the Web player
 - **DE / EN interface** — language switch in topbar
+
+## What's new in 1.7.1
+
+- Administrators can always open the lyrics tool for the current track, including
+  tracks where automatic lookup found nothing. Missing lyrics are indicated by a
+  red microphone; manual searches can adjust title, artist, and album without
+  persisting unsuccessful query changes.
 
 ## What's new in 1.7.0
 

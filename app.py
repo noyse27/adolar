@@ -39,7 +39,7 @@ logging.basicConfig(level=logging.INFO,
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", os.urandom(32))
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.7.1"
 
 # Restrict CORS to origins defined via env var (space-separated).
 # Default: deny all cross-origin requests (safe for local NAS use).
@@ -1105,10 +1105,18 @@ def api_track_lyrics_search(track_id):
         return jsonify({"error": "Lyrics-Modul ist deaktiviert."}), 409
     if not _auth.can(g.user, "edit_lyrics"):
         return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
     try:
-        results = lyrics.search_provider_candidates(track_id)
+        results = lyrics.search_provider_candidates(
+            track_id,
+            title=data.get("title"),
+            artist=data.get("artist"),
+            album=data.get("album"),
+        )
     except LookupError:
         abort(404)
+    except lyrics.LyricsValidationError as exc:
+        return _client_error(exc.user_message, exc)
     except Exception:
         logging.getLogger(__name__).exception(
             "Manual lyrics search failed for track %s", track_id,

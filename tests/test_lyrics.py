@@ -4,6 +4,7 @@ import tempfile
 import time
 import unittest
 from unittest import mock
+from urllib.parse import parse_qs, urlparse
 
 from mutagen.id3 import ID3, TIT2, TPE1
 
@@ -149,6 +150,27 @@ class LyricsServiceTests(unittest.TestCase):
         current = lyrics.get_track_lyrics(self.track_id)
         self.assertEqual(current["plain_lyrics"], "Wrong local words")
         self.assertEqual(current["revision"], original["revision"])
+
+    def test_manual_provider_search_uses_supplied_query_overrides(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = b"[]"
+
+        with mock.patch.object(
+            lyrics.urllib.request, "urlopen", return_value=response,
+        ) as urlopen:
+            lyrics.search_provider_candidates(
+                self.track_id,
+                title="Different Song",
+                artist="Different Artist",
+                album="Different Album",
+            )
+
+        request = urlopen.call_args.args[0]
+        query = parse_qs(urlparse(request.full_url).query)
+        self.assertEqual(query["track_name"], ["Different Song"])
+        self.assertEqual(query["artist_name"], ["Different Artist"])
+        self.assertEqual(query["album_name"], ["Different Album"])
 
     def test_selected_provider_candidate_replaces_wrong_local_lyrics(self):
         lyrics.write_mp3_tags(self.path, "Wrong local words", "")
@@ -348,6 +370,30 @@ class LyricsApiTests(unittest.TestCase):
         self.assertEqual(
             lyrics.get_track_lyrics(self.track_id)["plain_lyrics"],
             "Existing words",
+        )
+
+    def test_manual_search_forwards_custom_query_parameters(self):
+        app_module.db.set_setting("lyrics_enabled", "1")
+        self.client.set_cookie("adolar_session", "token")
+
+        with self.login_as(self.admin_id), mock.patch.object(
+            lyrics, "search_provider_candidates", return_value=[],
+        ) as search:
+            response = self.client.post(
+                f"/api/tracks/{self.track_id}/lyrics/search",
+                json={
+                    "title": "Other Song",
+                    "artist": "Other Artist",
+                    "album": "Other Album",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        search.assert_called_once_with(
+            self.track_id,
+            title="Other Song",
+            artist="Other Artist",
+            album="Other Album",
         )
 
     def test_selected_search_result_is_persisted(self):
