@@ -1103,7 +1103,7 @@ def api_track_lyrics_select(track_id):
     except LookupError:
         abort(404)
     except lyrics.LyricsValidationError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _client_error(exc.user_message, exc)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return jsonify({"error": "Der gewählte Lyrics-Treffer existiert nicht mehr."}), 404
@@ -1138,9 +1138,9 @@ def api_track_lyrics_put(track_id):
     except (TypeError, ValueError):
         return jsonify({"error": "Ungültige Lyrics-Revision."}), 400
     except lyrics.LyricsValidationError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _client_error(exc.user_message, exc)
     except lyrics.LyricsConflict as exc:
-        return jsonify({"error": str(exc)}), 409
+        return _client_error(exc.user_message, exc, 409)
     except LookupError:
         abort(404)
     db.log_audit(g.user["id"], "lyrics.updated", f"track:{track_id}")
@@ -1161,7 +1161,7 @@ def api_lyrics_admin_settings_put():
     try:
         settings = lyrics.update_settings(data)
     except lyrics.LyricsValidationError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _client_error(exc.user_message, exc)
     db.log_audit(g.user["id"], "lyrics.settings_updated", "system")
     if settings["enabled"] and not was_enabled:
         with db.db() as conn:

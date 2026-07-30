@@ -42,7 +42,17 @@ _LRC_METADATA = re.compile(r"^\[(?:ar|al|ti|au|by|offset|re|ve|length):.*\]$", r
 
 
 class LyricsError(Exception):
-    """Base exception for expected lyrics failures."""
+    """Base exception for expected lyrics failures.
+
+    Carries a curated, user-facing German message. Read .user_message (not
+    str(exc)) when building an API response — same convention as
+    errors.ValidationError, kept as a separate hierarchy (not a ValueError
+    subclass) so it can't be swallowed by an earlier `except ValueError`.
+    """
+
+    def __init__(self, user_message: str):
+        super().__init__(user_message)
+        self.user_message = user_message
 
 
 class LyricsConflict(LyricsError):
