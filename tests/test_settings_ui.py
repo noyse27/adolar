@@ -8,6 +8,7 @@ class SettingsUiTests(unittest.TestCase):
     def setUpClass(cls):
         project_root = Path(__file__).resolve().parents[1]
         cls.html = (project_root / "templates" / "index.html").read_text(encoding="utf-8")
+        cls.javascript = (project_root / "static" / "js" / "app.js").read_text(encoding="utf-8")
 
     def test_admin_menu_and_modal_are_named_settings(self):
         self.assertIn('<i class="ti ti-settings"></i> Einstellungen', self.html)
@@ -40,6 +41,14 @@ class SettingsUiTests(unittest.TestCase):
         self.assertIn('id="new-user-name"', user_section)
         self.assertIn('id="new-user-pw"', user_section)
         self.assertIn('onclick="addUser()"', user_section)
+
+    def test_admin_can_open_manual_lyrics_search_without_existing_lyrics(self):
+        self.assertIn('const adminFallback = _me?.role === "admin";', self.javascript)
+        self.assertIn('button.classList.toggle("lyrics-missing", missing);', self.javascript)
+        self.assertIn('resetLyricsSearchParams(track);', self.javascript)
+        self.assertIn('resetLyricsSearchParams();', self.javascript)
+        for field in ("title", "artist", "album"):
+            self.assertIn(f'id="lyrics-search-{field}"', self.html)
 
 
 if __name__ == "__main__":

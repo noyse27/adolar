@@ -1345,7 +1345,7 @@ function updatePlayView(track) {
   bookmarkBtn.style.display = _me && !jingle ? "inline-flex" : "none";
   bookmarkBtn.dataset.trackId = track.id;
   if (_me && !jingle) _applyBookmarkState(bookmarkBtn, track.id);
-  $("play-view-lyrics").style.display = track.has_lyrics && !jingle ? "inline-flex" : "none";
+  updateLyricsActionButtons(track, Boolean(track.has_lyrics));
   updatePlaybackModeControls();
   renderPlayViewQueue();
 }
@@ -1380,7 +1380,7 @@ function updatePlayerUI(t) {
     : null);
   updateMiniPlayer(t);
   updatePlayView(t);
-  $("player-lyrics").style.display = t.has_lyrics && !isJingle(t) ? "inline-flex" : "none";
+  updateLyricsActionButtons(t, Boolean(t.has_lyrics));
   const wrap = $("player-cover-wrap");
   wrap.innerHTML = "";
   if (t.has_cover) {
@@ -1416,12 +1416,25 @@ function updatePlayerUI(t) {
   }
 }
 
+function updateLyricsActionButtons(track, available) {
+  const jingle = !track || isJingle(track);
+  const adminFallback = _me?.role === "admin";
+  const visible = !jingle && (Boolean(available) || adminFallback);
+  const missing = visible && adminFallback && !available;
+  for (const id of ["player-lyrics", "play-view-lyrics"]) {
+    const button = $(id);
+    button.style.display = visible ? "inline-flex" : "none";
+    button.classList.toggle("lyrics-missing", missing);
+    const label = missing ? "Lyrics suchen oder bearbeiten" : "Lyrics anzeigen";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+}
+
 function applyLyricsAvailability(trackId, available) {
   if (!state.currentTrack || String(state.currentTrack.id) !== String(trackId)) return;
   state.currentTrack.has_lyrics = Boolean(available);
-  const display = available ? "inline-flex" : "none";
-  $("player-lyrics").style.display = display;
-  $("play-view-lyrics").style.display = display;
+  updateLyricsActionButtons(state.currentTrack, Boolean(available));
 }
 
 async function ensureLyricsForTrack(track) {
@@ -1483,6 +1496,12 @@ function updateActiveLyricsLine() {
   if (active >= 0) rows[active].scrollIntoView({block: "center", behavior: "smooth"});
 }
 
+function resetLyricsSearchParams(track = state.currentTrack) {
+  $("lyrics-search-title").value = track?.title || "";
+  $("lyrics-search-artist").value = track?.artist || "";
+  $("lyrics-search-album").value = track?.album || "";
+}
+
 async function openLyricsModal() {
   const track = state.currentTrack;
   if (!track || isJingle(track)) return;
@@ -1499,6 +1518,8 @@ async function openLyricsModal() {
   $("lyrics-modal-source").textContent = data.source ? `Quelle: ${data.source}` : "";
   $("lyrics-search-btn").style.display = data.editable ? "inline-flex" : "none";
   $("lyrics-edit-btn").style.display = data.editable ? "inline-flex" : "none";
+  resetLyricsSearchParams(track);
+  $("lyrics-search-params").style.display = data.editable ? "grid" : "none";
   $("lyrics-format").style.display = "none";
   $("lyrics-editor").style.display = "none";
   $("lyrics-search-results").style.display = "none";
@@ -1609,6 +1630,12 @@ async function searchLyricsAgain() {
   try {
     const response = await fetch(`${API}/api/tracks/${lyricsUi.trackId}/lyrics/search`, {
       method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        title: $("lyrics-search-title").value,
+        artist: $("lyrics-search-artist").value,
+        album: $("lyrics-search-album").value,
+      }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -1659,6 +1686,8 @@ async function closeLyricsModal() {
   }
   $("lyrics-modal").classList.remove("open");
   $("lyrics-search-results").style.display = "none";
+  $("lyrics-search-params").style.display = "none";
+  resetLyricsSearchParams();
   lyricsUi.data = null;
   lyricsUi.trackId = null;
   lyricsUi.editing = false;
@@ -4643,6 +4672,9 @@ async function loadMe() {
 
   $("user-menu-name").textContent = _me.username;
   $("btn-playlist-editor").style.display = _me.allow_playlists ? "flex" : "none";
+  if (state.currentTrack) {
+    updateLyricsActionButtons(state.currentTrack, Boolean(state.currentTrack.has_lyrics));
+  }
 
   if (_me.role === "admin") {
     $("btn-user-mgmt").style.display = "flex";

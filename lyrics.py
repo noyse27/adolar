@@ -443,15 +443,30 @@ def resolve_track(track_id: int, *, force: bool = False) -> dict | None:
         return get_track_lyrics(track_id)
 
 
-def search_provider_candidates(track_id: int, *, timeout: float = 8.0) -> list[dict]:
+def search_provider_candidates(
+    track_id: int,
+    *,
+    title: str | None = None,
+    artist: str | None = None,
+    album: str | None = None,
+    timeout: float = 8.0,
+) -> list[dict]:
     """Return sanitized LRCLIB candidates without changing stored lyrics."""
     track = _track(track_id)
     if track is None:
         raise LookupError("track not found")
+    overrides = {
+        "title": title,
+        "artist": artist,
+        "album": album,
+    }
+    for field, value in overrides.items():
+        if value is not None and (not isinstance(value, str) or len(value) > 500):
+            raise LyricsValidationError(f"Ungültiger Suchwert für {field}.")
     params = {
-        "track_name": track.get("title") or "",
-        "artist_name": track.get("artist") or "",
-        "album_name": track.get("album") or "",
+        "track_name": title.strip() if title is not None else (track.get("title") or ""),
+        "artist_name": artist.strip() if artist is not None else (track.get("artist") or ""),
+        "album_name": album.strip() if album is not None else (track.get("album") or ""),
     }
     if not params["track_name"]:
         return []
