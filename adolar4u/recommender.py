@@ -15,8 +15,9 @@ import smart_shuffle
 
 from .service import get_global_settings, get_seed_affinities, get_user_settings
 
-ALGORITHM_VERSION = "metadata-v2-skip-smoothing-1"
+ALGORITHM_VERSION = "metadata-v2-skip-smoothing-completion-normalization-1"
 DIAGNOSTIC_RETENTION_DAYS = 60
+BUCKET_HISTORY_HOURS = 12
 
 # Skip penalties are ratios (skips / events), smoothed with pseudo-observations
 # in the denominator. Without smoothing, a single early skip of a barely-heard
@@ -46,8 +47,11 @@ def _candidate_query(order_by: str) -> str:
                    SUM(event_type='completed') AS completed_count,
                    SUM(event_type='skipped') AS skipped_count,
                    SUM(event_type='skipped' AND completion_ratio < 0.25) AS early_skips,
-                   AVG(CASE WHEN event_type IN ('completed', 'skipped')
-                            THEN completion_ratio END) AS avg_completion,
+                   AVG(CASE
+                           WHEN event_type='completed' AND reason='ended' THEN 1.0
+                           WHEN event_type IN ('completed', 'skipped')
+                               THEN completion_ratio
+                       END) AS avg_completion,
                    SUM(event_type='completed' AND
                        CAST(strftime('%H', created_at, 'unixepoch', 'localtime') AS INTEGER)=?)
                        AS same_hour_completed,
@@ -369,6 +373,24 @@ def _choose_bucketed_candidates(candidates: list[dict], count: int,
     return chosen
 
 
+def _recent_bucket_counts(user_id: int, now: float | None = None) -> dict[str, int]:
+    """Return the durable group balance used when a shuffle session is new."""
+    db = _db_module()
+    cutoff = float(now if now is not None else time.time()) - BUCKET_HISTORY_HOURS * 3600
+    with db.db() as conn:
+        rows = conn.execute("""
+            SELECT bucket, COUNT(*) AS count
+            FROM adolar4u_recommendations
+            WHERE user_id=? AND created_at>=?
+            GROUP BY bucket
+        """, (int(user_id), cutoff)).fetchall()
+    return {
+        str(row["bucket"]): int(row["count"])
+        for row in rows
+        if str(row["bucket"]) in {"anchor", "similar", "familiar", "discovery"}
+    }
+
+
 def _profile_snapshot(candidates: list[dict], artist_affinity: dict,
                       genre_affinity: dict) -> dict:
     artist_names: dict[str, str] = {}
@@ -530,6 +552,15 @@ def recommend_tracks(user_id: int, count=25, exclude_ids=None, shuffle_state=Non
     ] or candidates
     for rank, row in enumerate(bucket_candidates, start=1):
         row["_adolar4u_candidate_rank"] = rank
+    if (not shuffle_state.adolar4u_bucket_counts
+            and not user_settings["learning_paused"]):
+        # Browser/server restarts and one-track clients can create a fresh
+        # process-local shuffle state while the personal journal still knows
+        # the recent mix. Seed the new state from that durable 12-hour balance
+        # so every fresh count=1 request does not start with another anchor.
+        shuffle_state.adolar4u_bucket_counts.update(
+            _recent_bucket_counts(int(user_id), now)
+        )
     shortlist = _choose_bucketed_candidates(
         bucket_candidates, count, discovery, shuffle_state.adolar4u_bucket_counts,
     )

@@ -68,6 +68,25 @@ admin. The new model is nevertheless user-scoped for future accounts.
    `adolar4u/recommender.py`), one skip produced the same maximum penalty as
    ten skips and effectively banned the track, which real listening in July
    2026 showed to be too harsh.
+9. A natural `completed`/`ended` event counts as full completion even when a
+   browser crossfade reports the incoming track's position. The July 2026
+   learning export exposed many such rows at roughly eight seconds. New events
+   are normalized when recorded, and ranking/history/export aggregation also
+   normalizes retained legacy rows so the profile repairs itself immediately.
+10. A new process-local shuffle session continues the user's durable 12-hour
+    candidate-group balance. This prevents server restarts and repeated
+    one-track clients from restarting the mix with another anchor; the July
+    2026 export showed 59 percent anchors across such requests instead of the
+    intended approximately 15 percent.
+11. The radio queue is refilled in small batches (`RADIO_REFILL_BATCH = 5` in
+    `static/js/app.js`), not a large upfront batch. The July 30, 2026 export
+    showed that the first ranked position of every freshly scored batch skews
+    heavily toward high-play-count anchor tracks (52 percent anchor share and
+    ~48 average plays at batch position 1, versus the ~15/~19 percent overall
+    anchor target); a large batch locks many queue slots into that single
+    stale scoring snapshot before new listening events (skips, completions,
+    recency) can influence the next fetch. Smaller batches trade a few extra
+    fetches for faster adaptation.
 
 ## Current test phase
 

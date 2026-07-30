@@ -285,6 +285,14 @@ def record_event(user_id: int, track_id: int, event: dict) -> dict:
     position = _nonnegative_number(event.get("position_seconds"), "position_seconds")
     duration = _nonnegative_number(event.get("duration_seconds"), "duration_seconds")
     ratio = min(1.0, position / duration) if duration > 0 else 0.0
+    # A natural media-ended event is authoritative completion evidence. During
+    # a crossfade the browser may already expose the incoming track's position
+    # and duration when the outgoing track's event is sent. That produced
+    # "completed" rows with roughly eight seconds of playback and polluted the
+    # learned average-completion signal. Keep partial ratios for skips and other
+    # completion reasons, but normalize a genuine ended event to completion.
+    if event_type == "completed" and reason == "ended":
+        ratio = 1.0
     session_id = str(event.get("session_id") or "").strip()[:120] or None
     client_event_id = str(event.get("client_event_id") or "").strip()[:120] or None
     recommendation_id = event.get("recommendation_id")
@@ -365,8 +373,11 @@ def get_learning_history(user_id: int, days: int = 7, limit: int = 100) -> dict:
                        MAX(event_type='started') AS started,
                        MAX(event_type='completed') AS completed,
                        MAX(event_type='skipped') AS skipped,
-                       MAX(CASE WHEN event_type IN ('completed','skipped')
-                                THEN completion_ratio END) AS completion_ratio
+                       MAX(CASE
+                               WHEN event_type='completed' AND reason='ended' THEN 1.0
+                               WHEN event_type IN ('completed','skipped')
+                                   THEN completion_ratio
+                           END) AS completion_ratio
                 FROM adolar4u_listening_events
                 WHERE user_id=? AND recommendation_id IS NOT NULL
                 GROUP BY recommendation_id
@@ -387,8 +398,11 @@ def get_learning_history(user_id: int, days: int = 7, limit: int = 100) -> dict:
                        MAX(event_type='started') AS started,
                        MAX(event_type='completed') AS completed,
                        MAX(event_type='skipped') AS skipped,
-                       MAX(CASE WHEN event_type IN ('completed','skipped')
-                                THEN completion_ratio END) AS completion_ratio
+                       MAX(CASE
+                               WHEN event_type='completed' AND reason='ended' THEN 1.0
+                               WHEN event_type IN ('completed','skipped')
+                                   THEN completion_ratio
+                           END) AS completion_ratio
                 FROM adolar4u_listening_events
                 WHERE user_id=? AND recommendation_id IS NOT NULL
                 GROUP BY recommendation_id

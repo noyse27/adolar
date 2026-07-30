@@ -126,6 +126,42 @@ class Adolar4UTests(unittest.TestCase):
         )
         self.assertEqual(result["reason"], "learning_paused")
 
+    def test_natural_completion_normalizes_crossfade_position(self):
+        adolar4u.update_global_settings({"enabled": True})
+        adolar4u.update_user_settings(self.USER_ID, {"enabled": True})
+        result = adolar4u.record_event(self.USER_ID, self.TRACK_ID, {
+            "event_type": "completed",
+            "position_seconds": 8,
+            "duration_seconds": 300,
+            "reason": "ended",
+            "client_event_id": "crossfade-complete",
+        })
+        self.assertTrue(result["accepted"])
+        with app_module.db.db() as conn:
+            event = conn.execute("""
+                SELECT completion_ratio
+                FROM adolar4u_listening_events
+                WHERE user_id=? AND client_event_id='crossfade-complete'
+            """, (self.USER_ID,)).fetchone()
+        self.assertEqual(event["completion_ratio"], 1.0)
+
+    def test_legacy_crossfade_completion_is_normalized_for_profile(self):
+        adolar4u.update_global_settings({"enabled": True})
+        adolar4u.update_user_settings(self.USER_ID, {"enabled": True})
+        with app_module.db.db() as conn:
+            conn.execute("""
+                INSERT INTO adolar4u_listening_events
+                    (user_id, track_id, event_type, position_seconds,
+                     duration_seconds, completion_ratio, source, reason,
+                     client_event_id)
+                VALUES (?, ?, 'completed', 8, 300, 0.026667, 'adolar4u',
+                        'ended', 'legacy-crossfade-complete')
+            """, (self.USER_ID, self.TRACK_ID))
+
+        candidates, _ = recommender._load_candidates(self.USER_ID)
+        signal = next(row for row in candidates if row["id"] == self.TRACK_ID)
+        self.assertEqual(signal["avg_completion"], 1.0)
+
     def test_new_profile_uses_forty_percent_discovery(self):
         settings = adolar4u.get_user_settings(self.USER_ID)
         self.assertEqual(settings["discovery_level"], 0.40)
@@ -394,6 +430,31 @@ class Adolar4UTests(unittest.TestCase):
             sequential.append(bucket)
         self.assertEqual(sequential.count("anchor"), 3)
 
+    def test_new_shuffle_session_continues_durable_bucket_balance(self):
+        adolar4u.update_global_settings({"enabled": True})
+        adolar4u.update_user_settings(self.USER_ID, {
+            "enabled": True,
+            "discovery_level": 0.4,
+        })
+        first = adolar4u.recommend_tracks(
+            self.USER_ID, count=1, rng=random.Random(30),
+        )
+        durable = recommender._recent_bucket_counts(self.USER_ID)
+        self.assertEqual(sum(durable.values()), 1)
+        self.assertEqual(durable[first[0]["adolar4u_bucket"]], 1)
+
+        state = recommender.smart_shuffle.ShuffleState(
+            context=f"adolar4u:{self.USER_ID}"
+        )
+        adolar4u.recommend_tracks(
+            self.USER_ID, count=1, shuffle_state=state,
+            rng=random.Random(31),
+        )
+
+        self.assertEqual(sum(state.adolar4u_bucket_counts.values()), 2)
+        for bucket, count in durable.items():
+            self.assertGreaterEqual(state.adolar4u_bucket_counts[bucket], count)
+
     def test_lastfm_loved_and_local_favorites_are_user_specific(self):
         other_user = 22
         with app_module.db.db() as conn:
@@ -624,6 +685,16 @@ class Adolar4UTests(unittest.TestCase):
             "recommendation_id": decision_id,
             "client_event_id": "history-complete",
         })
+        # Retained rows from the affected web client can say "ended" while
+        # carrying the incoming crossfade track's partial position.
+        with app_module.db.db() as conn:
+            conn.execute("""
+                UPDATE adolar4u_listening_events
+                SET position_seconds=8, duration_seconds=300,
+                    completion_ratio=0.026667, reason='ended'
+                WHERE user_id=? AND recommendation_id=?
+                  AND event_type='completed'
+            """, (self.USER_ID, decision_id))
 
         with self._login():
             response = self.client.get("/api/adolar4u/history?days=7")
@@ -656,6 +727,14 @@ class Adolar4UTests(unittest.TestCase):
             "recommendation_id": decision_id,
             "client_event_id": "export-completed",
         })
+        with app_module.db.db() as conn:
+            conn.execute("""
+                UPDATE adolar4u_listening_events
+                SET position_seconds=8, duration_seconds=300,
+                    completion_ratio=0.026667, reason='ended'
+                WHERE user_id=? AND recommendation_id=?
+                  AND event_type='completed'
+            """, (self.USER_ID, decision_id))
         with app_module.db.db() as conn:
             conn.execute("""
                 INSERT OR IGNORE INTO users
@@ -703,6 +782,7 @@ class Adolar4UTests(unittest.TestCase):
             row["reason"] for row in recommendations
         })
         self.assertEqual(recommendations[0]["outcome"], "completed")
+        self.assertEqual(float(recommendations[0]["completion_ratio"]), 1.0)
         self.assertEqual(recommendations[0]["recommendation_id"], str(decision_id))
         self.assertEqual(events[0]["recommendation_id"], str(decision_id))
         self.assertNotIn("password", json.dumps(summary).lower())

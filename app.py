@@ -970,7 +970,10 @@ def api_adolar4u_onboarding_complete():
         onboarding = adolar4u.complete_onboarding(
             g.user["id"], data.get("artists"), data.get("genres"),
         )
-        initial_playlist = adolar4u.recommend_tracks(g.user["id"], count=25) or []
+        # 5 to play immediately + one background-refill batch worth (see
+        # RADIO_REFILL_BATCH in static/js/app.js) — matches startRadio()'s
+        # normal fetch shape instead of over-committing to a stale snapshot.
+        initial_playlist = adolar4u.recommend_tracks(g.user["id"], count=10) or []
     except errors.ValidationError as exc:
         return _client_error(exc.user_message, exc)
     except ValueError as exc:
