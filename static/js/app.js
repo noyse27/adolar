@@ -509,6 +509,12 @@ const normalCrossfade = {
   active: false,
   timer: null,
 };
+const lyricsUi = {
+  data: null,
+  trackId: null,
+  editing: false,
+  requestGeneration: 0,
+};
 const CF_PRELOAD = 25; // seconds before end: start buffering next track
 const CF_OUT     = 12; // seconds before end: start fade-out
 const CF_IN      =  8; // fade-in duration
@@ -573,7 +579,11 @@ function finishAdolar4UTrack(reason = "track_change", forceCompleted = false, be
   sendAdolar4UEvent(trackId, forceCompleted || ratio >= .9 ? "completed" : "skipped", {
     source: adolar4uTelemetry.source,
     reason: forceCompleted || ratio >= .9 ? "ended" : reason,
-    position, duration,
+    // Crossfade handoff can expose the incoming audio element's currentTime
+    // before the outgoing completion request is built. A natural ended event
+    // is complete by definition, so do not export that stale partial position.
+    position: forceCompleted && duration > 0 ? duration : position,
+    duration,
   }, beacon);
   adolar4uTelemetry.trackId = null;
   adolar4uTelemetry.decisionId = null;
@@ -1330,6 +1340,7 @@ function updatePlayView(track) {
   bookmarkBtn.style.display = _me && !jingle ? "inline-flex" : "none";
   bookmarkBtn.dataset.trackId = track.id;
   if (_me && !jingle) _applyBookmarkState(bookmarkBtn, track.id);
+  $("play-view-lyrics").style.display = track.has_lyrics && !jingle ? "inline-flex" : "none";
   updatePlaybackModeControls();
   renderPlayViewQueue();
 }
@@ -1364,6 +1375,7 @@ function updatePlayerUI(t) {
     : null);
   updateMiniPlayer(t);
   updatePlayView(t);
+  $("player-lyrics").style.display = t.has_lyrics && !isJingle(t) ? "inline-flex" : "none";
   const wrap = $("player-cover-wrap");
   wrap.innerHTML = "";
   if (t.has_cover) {
@@ -1382,6 +1394,7 @@ function updatePlayerUI(t) {
     $("player-favorite").style.display = "none";
     return;
   }
+  ensureLyricsForTrack(t);
   $("player-favorite").style.display = _me ? "inline-flex" : "none";
   $("player-favorite").dataset.trackId = t.id;
   applyFavoriteState($("player-favorite"), _favoriteIds.has(Number(t.id)));
@@ -1396,6 +1409,254 @@ function updatePlayerUI(t) {
       body: JSON.stringify({ artist: t.artist, title: t.title, duration: t.duration }),
     }).catch(() => {});
   }
+}
+
+function applyLyricsAvailability(trackId, available) {
+  if (!state.currentTrack || String(state.currentTrack.id) !== String(trackId)) return;
+  state.currentTrack.has_lyrics = Boolean(available);
+  const display = available ? "inline-flex" : "none";
+  $("player-lyrics").style.display = display;
+  $("play-view-lyrics").style.display = display;
+}
+
+async function ensureLyricsForTrack(track) {
+  if (!track || isJingle(track)) return;
+  const generation = ++lyricsUi.requestGeneration;
+  try {
+    const current = await fetch(`${API}/api/tracks/${track.id}/lyrics`, {cache: "no-store"});
+    if (!current.ok || generation !== lyricsUi.requestGeneration) return;
+    let data = await current.json();
+    if (data.available) {
+      applyLyricsAvailability(track.id, true);
+      return;
+    }
+    if (!data.enabled) return;
+    await fetch(`${API}/api/tracks/${track.id}/lyrics/fetch`, {method: "POST"});
+    for (const delay of [700, 1800, 3500]) {
+      await new Promise(resolve => setTimeout(resolve, delay));
+      if (generation !== lyricsUi.requestGeneration) return;
+      const response = await fetch(`${API}/api/tracks/${track.id}/lyrics`, {cache: "no-store"});
+      if (!response.ok) return;
+      data = await response.json();
+      if (data.available) {
+        applyLyricsAvailability(track.id, true);
+        return;
+      }
+      if (!["pending", "error"].includes(data.status)) return;
+    }
+  } catch {}
+}
+
+function renderLyricsViewer(data) {
+  const viewer = $("lyrics-viewer");
+  viewer.innerHTML = "";
+  if (data.lines?.length) {
+    data.lines.forEach((line, index) => {
+      const row = document.createElement("div");
+      row.className = "lyrics-line";
+      row.dataset.timeMs = line.time_ms;
+      row.dataset.index = index;
+      row.textContent = line.text || "♪";
+      viewer.appendChild(row);
+    });
+    updateActiveLyricsLine();
+  } else {
+    viewer.textContent = data.plain_lyrics || "Keine Lyrics vorhanden.";
+  }
+}
+
+function updateActiveLyricsLine() {
+  if (!$("lyrics-modal").classList.contains("open") || lyricsUi.editing) return;
+  const rows = [...$("lyrics-viewer").querySelectorAll(".lyrics-line")];
+  if (!rows.length) return;
+  const currentMs = audio.currentTime * 1000;
+  let active = -1;
+  rows.forEach((row, index) => {
+    if (Number(row.dataset.timeMs) <= currentMs) active = index;
+  });
+  rows.forEach((row, index) => row.classList.toggle("active", index === active));
+  if (active >= 0) rows[active].scrollIntoView({block: "center", behavior: "smooth"});
+}
+
+async function openLyricsModal() {
+  const track = state.currentTrack;
+  if (!track || isJingle(track)) return;
+  $("lyrics-modal-error").textContent = "";
+  const response = await fetch(`${API}/api/tracks/${track.id}/lyrics`, {cache: "no-store"});
+  if (!response.ok) return;
+  const data = await response.json();
+  if (!data.available && !data.editable) return;
+  lyricsUi.data = data;
+  lyricsUi.trackId = track.id;
+  lyricsUi.editing = false;
+  $("lyrics-modal-title").textContent = track.title || "Lyrics";
+  $("lyrics-modal-subtitle").textContent = [track.artist, track.album].filter(Boolean).join(" · ");
+  $("lyrics-modal-source").textContent = data.source ? `Quelle: ${data.source}` : "";
+  $("lyrics-search-btn").style.display = data.editable ? "inline-flex" : "none";
+  $("lyrics-edit-btn").style.display = data.editable ? "inline-flex" : "none";
+  $("lyrics-format").style.display = "none";
+  $("lyrics-editor").style.display = "none";
+  $("lyrics-search-results").style.display = "none";
+  $("lyrics-viewer").style.display = "block";
+  renderLyricsViewer(data);
+  $("lyrics-modal").classList.add("open");
+  $("lyrics-modal-ok").focus();
+}
+
+function startLyricsEditing() {
+  if (!lyricsUi.data?.editable) return;
+  lyricsUi.editing = true;
+  $("lyrics-search-btn").style.display = "none";
+  $("lyrics-search-results").style.display = "none";
+  const format = lyricsUi.data.synced_lyrics ? "lrc" : "plain";
+  $("lyrics-format").value = format;
+  $("lyrics-format").style.display = "block";
+  $("lyrics-viewer").style.display = "none";
+  $("lyrics-editor").style.display = "block";
+  $("lyrics-editor").value = format === "lrc"
+    ? lyricsUi.data.synced_lyrics : lyricsUi.data.plain_lyrics;
+  $("lyrics-editor").focus();
+}
+
+function showCurrentLyrics() {
+  $("lyrics-search-results").style.display = "none";
+  $("lyrics-viewer").style.display = "block";
+  $("lyrics-edit-btn").style.display = lyricsUi.data?.editable ? "inline-flex" : "none";
+}
+
+function renderLyricsSearchResults(results) {
+  const container = $("lyrics-search-results");
+  container.innerHTML = "";
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "radio-secondary-btn lyrics-search-back";
+  back.innerHTML = `<i class="ti ti-arrow-left"></i> Aktuelle Lyrics`;
+  back.onclick = showCurrentLyrics;
+  container.appendChild(back);
+
+  if (!results.length) {
+    const empty = document.createElement("div");
+    empty.className = "lyrics-search-empty";
+    empty.textContent = "Beim Lyrics-Anbieter wurde kein passender Text gefunden.";
+    container.appendChild(empty);
+    return;
+  }
+
+  results.forEach(result => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "lyrics-search-result";
+    const heading = document.createElement("strong");
+    heading.textContent = result.title || "Unbekannter Titel";
+    const artist = document.createElement("span");
+    artist.textContent = result.artist || "Unbekannter Interpret";
+    const details = document.createElement("small");
+    const duration = result.duration ? fmt(result.duration) : "–";
+    const format = result.instrumental ? "Instrumental" : (result.synced ? "LRC" : "Text");
+    details.textContent = [result.album, duration, format].filter(Boolean).join(" · ");
+    button.append(heading, artist, details);
+    button.onclick = () => selectLyricsCandidate(result, button);
+    container.appendChild(button);
+  });
+}
+
+async function selectLyricsCandidate(result, selectedButton) {
+  if (!confirm(`„${result.title || "Diesen Treffer"}“ übernehmen und vorhandene Lyrics ersetzen?`)) {
+    return;
+  }
+  const buttons = [...$("lyrics-search-results").querySelectorAll("button")];
+  buttons.forEach(button => { button.disabled = true; });
+  selectedButton.classList.add("loading");
+  $("lyrics-modal-error").textContent = "";
+  try {
+    const response = await fetch(`${API}/api/tracks/${lyricsUi.trackId}/lyrics/select`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({source_id: result.id}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      $("lyrics-modal-error").textContent =
+        payload.error || "Der Lyrics-Treffer konnte nicht übernommen werden.";
+      return;
+    }
+    lyricsUi.data = payload;
+    $("lyrics-modal-source").textContent = payload.source ? `Quelle: ${payload.source}` : "";
+    renderLyricsViewer(payload);
+    applyLyricsAvailability(lyricsUi.trackId, payload.available);
+    showCurrentLyrics();
+  } catch {
+    $("lyrics-modal-error").textContent = "Lyrics-Anbieter ist derzeit nicht erreichbar.";
+  } finally {
+    selectedButton.classList.remove("loading");
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+
+async function searchLyricsAgain() {
+  if (!lyricsUi.data?.editable || !lyricsUi.trackId) return;
+  const button = $("lyrics-search-btn");
+  const originalContent = button.innerHTML;
+  button.disabled = true;
+  $("lyrics-edit-btn").disabled = true;
+  button.innerHTML = `<i class="ti ti-loader-2 spin"></i> Suche…`;
+  $("lyrics-modal-error").textContent = "";
+  try {
+    const response = await fetch(`${API}/api/tracks/${lyricsUi.trackId}/lyrics/search`, {
+      method: "POST",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      $("lyrics-modal-error").textContent =
+        payload.error || "Lyrics-Suche ist fehlgeschlagen.";
+      return;
+    }
+    $("lyrics-viewer").style.display = "none";
+    $("lyrics-editor").style.display = "none";
+    $("lyrics-edit-btn").style.display = "none";
+    $("lyrics-search-results").style.display = "block";
+    renderLyricsSearchResults(payload.results || []);
+  } catch {
+    $("lyrics-modal-error").textContent = "Lyrics-Anbieter ist derzeit nicht erreichbar.";
+  } finally {
+    button.innerHTML = originalContent;
+    button.disabled = false;
+    $("lyrics-edit-btn").disabled = false;
+  }
+}
+
+async function closeLyricsModal() {
+  if (lyricsUi.editing && lyricsUi.data) {
+    const format = $("lyrics-format").value;
+    const original = format === "lrc"
+      ? lyricsUi.data.synced_lyrics : lyricsUi.data.plain_lyrics;
+    const changed = $("lyrics-editor").value !== (original || "");
+    if (changed && confirm("Änderungen speichern?")) {
+      $("lyrics-modal-ok").disabled = true;
+      const response = await fetch(`${API}/api/tracks/${lyricsUi.trackId}/lyrics`, {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          content: $("lyrics-editor").value,
+          format,
+          revision: lyricsUi.data.revision,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      $("lyrics-modal-ok").disabled = false;
+      if (!response.ok) {
+        $("lyrics-modal-error").textContent = payload.error || "Lyrics konnten nicht gespeichert werden.";
+        return;
+      }
+      lyricsUi.data = payload;
+      applyLyricsAvailability(lyricsUi.trackId, true);
+    }
+  }
+  $("lyrics-modal").classList.remove("open");
+  $("lyrics-search-results").style.display = "none";
+  lyricsUi.data = null;
+  lyricsUi.trackId = null;
+  lyricsUi.editing = false;
 }
 
 function playTrack(idx) {
@@ -1949,7 +2210,20 @@ $("play-view-bookmark").onclick = e => {
     _openBookmarkDropdown($("play-view-bookmark"), state.currentTrack.id);
   }
 };
+$("player-lyrics").onclick = openLyricsModal;
+$("play-view-lyrics").onclick = openLyricsModal;
+$("lyrics-search-btn").onclick = searchLyricsAgain;
+$("lyrics-edit-btn").onclick = startLyricsEditing;
+$("lyrics-modal-ok").onclick = closeLyricsModal;
+$("lyrics-modal-close").onclick = closeLyricsModal;
+$("lyrics-modal").onclick = e => {
+  if (e.target === $("lyrics-modal")) closeLyricsModal();
+};
 document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && $("lyrics-modal").classList.contains("open")) {
+    closeLyricsModal();
+    return;
+  }
   if (e.key === "Escape" && playViewState.open) closePlayView();
 });
 setInterval(updatePlayViewClock, 1000);
@@ -2001,6 +2275,7 @@ audio.ontimeupdate = () => {
   $("play-view-progress").value = progress.value;
   $("play-view-time-cur").textContent = fmt(audio.currentTime);
   $("play-view-time-dur").textContent = fmt(audio.duration);
+  updateActiveLyricsLine();
 
   if (isJingle(state.currentTrack)) return;
 
@@ -4411,6 +4686,7 @@ async function openUserMgmt() {
   await refreshUserList();
   await refreshAccessSettings();
   await refreshAdolar4UAdminSettings();
+  await refreshLyricsAdminSettings();
   await refreshBlockedIps();
   await refreshAuditLog();
 }
@@ -4442,6 +4718,10 @@ async function refreshUserList() {
       <label title="Eigene Radiosender" style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-tertiary);cursor:pointer">
         <input type="checkbox" data-uid="${u.id}" data-cap="radio_stations" class="cap-toggle" ${u.allow_radio_stations?'checked':''} ${u.role==='admin'?'disabled':''}>
         <i class="ti ti-radio" style="font-size:12px"></i>
+      </label>
+      <label title="Lyrics bearbeiten" style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-tertiary);cursor:pointer">
+        <input type="checkbox" data-uid="${u.id}" data-cap="lyrics_edit" class="cap-toggle" ${u.allow_lyrics_edit?'checked':''} ${u.role==='admin'?'disabled':''}>
+        <i class="ti ti-microphone-2" style="font-size:12px"></i>
       </label>
       <label title="Account aktiv" style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-tertiary);cursor:pointer">
         <input type="checkbox" data-uid="${u.id}" class="active-toggle" ${u.is_active?'checked':''} ${isMe?'disabled':''}>
@@ -4492,6 +4772,9 @@ async function refreshUserList() {
         body: JSON.stringify({allow: cb.checked})
       });
       if (!r.ok) cb.checked = !cb.checked;
+      if (r.ok && _me && cb.dataset.uid == _me.id && cb.dataset.cap === "lyrics_edit") {
+        _me.allow_lyrics_edit = cb.checked;
+      }
     };
   });
 
@@ -4576,6 +4859,59 @@ async function saveAdolar4UAdminSettings() {
     return;
   }
   await loadAdolar4UStatus();
+}
+
+async function refreshLyricsAdminSettings() {
+  const r = await fetch("/api/admin/lyrics/settings");
+  if (!r.ok) return;
+  const settings = await r.json();
+  $("setting-lyrics-enabled").checked = Boolean(settings.enabled);
+  $("setting-lyrics-auto-fetch").checked = Boolean(settings.auto_fetch);
+  $("setting-lyrics-write-tags").checked = Boolean(settings.write_tags);
+  $("setting-lyrics-write-sidecar").checked = Boolean(settings.write_sidecar);
+  $("setting-lyrics-provider").value = settings.provider || "lrclib";
+  $("setting-lyrics-provider-url").value = settings.provider_url || "https://lrclib.net";
+  $("setting-lyrics-api-key").value = "";
+  $("setting-lyrics-api-key").placeholder = settings.api_key_configured
+    ? "API-Key ist gespeichert" : "Nicht gesetzt";
+  $("setting-lyrics-key-state").textContent = settings.api_key_configured
+    ? "API-Key konfiguriert" : "LRCLIB benötigt keinen API-Key.";
+}
+
+async function saveLyricsAdminSettings() {
+  const apiKey = $("setting-lyrics-api-key").value;
+  const payload = {
+    enabled: $("setting-lyrics-enabled").checked,
+    auto_fetch: $("setting-lyrics-auto-fetch").checked,
+    write_tags: $("setting-lyrics-write-tags").checked,
+    write_sidecar: $("setting-lyrics-write-sidecar").checked,
+    provider: $("setting-lyrics-provider").value,
+    provider_url: $("setting-lyrics-provider-url").value,
+  };
+  if (apiKey) payload.api_key = apiKey;
+  const r = await fetch("/api/admin/lyrics/settings", {
+    method: "PUT", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const error = await r.json().catch(() => ({}));
+    alert(error.error || "Lyrics-Einstellungen konnten nicht gespeichert werden.");
+    return;
+  }
+  await refreshLyricsAdminSettings();
+}
+
+async function startLyricsScan() {
+  const r = await fetch("/api/admin/lyrics/scan", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({force: false}),
+  });
+  if (r.status === 202) {
+    alert("Lyrics-Prüfung wurde gestartet.");
+  } else {
+    const error = await r.json().catch(() => ({}));
+    alert(error.error || "Lyrics-Prüfung läuft bereits.");
+  }
 }
 
 async function openAdolar4USettings() {

@@ -67,6 +67,8 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             "net.polze.adolarradio.metadata.ADOLAR4U_REASON";
     static final String METADATA_KEY_LASTFM_LOVED =
             "net.polze.adolarradio.metadata.LASTFM_LOVED";
+    static final String METADATA_KEY_HAS_LYRICS =
+            "net.polze.adolarradio.metadata.HAS_LYRICS";
     private static final String PLAYBACK_CHANNEL_ID = "adolar_playback";
     private static final int PLAYBACK_NOTIFICATION_ID = 1001;
 
@@ -139,6 +141,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             currentTrack = promoted;
             mediaSession.setActive(true);
             updateMetadata(promoted);
+            requestLyricsIfMissing(promoted);
             sendListeningEvent(promoted, "started", null, 0, promoted.durationMs);
             updatePlaybackState(PlaybackStateCompat.STATE_PLAYING, null);
             queueNextTrack();
@@ -417,6 +420,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             track.durationMs = item.optLong("duration", 0) * 1000L;
             track.coverHash = item.optString("cover_hash", "");
             track.hasCover = item.optBoolean("has_cover", false);
+            track.hasLyrics = item.optBoolean("has_lyrics", false);
             return track;
         } catch (Exception ignored) {
             return null;
@@ -432,6 +436,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         queuedNextTrack = null;
         mediaSession.setActive(true);
         updateMetadata(track);
+        requestLyricsIfMissing(track);
         // Marks the service as "started" so it survives the phone UI unbinding
         // (e.g. screen off triggers MainActivity.onStop -> mediaBrowser.disconnect()).
         // Without this the service is bound-only and Android destroys it, and the
@@ -661,6 +666,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
                 .putLong(MediaMetadataCompat.METADATA_KEY_YEAR, track.year)
                 .putString(METADATA_KEY_ADOLAR4U_REASON, track.reason)
                 .putLong(METADATA_KEY_LASTFM_LOVED, track.loved ? 1L : 0L)
+                .putLong(METADATA_KEY_HAS_LYRICS, track.hasLyrics ? 1L : 0L)
                 .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, currentStationName)
                 .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, track.durationMs);
         if (track.hasCover && !track.coverHash.isEmpty()) {
@@ -670,6 +676,24 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             );
         }
         mediaSession.setMetadata(builder.build());
+    }
+
+    private void requestLyricsIfMissing(Track track) {
+        if (track == null || track.hasLyrics) return;
+        final int trackId = track.id;
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = openConnection(
+                        AdolarPrefs.apiUrl(this) + "/api/tracks/" + trackId + "/lyrics/fetch",
+                        "POST"
+                );
+                connection.getResponseCode();
+            } catch (Exception ignored) {
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }, "AdolarLyricsFetch").start();
     }
 
     private void updatePlaybackState(int state, String error) {
@@ -741,6 +765,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         long durationMs;
         String coverHash;
         boolean hasCover;
+        boolean hasLyrics;
         boolean loved;
     }
 }

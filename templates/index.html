@@ -68,7 +68,7 @@
         <i class="ti ti-sparkles"></i> Adolar4U
       </button>
       <button class="user-dd-item" id="btn-user-mgmt" style="display:none" onclick="openUserMgmt()">
-        <i class="ti ti-users"></i> Benutzerverwaltung
+        <i class="ti ti-settings"></i> Einstellungen
       </button>
       <div class="user-dd-sep"></div>
       <form method="post" action="/logout" style="margin:0">
@@ -412,6 +412,9 @@
           <button class="play-view-icon-btn" id="play-view-bookmark" type="button" title="Zu Playlist hinzufügen" aria-label="Zu Playlist hinzufügen" style="display:none">
             <i class="ti ti-bookmark"></i>
           </button>
+          <button class="play-view-icon-btn" id="play-view-lyrics" type="button" title="Lyrics anzeigen" aria-label="Lyrics anzeigen" style="display:none">
+            <i class="ti ti-microphone-2"></i>
+          </button>
         </div>
       </div>
 
@@ -468,10 +471,47 @@
   <button class="btn-favorite" id="player-favorite" title="Zu Favoriten" style="display:none">
     <i class="ti ti-star"></i>
   </button>
+  <button class="ctrl-btn" id="player-lyrics" title="Lyrics anzeigen" aria-label="Lyrics anzeigen" style="display:none">
+    <i class="ti ti-microphone-2"></i>
+  </button>
 </div>
 
 <audio id="audio"></audio>
 <audio id="audio-b"></audio>
+
+<!-- ── Lyrics Modal ── -->
+<div id="lyrics-modal" class="modal-backdrop" role="dialog" aria-modal="true"
+     aria-labelledby="lyrics-modal-title">
+  <div class="modal-box lyrics-modal-box">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title"><i class="ti ti-microphone-2"></i><span id="lyrics-modal-title">Lyrics</span></div>
+        <div id="lyrics-modal-subtitle"></div>
+      </div>
+      <button class="modal-close" id="lyrics-modal-close" type="button" aria-label="Lyrics schließen"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="lyrics-modal-toolbar">
+      <span id="lyrics-modal-source"></span>
+      <button id="lyrics-search-btn" class="radio-secondary-btn" type="button" style="display:none">
+        <i class="ti ti-search"></i> Neu suchen
+      </button>
+      <button id="lyrics-edit-btn" class="radio-secondary-btn" type="button" style="display:none">
+        <i class="ti ti-edit"></i> Bearbeiten
+      </button>
+      <select id="lyrics-format" class="radio-select" style="display:none">
+        <option value="plain">Text</option>
+        <option value="lrc">Synchronisiert (LRC)</option>
+      </select>
+    </div>
+    <div id="lyrics-viewer"></div>
+    <div id="lyrics-search-results" style="display:none"></div>
+    <textarea id="lyrics-editor" spellcheck="true" style="display:none" aria-label="Lyrics bearbeiten"></textarea>
+    <div id="lyrics-modal-error" role="alert"></div>
+    <div class="lyrics-modal-actions">
+      <button id="lyrics-modal-ok" class="radio-primary-btn" type="button">OK</button>
+    </div>
+  </div>
+</div>
 
 
 <script src="/static/js/app.js?v={{ app_version }}"></script>
@@ -552,64 +592,95 @@
   </div>
 </div>
 
-<!-- ── User Management Modal ── -->
+<!-- ── Administration settings modal ── -->
 <div id="usermgmt-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);align-items:center;justify-content:center" onclick="if(event.target===this)closeUserMgmt()">
-  <div style="background:var(--bg-primary);border:0.5px solid var(--border-medium);border-radius:12px;padding:28px 32px;width:640px;max-width:95vw;max-height:85vh;overflow-y:auto;position:relative">
-    <button onclick="closeUserMgmt()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer">✕</button>
-    <div style="font-size:15px;font-weight:600;margin-bottom:20px;color:var(--text-primary)">
-      <i class="ti ti-users" style="color:var(--accent)"></i> Benutzerverwaltung
+  <div class="settings-modal-box">
+    <button onclick="closeUserMgmt()" class="settings-modal-close" aria-label="Einstellungen schließen">✕</button>
+    <div class="settings-modal-title">
+      <i class="ti ti-settings" style="color:var(--accent)"></i> Einstellungen
     </div>
 
-    <!-- User list -->
-    <div id="usermgmt-list" style="margin-bottom:20px"></div>
+    <div class="settings-sections">
+      <details class="settings-section" open>
+        <summary><span><i class="ti ti-users"></i> Benutzerverwaltung</span><i class="ti ti-chevron-down settings-chevron"></i></summary>
+        <div class="settings-section-body">
+          <div id="usermgmt-list"></div>
+          <div class="settings-subsection">
+            <div class="settings-subsection-title">Neuer Benutzer</div>
+            <div class="settings-new-user">
+              <input id="new-user-name" type="text" placeholder="Benutzername">
+              <input id="new-user-pw" type="password" placeholder="Initialpasswort (min. 8 Z.)">
+              <button onclick="addUser()">Anlegen</button>
+            </div>
+            <div id="usermgmt-error"></div>
+          </div>
+        </div>
+      </details>
 
-    <div style="border-top:0.5px solid var(--border-subtle);padding:18px 0;margin-bottom:4px">
-      <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Zugriff und Standardrechte</div>
-      <div style="display:grid;grid-template-columns:1fr auto;gap:10px 16px;align-items:center;font-size:13px;color:var(--text-secondary)">
-        <label for="setting-anonymous-web">Adolar Web anonym verwenden</label><input id="setting-anonymous-web" type="checkbox" onchange="saveAccessSettings()">
-        <label for="setting-user-playlists">Benutzer dürfen eigene Playlists anlegen</label><input id="setting-user-playlists" type="checkbox" onchange="saveAccessSettings()">
-        <label for="setting-user-radios">Benutzer dürfen eigene Radiosender anlegen</label><input id="setting-user-radios" type="checkbox" onchange="saveAccessSettings()">
-        <label for="setting-companion-access">Radio Companion</label>
-        <select id="setting-companion-access" onchange="saveAccessSettings()" style="padding:5px 8px;background:var(--bg-secondary);border:0.5px solid var(--border-subtle);border-radius:6px;color:var(--text-primary)">
-          <option value="public">Öffentlich</option>
-          <option value="authenticated">Nur angemeldete Benutzer</option>
-          <option value="disabled">Deaktiviert</option>
-        </select>
-      </div>
-    </div>
+      <details class="settings-section">
+        <summary><span><i class="ti ti-shield-lock"></i> Rechteverwaltung</span><i class="ti ti-chevron-down settings-chevron"></i></summary>
+        <div class="settings-section-body">
+          <div class="settings-grid">
+            <label for="setting-anonymous-web">Adolar Web anonym verwenden</label><input id="setting-anonymous-web" type="checkbox" onchange="saveAccessSettings()">
+            <label for="setting-user-playlists">Benutzer dürfen eigene Playlists anlegen</label><input id="setting-user-playlists" type="checkbox" onchange="saveAccessSettings()">
+            <label for="setting-user-radios">Benutzer dürfen eigene Radiosender anlegen</label><input id="setting-user-radios" type="checkbox" onchange="saveAccessSettings()">
+            <label for="setting-companion-access">Radio Companion</label>
+            <select id="setting-companion-access" onchange="saveAccessSettings()">
+              <option value="public">Öffentlich</option>
+              <option value="authenticated">Nur angemeldete Benutzer</option>
+              <option value="disabled">Deaktiviert</option>
+            </select>
+          </div>
+          <div id="usermgmt-blocks-wrap" class="settings-subsection" style="display:none">
+            <div class="settings-subsection-title">Gesperrte IPs</div>
+            <div id="usermgmt-blocks"></div>
+          </div>
+        </div>
+      </details>
 
-    <div style="border-top:0.5px solid var(--border-subtle);padding:18px 0;margin-bottom:4px">
-      <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Adolar4U · Spezialmodul</div>
-      <div style="display:grid;grid-template-columns:1fr auto;gap:10px 16px;align-items:center;font-size:13px;color:var(--text-secondary)">
-        <label for="setting-adolar4u-enabled">Adolar4U global bereitstellen</label><input id="setting-adolar4u-enabled" type="checkbox" onchange="saveAdolar4UAdminSettings()">
-        <label for="setting-adolar4u-analysis">Lokale Audioanalyse erlauben (in Vorbereitung)</label><input id="setting-adolar4u-analysis" type="checkbox" onchange="saveAdolar4UAdminSettings()">
-        <label for="setting-adolar4u-collaborative">Aggregiertes Lernen aus anderen Plays erlauben (in Vorbereitung)</label><input id="setting-adolar4u-collaborative" type="checkbox" onchange="saveAdolar4UAdminSettings()">
-      </div>
-      <p style="font-size:11px;line-height:1.5;color:var(--text-tertiary);margin:10px 0 0">Standardmäßig aus. Jeder Benutzer muss das persönliche Lernen zusätzlich selbst aktivieren.</p>
-    </div>
+      <details class="settings-section">
+        <summary><span><i class="ti ti-sparkles"></i> Adolar4U</span><i class="ti ti-chevron-down settings-chevron"></i></summary>
+        <div class="settings-section-body">
+          <div class="settings-grid">
+            <label for="setting-adolar4u-enabled">Adolar4U global bereitstellen</label><input id="setting-adolar4u-enabled" type="checkbox" onchange="saveAdolar4UAdminSettings()">
+            <label for="setting-adolar4u-analysis">Lokale Audioanalyse erlauben (in Vorbereitung)</label><input id="setting-adolar4u-analysis" type="checkbox" onchange="saveAdolar4UAdminSettings()">
+            <label for="setting-adolar4u-collaborative">Aggregiertes Lernen aus anderen Plays erlauben (in Vorbereitung)</label><input id="setting-adolar4u-collaborative" type="checkbox" onchange="saveAdolar4UAdminSettings()">
+          </div>
+          <p class="settings-hint">Standardmäßig aus. Jeder Benutzer muss das persönliche Lernen zusätzlich selbst aktivieren.</p>
+        </div>
+      </details>
 
-    <!-- Blocked IPs -->
-    <div id="usermgmt-blocks-wrap" style="margin-bottom:20px;display:none">
-      <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Gesperrte IPs</div>
-      <div id="usermgmt-blocks"></div>
-    </div>
+      <details class="settings-section">
+        <summary><span><i class="ti ti-microphone-2"></i> Lyrics</span><i class="ti ti-chevron-down settings-chevron"></i></summary>
+        <div class="settings-section-body">
+          <div class="settings-grid">
+            <label for="setting-lyrics-enabled">Lyrics global bereitstellen</label><input id="setting-lyrics-enabled" type="checkbox" onchange="saveLyricsAdminSettings()">
+            <label for="setting-lyrics-auto-fetch">Beim Abspielen automatisch abrufen</label><input id="setting-lyrics-auto-fetch" type="checkbox" onchange="saveLyricsAdminSettings()">
+            <label for="setting-lyrics-write-tags">In MP3-Tags schreiben</label><input id="setting-lyrics-write-tags" type="checkbox" onchange="saveLyricsAdminSettings()">
+            <label for="setting-lyrics-write-sidecar">Lyrics-Datei neben Audio speichern</label><input id="setting-lyrics-write-sidecar" type="checkbox" onchange="saveLyricsAdminSettings()">
+            <label for="setting-lyrics-provider">Anbieter</label>
+            <select id="setting-lyrics-provider" onchange="saveLyricsAdminSettings()">
+              <option value="lrclib">LRCLIB</option>
+            </select>
+            <label for="setting-lyrics-provider-url">Anbieter-URL</label>
+            <input id="setting-lyrics-provider-url" type="url" value="https://lrclib.net" onchange="saveLyricsAdminSettings()">
+            <label for="setting-lyrics-api-key">API-Key (nur falls Anbieter benötigt)</label>
+            <input id="setting-lyrics-api-key" type="password" autocomplete="new-password" placeholder="Nicht gesetzt" onchange="saveLyricsAdminSettings()">
+          </div>
+          <div class="settings-inline-actions">
+            <button type="button" class="radio-secondary-btn" onclick="startLyricsScan()"><i class="ti ti-refresh"></i> Fehlende Lyrics prüfen</button>
+            <span id="setting-lyrics-key-state"></span>
+          </div>
+          <p class="settings-hint">Kein Treffer wird 28 Tage zwischengespeichert. LRCLIB benötigt derzeit keinen API-Key.</p>
+        </div>
+      </details>
 
-    <details style="border-top:0.5px solid var(--border-subtle);padding:14px 0;margin-bottom:6px">
-      <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em">Administrative Historie</summary>
-      <div id="usermgmt-audit" style="margin-top:10px"></div>
-    </details>
-
-    <!-- Add user form -->
-    <div style="border-top:0.5px solid var(--border-subtle);padding-top:18px">
-      <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Neuer Benutzer</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <input id="new-user-name" type="text" placeholder="Benutzername"
-               style="flex:1;min-width:120px;padding:7px 10px;background:var(--bg-secondary);border:0.5px solid var(--border-subtle);border-radius:7px;color:var(--text-primary);font-size:13px;outline:none">
-        <input id="new-user-pw" type="password" placeholder="Initialpasswort (min. 8 Z.)"
-               style="flex:1;min-width:140px;padding:7px 10px;background:var(--bg-secondary);border:0.5px solid var(--border-subtle);border-radius:7px;color:var(--text-primary);font-size:13px;outline:none">
-        <button onclick="addUser()" style="padding:7px 14px;background:var(--accent);border:none;border-radius:7px;color:#fff;font-size:13px;cursor:pointer;white-space:nowrap">Anlegen</button>
-      </div>
-      <div id="usermgmt-error" style="display:none;margin-top:8px;font-size:12px;color:#f28b8b"></div>
+      <details class="settings-section">
+        <summary><span><i class="ti ti-history"></i> Administrative Historie</span><i class="ti ti-chevron-down settings-chevron"></i></summary>
+        <div class="settings-section-body">
+          <div id="usermgmt-audit"></div>
+        </div>
+      </details>
     </div>
   </div>
 </div>

@@ -181,6 +181,7 @@ def init_db():
                 allow_download       INTEGER NOT NULL DEFAULT 0,
                 allow_playlists      INTEGER NOT NULL DEFAULT 1,
                 allow_radio_stations INTEGER NOT NULL DEFAULT 1,
+                allow_lyrics_edit    INTEGER NOT NULL DEFAULT 0,
                 contributes_playcount INTEGER NOT NULL DEFAULT 0,
                 is_active            INTEGER NOT NULL DEFAULT 1,
                 must_change_password INTEGER NOT NULL DEFAULT 1,
@@ -297,6 +298,25 @@ def init_db():
                 loved       INTEGER NOT NULL DEFAULT 0,
                 indexed_at  REAL DEFAULT (unixepoch())
             );
+
+            CREATE TABLE IF NOT EXISTS track_lyrics (
+                track_id       INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                status         TEXT NOT NULL DEFAULT 'pending'
+                               CHECK(status IN ('pending','available','missing','instrumental','error')),
+                plain_lyrics   TEXT,
+                synced_lyrics  TEXT,
+                format         TEXT,
+                source         TEXT,
+                source_id      TEXT,
+                checked_at     REAL,
+                next_check_at  REAL,
+                revision       INTEGER NOT NULL DEFAULT 1,
+                sync_state     TEXT NOT NULL DEFAULT 'clean'
+                               CHECK(sync_state IN ('clean','dirty')),
+                last_error     TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_track_lyrics_due
+            ON track_lyrics(status, next_check_at);
 
             CREATE TABLE IF NOT EXISTS covers (
                 hash        TEXT PRIMARY KEY,
@@ -421,6 +441,7 @@ def init_db():
             "ALTER TABLE radio_stations ADD COLUMN engine TEXT NOT NULL DEFAULT 'smart_shuffle'",
             "ALTER TABLE users ADD COLUMN allow_playlists INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE users ADD COLUMN allow_radio_stations INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN allow_lyrics_edit INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE playlists ADD COLUMN system_key TEXT",
             "ALTER TABLE sessions ADD COLUMN connection_id INTEGER",
@@ -445,6 +466,10 @@ def init_db():
         _migrate_personal_favorites(conn)
         _seed_radio_stations(conn)
         adolar4u.init_schema(conn)
+        conn.execute("""
+            INSERT OR IGNORE INTO track_lyrics (track_id, status)
+            SELECT id, 'pending' FROM tracks
+        """)
         # Play-count/BPM updates must not churn the full-text index.
         conn.executescript("""
             DROP TRIGGER IF EXISTS tracks_au;
@@ -895,6 +920,7 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
         d["loved"] = bool(d.get("loved"))
         tracks.append(d)
 
+    _annotate_lyrics_availability(tracks)
     return total, tracks
 
 
@@ -1242,7 +1268,29 @@ def _track_rows_to_dicts(rows) -> list[dict]:
         d["has_cover"] = bool(d["cover_hash"])
         d["user_play_count"] = d.get("user_play_count", 0)
         tracks.append(d)
+    _annotate_lyrics_availability(tracks)
     return tracks
+
+
+def _annotate_lyrics_availability(tracks: list[dict]) -> None:
+    if get_setting("lyrics_enabled", "0") != "1":
+        for track in tracks:
+            track["has_lyrics"] = False
+        return
+    ids = [int(track["id"]) for track in tracks if track.get("id") is not None]
+    if not ids:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    with db() as conn:
+        available = {
+            row["track_id"] for row in conn.execute(
+                f"""SELECT track_id FROM track_lyrics
+                    WHERE status='available' AND track_id IN ({placeholders})""",
+                ids,
+            )
+        }
+    for track in tracks:
+        track["has_lyrics"] = track.get("id") in available
 
 
 def _normalize_radio_filter(filter_def) -> dict:
@@ -1537,11 +1585,13 @@ def get_radio_station_tracks(station_id: int, count=25, exclude_ids=None, user_i
     if station.get("engine") == "adolar4u":
         if not user_id:
             return None
-        return adolar4u.recommend_tracks(
+        tracks = adolar4u.recommend_tracks(
             int(user_id), count=count, exclude_ids=exclude_ids,
             shuffle_state=shuffle_state,
             recommendation_session_id=recommendation_session_id,
         )
+        _annotate_lyrics_availability(tracks)
+        return tracks
     return get_radio_filter_tracks(
         station.get("filter") or {}, count, exclude_ids,
         user_id=user_id, shuffle_state=shuffle_state,
@@ -1631,6 +1681,9 @@ def upsert_track(data: dict):
     data.setdefault("loved", False)
     data.setdefault("album_artist", None)
     with db() as conn:
+        existing = conn.execute(
+            "SELECT id, mtime FROM tracks WHERE path=?", (data["path"],)
+        ).fetchone()
         conn.execute("""
             INSERT INTO tracks (path, title, artist, album, album_artist, genre, year, track_no,
                                 duration, bitrate, size, cover_hash, bpm, mtime, play_count, loved)
@@ -1647,6 +1700,20 @@ def upsert_track(data: dict):
                 bpm=CASE WHEN excluded.bpm IS NOT NULL THEN excluded.bpm ELSE bpm END,
                 loved=CASE WHEN excluded.loved=1 THEN 1 ELSE loved END
         """, data)
+        track = conn.execute(
+            "SELECT id FROM tracks WHERE path=?", (data["path"],)
+        ).fetchone()
+        conn.execute(
+            "INSERT OR IGNORE INTO track_lyrics (track_id, status) VALUES (?, 'pending')",
+            (track["id"],),
+        )
+        if existing and abs(float(existing["mtime"] or 0) - float(data["mtime"] or 0)) >= 1.0:
+            conn.execute(
+                """UPDATE track_lyrics
+                   SET status='pending', next_check_at=NULL, last_error=NULL
+                   WHERE track_id=?""",
+                (track["id"],),
+            )
 def save_cover(hash_: str, data: bytes, mime: str = "image/jpeg"):
     with db() as conn:
         conn.execute(
@@ -2107,6 +2174,7 @@ def get_playlist_tracks(playlist_id: int, user_id: int) -> list[dict] | None:
         d["has_cover"] = bool(d["cover_hash"])
         d["loved"] = bool(d.get("loved"))
         tracks.append(d)
+    _annotate_lyrics_availability(tracks)
     return tracks
 
 

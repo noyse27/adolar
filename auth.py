@@ -35,6 +35,7 @@ PUBLIC_PREFIXES = (
     "/api/stats", "/api/disco-status", "/api/me-optional",
     "/api/radio/", "/api/radio-stations",
     "/api/search", "/api/albums",   # read-only; called by Disco server without user session
+    "/api/tracks/",                 # lyrics GET/fetch are public; writes check capability in-route
     "/api/client/heartbeat",
     "/static/", "/hilfe/",
 )
@@ -113,7 +114,8 @@ def get_user_by_token(token: str) -> dict | None:
     with db.db() as conn:
         row = conn.execute(
             """SELECT u.id, u.username, u.role, u.allow_download, u.allow_playlists,
-                      u.allow_radio_stations, u.contributes_playcount, u.is_active,
+                      u.allow_radio_stations, u.allow_lyrics_edit,
+                      u.contributes_playcount, u.is_active,
                       u.must_change_password
                FROM sessions s JOIN users u ON u.id = s.user_id
                WHERE s.token=? AND s.expires_at > ? AND u.is_active=1""",
@@ -165,7 +167,8 @@ def get_all_users() -> list[dict]:
     with db.db() as conn:
         rows = conn.execute(
             """SELECT id, username, role, allow_download, allow_playlists,
-                      allow_radio_stations, contributes_playcount, is_active,
+                      allow_radio_stations, allow_lyrics_edit,
+                      contributes_playcount, is_active,
                       must_change_password, created_at FROM users ORDER BY id"""
         ).fetchall()
     return [dict(r) for r in rows]
@@ -174,7 +177,8 @@ def get_user_by_id(user_id: int) -> dict | None:
     with db.db() as conn:
         row = conn.execute(
             """SELECT id, username, role, allow_download, allow_playlists,
-                      allow_radio_stations, contributes_playcount, is_active,
+                      allow_radio_stations, allow_lyrics_edit,
+                      contributes_playcount, is_active,
                       must_change_password FROM users WHERE id=?""",
             (user_id,)
         ).fetchone()
@@ -184,7 +188,8 @@ def get_user_by_name(username: str) -> dict | None:
     with db.db() as conn:
         row = conn.execute(
             """SELECT id, username, password_hash, role, allow_download,
-                      allow_playlists, allow_radio_stations, contributes_playcount,
+                      allow_playlists, allow_radio_stations, allow_lyrics_edit,
+                      contributes_playcount,
                       is_active, must_change_password
                FROM users WHERE LOWER(username)=LOWER(?)""",
             (username,)
@@ -221,6 +226,7 @@ def set_user_capability(user_id: int, capability: str, allow: bool):
     columns = {
         "playlists": "allow_playlists",
         "radio_stations": "allow_radio_stations",
+        "lyrics_edit": "allow_lyrics_edit",
         "download": "allow_download",
     }
     column = columns.get(capability)
@@ -300,6 +306,8 @@ def can(user: dict | None, capability: str) -> bool:
         return bool(user and setting_enabled("allow_user_radio_stations", True) and user.get("allow_radio_stations", 1))
     if capability == "download_tracks":
         return bool(user and user.get("allow_download"))
+    if capability == "edit_lyrics":
+        return bool(user and user.get("allow_lyrics_edit"))
     return False
 
 def _get_dev_admin() -> dict | None:
