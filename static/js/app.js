@@ -577,7 +577,11 @@ function finishAdolar4UTrack(reason = "track_change", forceCompleted = false, be
   sendAdolar4UEvent(trackId, forceCompleted || ratio >= .9 ? "completed" : "skipped", {
     source: adolar4uTelemetry.source,
     reason: forceCompleted || ratio >= .9 ? "ended" : reason,
-    position, duration,
+    // Crossfade handoff can expose the incoming audio element's currentTime
+    // before the outgoing completion request is built. A natural ended event
+    // is complete by definition, so do not export that stale partial position.
+    position: forceCompleted && duration > 0 ? duration : position,
+    duration,
   }, beacon);
   adolar4uTelemetry.trackId = null;
   adolar4uTelemetry.decisionId = null;
