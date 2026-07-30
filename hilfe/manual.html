@@ -112,7 +112,7 @@
 <body>
 <div class="shell">
   <aside class="sidebar">
-    <div class="brand"><img src="../static/logo.svg" alt=""><div><div class="brand-name">ADOLAR</div><div class="brand-sub">Manual 1.4</div></div></div>
+    <div class="brand"><img src="../static/logo.svg" alt=""><div><div class="brand-name">ADOLAR</div><div class="brand-sub">Manual 1.6</div></div></div>
     <div class="search"><input id="help-search" type="search" placeholder="Hilfe durchsuchen …" aria-label="Handbuch durchsuchen"></div>
     <nav aria-label="Kapitel">
       <div class="nav-label">Start</div>
@@ -168,15 +168,17 @@
         <h3>Shuffle und Mini-Player</h3><p>Shuffle mischt die komplette aktuelle Auswahl und hält eine automatisch nachgefüllte Queue bereit. Dabei verteilt Adolar Künstler, Alben und Genres, vermeidet Wiederholungen und glättet passende BPM-Übergänge. Bei einem ausdrücklich gesetzten Genre-Filter bleibt die Genreauswahl unverändert. „Mini“ öffnet einen kompakten Player in einem eigenen Fenster.</p>
       </section>
 
-      <section id="suchen" data-search="suche filter interpret titel album genre jahr jahrzehnt bpm bitrate format sortieren">
+      <section id="suchen" data-search="suche filter interpret titel album genre jahr jahrzehnt bpm bitrate format sortieren raster grid sampler various artists">
         <div class="kicker">04 · Finden</div><h2>Suchen, filtern & sortieren</h2><p class="intro">Die Volltextsuche durchsucht Titel, Interpret, Album und Genre. Mehrere aktive Filter werden gemeinsam angewendet.</p>
         <div class="cards"><article class="card"><div class="num">A</div><h3>Textsuche</h3><p>Begriff eingeben; nach kurzer Pause aktualisiert Adolar die Treffer automatisch.</p></article><article class="card"><div class="num">B</div><h3>Detailfilter</h3><p>Interpret, Titel, Album, Genre, Jahrzehnt, Dauer, Format, Bitrate, Jahr und BPM kombinieren.</p></article><article class="card"><div class="num">C</div><h3>Sortierung</h3><p>Nach Interpret, Titel, Album, Jahr, Dauer oder Playcount ordnen.</p></article></div>
+        <div class="callout"><strong>Neu: Album-Raster</strong>Der Filter „Album“ zeigt jetzt ein Raster passender Alben statt einzelner Titel. Ein Doppelklick – oder das Öffnen-Symbol – öffnet die Titelliste des gewählten Albums in der richtigen Reihenfolge; „Zurück“ führt zum Raster zurück. Sampler mit mehreren Interpreten werden anhand eines echten Album-Interpret-Tags als eine einzige Karte gruppiert; ältere Bibliotheken nutzen bis zum nächsten Scan eine Ordner-basierte Heuristik.</div>
       </section>
 
-      <section id="playlists" data-search="playlist smart statisch bookmark favoriten löschen persönlich global">
+      <section id="playlists" data-search="playlist smart statisch bookmark favoriten löschen persönlich global editor dragdrop drag drop import export adolarplaylist">
         <div class="kicker">05 · Sammeln</div><h2>Playlists</h2>
         <h3>System- und globale Playlists</h3><p>Vordefinierte Listen wie „Zuletzt gespielt“, „Meistgespielt“, „Neueste 100“ und „Disco Hits“ stehen allen berechtigten Besuchern zur Verfügung.</p>
         <h3>Persönliche Playlists</h3><p>Wenn der Admin diese Fähigkeit freigegeben hat, erscheint an Tracks das Bookmark-Symbol. Dort eine vorhandene statische Playlist wählen oder direkt eine neue anlegen. Persönliche Smart-Playlists speichern eine Filter- und Sortierkombination.</p>
+        <h3>Playlist-Editor</h3><p>Der visuelle Editor öffnet sich beim Bearbeiten einer statischen oder Smart-Playlist: Titel per Suche hinzufügen, Reihenfolge per Drag-and-drop ändern, „Zufällig auffüllen“ für schnelle Mixes und ein Regel-Editor für Smart-Filter. Über Export/Import lässt sich eine Playlist als portable <code>.adolarplaylist</code>-Datei sichern oder auf einem anderen Adolar-Server wieder einspielen.</p>
         <div class="callout warning"><strong>Recht deaktiviert?</strong>Vorhandene persönliche Inhalte bleiben erhalten und lesbar. Erstellung und Bearbeitung sind gesperrt, bis der Admin das Recht erneut aktiviert.</div>
       </section>
 
@@ -190,10 +192,11 @@
         <div class="kicker">07 · Export</div><h2>Downloadkorb</h2><p>Nur Benutzer mit Downloadrecht sehen das Downloadsymbol. Titel in den Korb legen, oben den Korb öffnen und „Als ZIP herunterladen“ wählen. Gäste können grundsätzlich nicht herunterladen.</p>
       </section>
 
-      <section id="companion" class="companion" data-search="companion adolar radio windows einstellungen station cover favoriten bookmark">
+      <section id="companion" class="companion" data-search="companion adolar radio windows android einstellungen station cover favoriten bookmark">
         <div class="kicker" style="color:var(--orange)">08 · Adolar Radio</div><h2>Radio Companion</h2><p class="intro">Der Companion ist die reduzierte Radio-Oberfläche für den dauerhaften Musikbetrieb – im Browser unter <code>/radio</code> oder eingebettet in der Windows-App.</p>
         <div class="cards"><article class="card"><div class="num">01</div><h3>Verbinden</h3><p>In der Windows-App die Adresse des Adolar-Servers hinterlegen. Die Verbindung wird für den nächsten Start gespeichert.</p></article><article class="card"><div class="num">02</div><h3>Sender wählen</h3><p>Im Badge über dem Cover den gewünschten globalen oder eigenen Sender auswählen.</p></article><article class="card"><div class="num">03</div><h3>Steuern</h3><p>Play/Pause, Titel überspringen, Fortschritt und Lautstärke direkt im kompakten Fenster bedienen.</p></article></div>
         <h3>Persönliche Funktionen</h3><p>Nach der Anmeldung erscheinen – abhängig von den Rechten – private Sender und das Bookmark-Symbol. Ein Bookmark landet in „Adolar Radio Favoriten“.</p>
+        <h3>Adolar Android</h3><p>Neben der Windows-App gibt es <b>Adolar Android</b> für Wiedergabe und die persönliche Adolar4U-Lernhistorie unterwegs. Anmeldung, Senderwahl und Favoriten funktionieren wie im Windows-Companion.</p>
       </section>
 
       <section id="anmeldung" data-search="companion anmelden login öffentlich authentifiziert deaktiviert passwort">
@@ -202,16 +205,17 @@
         <p>Die Anmeldung erfolgt über das Benutzer-Symbol beziehungsweise die Einstellungen. Muss ein Initialpasswort geändert werden, zuerst Adolar Web öffnen und dort das neue Passwort setzen.</p>
       </section>
 
-      <section id="benutzer" data-search="admin benutzer rechte anonym gast account audit playlist radio download playcount">
+      <section id="benutzer" data-search="admin benutzer rechte anonym gast account audit playlist radio download playcount lastfm konten">
         <div class="kicker">10 · Administration</div><h2>Benutzer & Rechte</h2><p class="intro">Die Benutzerverwaltung liegt im Kontomenü des Admins. Rechte werden nicht nur in der Oberfläche ausgeblendet, sondern auch serverseitig geprüft.</p>
         <table><thead><tr><th>Funktion</th><th>Admin</th><th>Benutzer</th><th>Gast</th></tr></thead><tbody><tr><td>Bibliothek und Wiedergabe</td><td class="yes">Immer</td><td class="yes">Ja</td><td>Konfigurierbar</td></tr><tr><td>Eigene Playlists</td><td class="yes">Ja</td><td>Global + pro Benutzer</td><td class="no">Nein</td></tr><tr><td>Eigene Radiosender</td><td class="yes">Ja</td><td>Global + pro Benutzer</td><td class="no">Nein</td></tr><tr><td>Downloads</td><td class="yes">Ja</td><td>Pro Benutzer</td><td class="no">Nein</td></tr><tr><td>Wartung & Benutzer</td><td class="yes">Ja</td><td class="no">Nein</td><td class="no">Nein</td></tr></tbody></table>
         <h3>Konten verwalten</h3><p>Neue Benutzer erhalten ein Initialpasswort und müssen es bei der ersten Anmeldung ändern. Ein deaktiviertes Konto verliert sofort alle Sitzungen, behält aber Playlists, Radios und Playcounts. Die administrative Historie protokolliert relevante Rechte- und Kontoänderungen.</p>
+        <h3>Last.fm-Konten</h3><p>Jeder angemeldete Benutzer kann im Kontomenü ein eigenes Last.fm-Konto verbinden. Now-Playing-Meldungen, Scrobbles (ab 50 % Wiedergabe) und der Import von Loved-Titeln laufen über dieses persönliche Konto – unabhängig von den Last.fm-Zugängen anderer Benutzer.</p>
         <h3>Favoriten und Last.fm</h3><p>Der Stern ist der lokale Adolar-Favorit, das Herz gehört ausschließlich zu Last.fm. Ein neuer Adolar-Favorit setzt bei aktivierter Synchronisation zusätzlich das Last.fm-Herz. Umgekehrt erzeugt ein Last.fm-Herz bewusst keinen lokalen Favoriten; auch ein Loved-Import füllt die Favoriten-Playlist nicht automatisch.</p>
       </section>
 
-      <section id="wartung" data-search="wartung admin scan bpm tags lastfm playcount archiv backup datensicherung usb">
+      <section id="wartung" data-search="wartung admin scan bpm tags lastfm playcount archiv backup datensicherung usb verbindungen clients ip system monitor jobs hintergrund">
         <div class="kicker">11 · Administration</div><h2>Bibliothekswartung</h2>
-        <div class="ui-map"><div class="ui-item"><b>Bibliothek scannen</b>Neue und geänderte Dateien einlesen; unveränderte Titel werden übersprungen.</div><div class="ui-item"><b>BPM-Tags einlesen</b>Vorhandene TBPM-Werte schnell aus den Musikdateien übernehmen.</div><div class="ui-item"><b>BPM berechnen</b>Fehlende Werte im Hintergrund analysieren und in die Tags schreiben.</div><div class="ui-item"><b>Globale Playcounts</b>Autorisierte Plays erhöhen das Archiv; persönliche Zähler bleiben davon unabhängig.</div><div class="ui-item"><b>Datensicherung</b>Admins können konsistente Datenbank-Snapshots starten, prüfen, herunterladen und löschen. Automatische Sicherungen laufen standardmäßig täglich ab 03:00 Uhr; die neuesten sieben bleiben erhalten.</div></div>
+        <div class="ui-map"><div class="ui-item"><b>Bibliothek scannen</b>Neue und geänderte Dateien einlesen; unveränderte Titel werden übersprungen.</div><div class="ui-item"><b>BPM-Tags einlesen</b>Vorhandene TBPM-Werte schnell aus den Musikdateien übernehmen.</div><div class="ui-item"><b>BPM berechnen</b>Fehlende Werte im Hintergrund analysieren und in die Tags schreiben.</div><div class="ui-item"><b>Globale Playcounts</b>Autorisierte Plays erhöhen das Archiv; persönliche Zähler bleiben davon unabhängig.</div><div class="ui-item"><b>Datensicherung</b>Admins können konsistente Datenbank-Snapshots starten, prüfen, herunterladen und löschen. Automatische Sicherungen laufen standardmäßig täglich ab 03:00 Uhr; die neuesten sieben bleiben erhalten.</div><div class="ui-item"><b>Verbindungen</b>Übersicht verbundener Clients mit Heartbeat-Zeit und maskierter IP-Adresse – hilfreich, um vergessene Radiogeräte oder hängende Sessions zu erkennen.</div><div class="ui-item"><b>System Monitor</b>Zeigt laufende und zuletzt abgeschlossene Hintergrundjobs – Bibliotheksscan, BPM-Tags/-Berechnung, Thumbnail-Erzeugung, Datenbank-Optimierung und Datensicherung – jeweils mit Fortschritt, Startzeit und ob der Job manuell oder automatisch ausgelöst wurde.</div></div>
         <p>Eine Sicherung wird erst angezeigt, nachdem SQLite sie geprüft und Adolar eine SHA-256-Prüfsumme erzeugt hat. Sie enthält Konten, Favoriten, Last.fm-Zuordnungen und Adolar4U-Lerndaten und ist deshalb vertraulich. Das externe Backup-Ziel sollte zusätzlich mit Hyper Backup auf ein zweites Medium gesichert werden.</p>
         <p>In der persönlichen Adolar4U-Lernhistorie lädt <b>Analyse-Export</b> den gewählten Zeitraum als ZIP herunter. Empfehlungen, Hörereignisse und Profil-Snapshots liegen als auswertbare CSV-Dateien bei; <code>summary.json</code> enthält die aggregierten Gruppenanteile und Profiländerungen. Der Export gehört ausschließlich zum angemeldeten Benutzer und enthält keine Passwörter, Last.fm-Sitzungsschlüssel oder Musikdateipfade.</p>
       </section>
