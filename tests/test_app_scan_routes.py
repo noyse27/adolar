@@ -117,6 +117,19 @@ class ScanStatusRouteTests(ScanRouteTestBase):
         self.assertEqual(data["total_tracks"], 1)
         self.assertIn("running", data)
 
+    def test_persisted_scan_time_is_returned_after_process_restart(self):
+        app_module.db.set_last_scan_finished_at(1_722_085_200.5)
+        with self._login(), mock.patch.object(
+            app_module.scanner,
+            "status",
+            return_value={"running": False, "finished_at": None},
+        ):
+            scan_status = self.client.get("/api/scan/status").get_json()
+            stats = self.client.get("/api/stats").get_json()
+
+        self.assertEqual(scan_status["finished_at"], 1_722_085_200.5)
+        self.assertEqual(stats["last_scan"], 1_722_085_200.5)
+
 
 if __name__ == "__main__":
     unittest.main()

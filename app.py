@@ -1788,6 +1788,41 @@ def api_libraries_move(library_id):
     return jsonify({"library": lib, "tracks_updated": updated})
 
 
+@app.post("/api/admin/libraries/<library_id>/rename-path")
+@_auth.admin_required
+def api_libraries_rename_path(library_id):
+    """Rewrite tracks.path for a subfolder rename/move within the active
+    library. Unlike /move above, this does NOT touch the library's
+    registered music_path — only the DB rows under old_path are rewritten.
+    Intended for external tools (e.g. Adolar Taggster) that rename/move a
+    folder on disk themselves and just need Adolar's DB kept in sync."""
+    _libs, active_id = libraries.list_libraries(LIBRARY_REGISTRY_PATH, MUSIC_ROOT, db.DB_PATH)
+    data = request.get_json(silent=True) or {}
+    old_path_input = (data.get("old_path") or "").strip()
+    new_path_input = (data.get("new_path") or "").strip()
+    old_path = os.path.realpath(old_path_input) if old_path_input else ""
+    new_path = os.path.realpath(new_path_input) if new_path_input else ""
+    music_root = _current_music_root()
+    try:
+        if library_id != active_id:
+            raise errors.ValidationError("Bitte zuerst diese Bibliothek aktivieren.")
+        if not old_path_input or not new_path_input:
+            raise errors.ValidationError("old_path und new_path werden benötigt.")
+        if old_path != music_root and not old_path.startswith(music_root + os.sep):
+            raise errors.ValidationError("old_path liegt nicht innerhalb der aktiven Bibliothek.")
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    try:
+        updated = db.migrate_track_paths(old_path, new_path)
+    except sqlite3.IntegrityError as exc:
+        return _client_error("Zielpfad kollidiert mit vorhandenen Tracks.", exc, 409)
+    db.log_audit(
+        g.user["id"], "library.path_renamed", library_id,
+        json.dumps({"old_path": old_path, "new_path": new_path, "tracks_updated": updated}),
+    )
+    return jsonify({"tracks_updated": updated})
+
+
 @app.post("/api/admin/library/covers")
 @_auth.admin_required
 def api_library_covers():
@@ -1985,8 +2020,9 @@ def api_genres():
 def api_stats():
     stats = db.get_stats()
     sc = scanner.status()
+    persisted_scan = db.get_scanner_status()
     stats["version"] = APP_VERSION
-    stats["last_scan"] = sc.get("finished_at")
+    stats["last_scan"] = sc.get("finished_at") or persisted_scan.get("finished_at")
     stats["disco_active"] = _disco_active()
     return jsonify(stats)
 
@@ -2930,6 +2966,18 @@ def api_lastfm_settings():
 @_auth.admin_required
 def api_scan_start():
     music_root = _current_music_root()
+    data = request.get_json(silent=True) or {}
+    path_input = (data.get("path") or "").strip()
+    if path_input:
+        # Folder-scoped scan (e.g. triggered by Adolar Taggster after an
+        # edit) — skips the full-library BPM/thumbnail follow-up sweeps.
+        candidate = os.path.realpath(path_input)
+        if candidate != music_root and not candidate.startswith(music_root + os.sep):
+            return jsonify({"error": "path liegt nicht innerhalb der aktiven Bibliothek."}), 400
+        if not os.path.isdir(candidate):
+            return jsonify({"error": f"Pfad nicht gefunden: {candidate}"}), 400
+        scanner.run_scan(candidate, run_followups=False)
+        return jsonify({"status": "started", "path": candidate})
     if not os.path.isdir(music_root):
         return jsonify({"error": f"MUSIC_ROOT not found: {music_root}"}), 400
     scanner.run_scan(music_root)
@@ -2990,7 +3038,9 @@ def api_bpm_scan():
 @app.get("/api/scan/status")
 def api_scan_status():
     s = scanner.status()
-    s.update(db.get_scanner_status())
+    persisted = db.get_scanner_status()
+    s["total_tracks"] = persisted["total_tracks"]
+    s["finished_at"] = s.get("finished_at") or persisted.get("finished_at")
     return jsonify(s)
 
 

@@ -225,6 +225,19 @@ class RunScanIntegrationTests(unittest.TestCase):
         titles = {row["title"] for row in tracks.values()}
         self.assertEqual(titles, {"One", "Two"})
 
+    def test_scan_completion_time_is_persisted_across_process_state_reset(self):
+        scanner.run_scan(self.music_root)
+        self._wait_for_scan_to_finish()
+        completed_at = scanner.status()["finished_at"]
+
+        scanner._update(finished_at=None)
+
+        self.assertAlmostEqual(
+            db.get_scanner_status()["finished_at"],
+            completed_at,
+            places=3,
+        )
+
     def test_run_scan_populates_album_artist_from_tag(self):
         _make_mp3(
             os.path.join(self.music_root, "one.mp3"),

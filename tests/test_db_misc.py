@@ -96,7 +96,17 @@ class UpdateBpmAndScannerStatusTests(MiscTestBase):
         self.assertEqual(row["bpm"], 100.0)
 
     def test_get_scanner_status_reports_track_count(self):
-        self.assertEqual(db.get_scanner_status(), {"total_tracks": 1})
+        self.assertEqual(
+            db.get_scanner_status(),
+            {"total_tracks": 1, "finished_at": None},
+        )
+
+    def test_last_scan_time_survives_database_reinitialization(self):
+        db.set_last_scan_finished_at(1_722_085_200.5)
+
+        db.init_db()
+
+        self.assertEqual(db.get_scanner_status()["finished_at"], 1_722_085_200.5)
 
 
 class IncrementUserPlayCountTests(MiscTestBase):
