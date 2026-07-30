@@ -1,6 +1,6 @@
 # Adolar
 
-Current version: **1.6.0**
+Current version: **1.7.0**
 
 A self-hosted music archive web app for Synology NAS (or any Docker host). Browse, search, and stream your local MP3/FLAC/M4A collection from any browser — no cloud required.
 
@@ -49,6 +49,15 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Bookmark button** — add any track to a personal playlist directly from the track list; create new playlists on the fly
 - **Radio favorites** — the Radio companion uses the same personal Favorites list as the Web player
 - **DE / EN interface** — language switch in topbar
+
+## What's new in 1.7.0
+
+- Optional Lyrics module: local sidecar/tag lookup first, then the LRCLIB provider (self-hostable URL); synced-line display with live highlighting during playback; per-user "Lyrics bearbeiten" capability to search alternate matches, pick a different result, or free-edit the text; admin settings and a manual "check missing lyrics" background scan
+- API tokens for external admin tools such as Adolar Taggster: `Authorization: Bearer` auth as an alternative to the browser session, managed from a new "API-Zugriff" settings section, shown in the connection monitor
+- Adolar Taggster external-sync support: an admin endpoint to keep track paths in sync after an external rename/move, and a folder-scoped rescan that skips the full-library BPM/thumbnail sweep; scan completion time now survives a process restart
+- Adolar4U: corrected completion normalization for browser-crossfade edge cases, a fresh shuffle session now seeds from the durable 12-hour candidate-group balance instead of restarting with another anchor, and the radio queue refills in smaller batches so it adapts faster to fresh listening signals
+- Search now folds non-Latin scripts (e.g. Cyrillic) correctly instead of only ASCII case-folding
+- Security: fixed a stored-XSS gap in the admin "Gesperrte IPs" panel, brought lyrics error responses in line with the existing curated-message convention, and locked down the CI workflow's default token permissions
 
 ## What's new in 1.6.0
 

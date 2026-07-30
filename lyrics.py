@@ -23,7 +23,7 @@ MISSING_RETRY_SECONDS = 28 * 24 * 60 * 60
 ERROR_RETRY_SECONDS = 12 * 60 * 60
 MAX_LYRICS_LENGTH = 500_000
 DEFAULT_PROVIDER_URL = "https://lrclib.net"
-USER_AGENT = "Adolar/1.6.0 (lyrics; self-hosted music server)"
+USER_AGENT = "Adolar/1.7.0 (lyrics; self-hosted music server)"
 
 SETTINGS_DEFAULTS = {
     "lyrics_enabled": "0",

@@ -112,7 +112,7 @@
 <body>
 <div class="shell">
   <aside class="sidebar">
-    <div class="brand"><img src="../static/logo.svg" alt=""><div><div class="brand-name">ADOLAR</div><div class="brand-sub">Manual 1.6</div></div></div>
+    <div class="brand"><img src="../static/logo.svg" alt=""><div><div class="brand-name">ADOLAR</div><div class="brand-sub">Manual 1.7</div></div></div>
     <div class="search"><input id="help-search" type="search" placeholder="Hilfe durchsuchen …" aria-label="Handbuch durchsuchen"></div>
     <nav aria-label="Kapitel">
       <div class="nav-label">Start</div>
@@ -124,7 +124,7 @@
       <div class="nav-label">Verwaltung</div>
       <a href="#benutzer">Benutzer & Rechte</a><a href="#wartung">Wartung</a><a href="#probleme">Problemlösung</a>
     </nav>
-    <div class="side-foot">Adolar v1.6.0<br>Same rocket. Different mission.</div>
+    <div class="side-foot">Adolar v1.7.0<br>Same rocket. Different mission.</div>
   </aside>
 
   <main class="main">
@@ -166,6 +166,7 @@
         <div class="kicker">03 · Player</div><h2>Wiedergabe & Now Playing</h2>
         <ol class="steps"><li><strong>Titel abspielen:</strong> Trackzeile oder Play-Symbol wählen. Ein erneuter Klick pausiert.</li><li><strong>Position ändern:</strong> Den Fortschrittsregler in der Playerleiste oder Vollansicht ziehen.</li><li><strong>Crossfade:</strong> Das Übergangssymbol aktiviert Crossfade für Bibliothek und Playlists. Adolar puffert den Folgetitel und dessen Cover vor.</li><li><strong>Now Playing:</strong> Cover oder Vergrößern-Symbol öffnet Cover, Metadaten, Queue und große Bedienelemente.</li></ol>
         <h3>Shuffle und Mini-Player</h3><p>Shuffle mischt die komplette aktuelle Auswahl und hält eine automatisch nachgefüllte Queue bereit. Dabei verteilt Adolar Künstler, Alben und Genres, vermeidet Wiederholungen und glättet passende BPM-Übergänge. Bei einem ausdrücklich gesetzten Genre-Filter bleibt die Genreauswahl unverändert. „Mini“ öffnet einen kompakten Player in einem eigenen Fenster.</p>
+        <div class="callout"><strong>Neu: Lyrics</strong>Ist das optionale Lyrics-Modul aktiviert, zeigt das Mikrofon-Symbol im Player den Songtext an – bei vorhandenen zeitsynchronisierten Daten mit mitlaufender Hervorhebung. Fehlende Texte werden automatisch über LRCLIB gesucht; wer die Berechtigung „Lyrics bearbeiten“ hat, kann einen anderen Treffer wählen oder den Text frei bearbeiten.</div>
       </section>
 
       <section id="suchen" data-search="suche filter interpret titel album genre jahr jahrzehnt bpm bitrate format sortieren raster grid sampler various artists">
@@ -205,12 +206,13 @@
         <p>Die Anmeldung erfolgt über das Benutzer-Symbol beziehungsweise die Einstellungen. Muss ein Initialpasswort geändert werden, zuerst Adolar Web öffnen und dort das neue Passwort setzen.</p>
       </section>
 
-      <section id="benutzer" data-search="admin benutzer rechte anonym gast account audit playlist radio download playcount lastfm konten">
+      <section id="benutzer" data-search="admin benutzer rechte anonym gast account audit playlist radio download playcount lastfm konten api token taggster bearer">
         <div class="kicker">10 · Administration</div><h2>Benutzer & Rechte</h2><p class="intro">Die Benutzerverwaltung liegt im Kontomenü des Admins. Rechte werden nicht nur in der Oberfläche ausgeblendet, sondern auch serverseitig geprüft.</p>
         <table><thead><tr><th>Funktion</th><th>Admin</th><th>Benutzer</th><th>Gast</th></tr></thead><tbody><tr><td>Bibliothek und Wiedergabe</td><td class="yes">Immer</td><td class="yes">Ja</td><td>Konfigurierbar</td></tr><tr><td>Eigene Playlists</td><td class="yes">Ja</td><td>Global + pro Benutzer</td><td class="no">Nein</td></tr><tr><td>Eigene Radiosender</td><td class="yes">Ja</td><td>Global + pro Benutzer</td><td class="no">Nein</td></tr><tr><td>Downloads</td><td class="yes">Ja</td><td>Pro Benutzer</td><td class="no">Nein</td></tr><tr><td>Wartung & Benutzer</td><td class="yes">Ja</td><td class="no">Nein</td><td class="no">Nein</td></tr></tbody></table>
         <h3>Konten verwalten</h3><p>Neue Benutzer erhalten ein Initialpasswort und müssen es bei der ersten Anmeldung ändern. Ein deaktiviertes Konto verliert sofort alle Sitzungen, behält aber Playlists, Radios und Playcounts. Die administrative Historie protokolliert relevante Rechte- und Kontoänderungen.</p>
         <h3>Last.fm-Konten</h3><p>Jeder angemeldete Benutzer kann im Kontomenü ein eigenes Last.fm-Konto verbinden. Now-Playing-Meldungen, Scrobbles (ab 50 % Wiedergabe) und der Import von Loved-Titeln laufen über dieses persönliche Konto – unabhängig von den Last.fm-Zugängen anderer Benutzer.</p>
         <h3>Favoriten und Last.fm</h3><p>Der Stern ist der lokale Adolar-Favorit, das Herz gehört ausschließlich zu Last.fm. Ein neuer Adolar-Favorit setzt bei aktivierter Synchronisation zusätzlich das Last.fm-Herz. Umgekehrt erzeugt ein Last.fm-Herz bewusst keinen lokalen Favoriten; auch ein Loved-Import füllt die Favoriten-Playlist nicht automatisch.</p>
+        <h3>API-Zugriff</h3><p>Im Bereich „API-Zugriff“ der Einstellungen erzeugt ein Admin Tokens für externe Werkzeuge (z.B. Adolar Taggster), die sich per <code>Authorization: Bearer &lt;token&gt;</code> statt über die Web-Sitzung anmelden. Der Token wird nur einmal beim Erzeugen angezeigt; danach lässt er sich nur noch widerrufen.</p>
       </section>
 
       <section id="wartung" data-search="wartung admin scan bpm tags lastfm playcount archiv backup datensicherung usb verbindungen clients ip system monitor jobs hintergrund">
@@ -229,7 +231,7 @@
         <details><summary>Der Companion zeigt keine privaten Sender</summary><p>Im Companion anmelden und prüfen lassen, ob das Recht „Eigene Radiosender“ aktiv ist. Private Sender anderer Benutzer bleiben unsichtbar.</p></details>
       </section>
     </div>
-    <footer>Adolar v1.6.0 · © PolzeSoft 2026 · polze.net · Same rocket. Different mission.</footer>
+    <footer>Adolar v1.7.0 · © PolzeSoft 2026 · polze.net · Same rocket. Different mission.</footer>
   </main>
 </div>
 <script>
