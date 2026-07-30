@@ -169,8 +169,12 @@ class LyricsServiceTests(unittest.TestCase):
         self.assertEqual(lyrics.read_mp3_tags(self.path).plain, "Correct provider words")
 
     def test_selected_provider_candidate_rejects_invalid_id(self):
-        with self.assertRaises(lyrics.LyricsValidationError):
+        with self.assertRaises(lyrics.LyricsValidationError) as ctx:
             lyrics.apply_provider_candidate(self.track_id, "../wrong")
+        # .user_message (not str(exc)) is what routes must return to the
+        # client — see errors.ValidationError and app._client_error.
+        self.assertEqual(ctx.exception.user_message, "Ungültige Lyrics-Treffer-ID.")
+        self.assertEqual(str(ctx.exception), ctx.exception.user_message)
 
     def test_provider_result_is_saved_to_db_tag_and_sidecar(self):
         db.set_setting("lyrics_enabled", "1")
