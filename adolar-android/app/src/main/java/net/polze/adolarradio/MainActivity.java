@@ -2,6 +2,7 @@ package net.polze.adolarradio;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
@@ -86,11 +87,13 @@ public class MainActivity extends Activity {
     private Button accountButton;
     private Button favoriteButton;
     private Button loveButton;
+    private Button lyricsButton;
     private boolean signedIn;
     private String signedInUsername = "";
     private boolean lastFmConnected;
     private boolean favorite;
     private boolean loved;
+    private boolean hasLyrics;
     private int currentTrackId = -1;
     private String currentTrackTitle = "";
     private String currentTrackArtist = "";
@@ -381,12 +384,16 @@ public class MainActivity extends Activity {
 
         favoriteButton = trackActionButton(getString(R.string.favorite_off), view -> toggleFavorite());
         loveButton = trackActionButton(getString(R.string.love_off), view -> toggleLove());
+        lyricsButton = trackActionButton(getString(R.string.lyrics), view -> showLyrics());
         LinearLayout.LayoutParams favoriteParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        favoriteParams.setMargins(0, 0, dp(5), 0);
+        favoriteParams.setMargins(0, 0, dp(4), 0);
         trackActions.addView(favoriteButton, favoriteParams);
         LinearLayout.LayoutParams loveParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        loveParams.setMargins(dp(5), 0, 0, 0);
+        loveParams.setMargins(dp(4), 0, dp(4), 0);
         trackActions.addView(loveButton, loveParams);
+        LinearLayout.LayoutParams lyricsParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        lyricsParams.setMargins(dp(4), 0, 0, 0);
+        trackActions.addView(lyricsButton, lyricsParams);
         updateAccountButton();
         updateTrackActionButtons();
 
@@ -699,6 +706,7 @@ public class MainActivity extends Activity {
             currentTrackId = -1;
             currentTrackTitle = "";
             currentTrackArtist = "";
+            hasLyrics = false;
             trackTitle.setText(R.string.no_track_title);
             trackArtist.setText(R.string.no_track_artist);
             trackAlbum.setText("");
@@ -721,6 +729,7 @@ public class MainActivity extends Activity {
                 metadata.getString(MediaMetadataCompat.METADATA_KEY_ARTIST), ""
         );
         loved = metadata.getLong(AdolarMediaService.METADATA_KEY_LASTFM_LOVED) == 1L;
+        hasLyrics = metadata.getLong(AdolarMediaService.METADATA_KEY_HAS_LYRICS) == 1L;
         trackTitle.setText(valueOrFallback(
                 metadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE),
                 getString(R.string.no_track_title)
@@ -1137,13 +1146,60 @@ public class MainActivity extends Activity {
         }, "AdolarLastFmLove").start();
     }
 
+    private void showLyrics() {
+        if (!hasLyrics || currentTrackId < 0) return;
+        final int trackId = currentTrackId;
+        lyricsButton.setEnabled(false);
+        new Thread(() -> {
+            ApiResponse response = requestApi("/api/tracks/" + trackId + "/lyrics", "GET", null);
+            String content = "";
+            if (response.code == 200) {
+                try {
+                    JSONObject payload = new JSONObject(response.body);
+                    content = payload.optString("plain_lyrics", "");
+                    if (content.isEmpty()) {
+                        content = payload.optString("synced_lyrics", "")
+                                .replaceAll("\\[\\d{1,3}:\\d{1,2}(?:\\.\\d{1,3})?\\]", "")
+                                .replaceAll("(?m)^\\[[a-zA-Z]+:.*]$", "")
+                                .trim();
+                    }
+                } catch (Exception ignored) { }
+            }
+            String result = content;
+            mainHandler.post(() -> {
+                if (lyricsButton != null) lyricsButton.setEnabled(hasLyrics);
+                if (trackId != currentTrackId) return;
+                if (response.code != 200 || result.isEmpty()) {
+                    setStatus(getString(R.string.lyrics_load_error), true);
+                    return;
+                }
+                TextView lyricsView = new TextView(MainActivity.this);
+                lyricsView.setText(result);
+                lyricsView.setTextColor(getColorCompat(R.color.text_primary));
+                lyricsView.setTextSize(16);
+                lyricsView.setLineSpacing(0, 1.25f);
+                lyricsView.setTextIsSelectable(true);
+                lyricsView.setPadding(dp(20), dp(12), dp(20), dp(20));
+                ScrollView scroll = new ScrollView(MainActivity.this);
+                scroll.addView(lyricsView, matchWrap());
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(getString(R.string.lyrics_title, currentTrackTitle))
+                        .setView(scroll)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
+            });
+        }, "AdolarLyrics").start();
+    }
+
     private void updateTrackActionButtons() {
-        if (favoriteButton == null || loveButton == null) return;
+        if (favoriteButton == null || loveButton == null || lyricsButton == null) return;
         favoriteButton.setText(favorite ? R.string.favorite_on : R.string.favorite_off);
         loveButton.setText(loved ? R.string.love_on : R.string.love_off);
         boolean hasTrack = currentTrackId >= 0;
         favoriteButton.setEnabled(signedIn && hasTrack);
         loveButton.setEnabled(signedIn && lastFmConnected && hasTrack);
+        lyricsButton.setVisibility(hasLyrics && hasTrack ? View.VISIBLE : View.GONE);
+        lyricsButton.setEnabled(hasLyrics && hasTrack);
         favoriteButton.setAlpha(favoriteButton.isEnabled() ? 1f : 0.45f);
         loveButton.setAlpha(loveButton.isEnabled() ? 1f : 0.45f);
     }

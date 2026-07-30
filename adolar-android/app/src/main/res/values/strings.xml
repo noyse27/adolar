@@ -56,6 +56,9 @@
     <string name="favorite_on">★ Favorit</string>
     <string name="love_off">♡ Lieben</string>
     <string name="love_on">♥ Geliebt</string>
+    <string name="lyrics">♫ Lyrics</string>
+    <string name="lyrics_title">Lyrics · %1$s</string>
+    <string name="lyrics_load_error">Lyrics konnten nicht geladen werden.</string>
     <string name="favorite_login_required">Für Favoriten bitte anmelden.</string>
     <string name="lastfm_required">Last.fm ist für dieses Konto nicht verbunden.</string>
     <string name="track_action_error">Der Titel konnte nicht aktualisiert werden.</string>
