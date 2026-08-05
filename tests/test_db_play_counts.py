@@ -75,6 +75,19 @@ class RecordUserPlayTests(PlayCountTestBase):
             ).fetchone()
         self.assertEqual(row["count"], 2)
 
+    def test_exposure_only_play_skips_personal_count_but_keeps_archive_count(self):
+        new_count, _ = db.record_user_play(
+            user_id=7, track_id=self.track_id, contributes=True,
+            record_personal=False,
+        )
+        self.assertEqual(new_count, 1)
+        with db.db() as conn:
+            personal = conn.execute(
+                "SELECT 1 FROM user_play_counts WHERE user_id=? AND track_id=?",
+                (7, self.track_id),
+            ).fetchone()
+        self.assertIsNone(personal)
+
     def test_different_users_get_independent_play_counts(self):
         db.record_user_play(user_id=1, track_id=self.track_id, contributes=False)
         db.record_user_play(user_id=1, track_id=self.track_id, contributes=False)

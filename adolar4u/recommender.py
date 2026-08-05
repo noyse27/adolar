@@ -15,9 +15,12 @@ import smart_shuffle
 
 from .service import get_global_settings, get_seed_affinities, get_user_settings
 
-ALGORITHM_VERSION = "metadata-v2-skip-smoothing-completion-normalization-1"
+ALGORITHM_VERSION = "metadata-v4-source-aware-bridge-1"
 DIAGNOSTIC_RETENTION_DAYS = 60
 BUCKET_HISTORY_HOURS = 12
+RECOMMENDATION_COOLDOWN_DAYS = 7
+RECENT_ARTIST_WINDOW = 12
+PLAYLIST_SATURATION_DAYS = 14
 
 # Skip penalties are ratios (skips / events), smoothed with pseudo-observations
 # in the denominator. Without smoothing, a single early skip of a barely-heard
@@ -40,21 +43,37 @@ def _key(value) -> str:
     return str(value or "").strip().casefold()
 
 
+def _logical_track_key(row: dict) -> str:
+    """Return a stable song identity across duplicate library track IDs."""
+    artist = _key(row.get("artist"))
+    title = _key(row.get("title"))
+    if artist and title:
+        return f"{artist}\x1f{title}"
+    return f"id:{int(row.get('id') or 0)}"
+
+
 def _candidate_query(order_by: str) -> str:
     return f"""
         WITH event_summary AS (
             SELECT track_id,
-                   SUM(event_type='completed') AS completed_count,
-                   SUM(event_type='skipped') AS skipped_count,
-                   SUM(event_type='skipped' AND completion_ratio < 0.25) AS early_skips,
+                   SUM(event_type='completed' AND source!='radio') AS completed_count,
+                   SUM(event_type='skipped' AND source!='radio') AS skipped_count,
+                   SUM(event_type='skipped' AND source!='radio' AND
+                       completion_ratio < 0.25) AS early_skips,
                    AVG(CASE
-                           WHEN event_type='completed' AND reason='ended' THEN 1.0
-                           WHEN event_type IN ('completed', 'skipped')
+                           WHEN source!='radio' AND event_type='completed'
+                               AND reason='ended' THEN 1.0
+                           WHEN source!='radio'
+                               AND event_type IN ('completed', 'skipped')
                                THEN completion_ratio
                        END) AS avg_completion,
-                   SUM(event_type='completed' AND
+                   SUM(event_type='completed' AND source!='radio' AND
                        CAST(strftime('%H', created_at, 'unixepoch', 'localtime') AS INTEGER)=?)
                        AS same_hour_completed,
+                   SUM(event_type='started' AND source='playlist' AND
+                       created_at >= unixepoch() -
+                           {PLAYLIST_SATURATION_DAYS} * 86400)
+                       AS playlist_exposure_count,
                    MAX(created_at) AS last_event_at
             FROM adolar4u_listening_events
             WHERE user_id=?
@@ -71,7 +90,9 @@ def _candidate_query(order_by: str) -> str:
                COALESCE(ev.early_skips, 0) AS early_skips,
                COALESCE(ev.avg_completion, 0) AS avg_completion,
                COALESCE(ev.same_hour_completed, 0) AS same_hour_completed,
+               COALESCE(ev.playlist_exposure_count, 0) AS playlist_exposure_count,
                ev.last_event_at,
+               CASE WHEN lyr.status='instrumental' THEN 1 ELSE 0 END AS instrumental,
                EXISTS(
                    SELECT 1 FROM playlist_tracks favt
                    JOIN playlists fav ON fav.id=favt.playlist_id
@@ -107,6 +128,7 @@ def _candidate_query(order_by: str) -> str:
         LEFT JOIN user_play_counts upc
                ON upc.track_id=t.id AND upc.user_id=?
         LEFT JOIN event_summary ev ON ev.track_id=t.id
+        LEFT JOIN track_lyrics lyr ON lyr.track_id=t.id
         ORDER BY {order_by}
         LIMIT ?
     """
@@ -142,9 +164,76 @@ def _load_candidates(user_id: int, limit: int = 2500) -> tuple[list[dict], dict]
     return list(candidates.values()), stats
 
 
+def _durable_diversity_context(user_id: int, now: float) -> dict:
+    """Load cross-session song and artist history used for repeat protection.
+
+    Listening recency is folded across duplicate track IDs that share the same
+    normalized artist/title. Recommendation recency deliberately also includes
+    queued titles without an outcome: restarting a client must not recreate the
+    same high-scoring startup queue before those titles had a chance to play.
+    """
+    db = _db_module()
+    cutoff = float(now) - RECOMMENDATION_COOLDOWN_DAYS * 86400
+    logical_last_played: dict[str, float] = {}
+    logical_last_recommended: dict[str, float] = {}
+
+    def remember(target: dict[str, float], row, timestamp_key: str) -> None:
+        key = _logical_track_key(dict(row))
+        timestamp = row[timestamp_key]
+        if timestamp is not None:
+            target[key] = max(target.get(key, 0.0), float(timestamp))
+
+    with db.db() as conn:
+        play_rows = conn.execute("""
+            SELECT t.id, t.artist, t.title, MAX(upc.last_played_at) AS last_at
+            FROM user_play_counts upc
+            JOIN tracks t ON t.id=upc.track_id
+            WHERE upc.user_id=? AND upc.last_played_at IS NOT NULL
+            GROUP BY LOWER(TRIM(COALESCE(t.artist, ''))),
+                     LOWER(TRIM(COALESCE(t.title, '')))
+        """, (int(user_id),)).fetchall()
+        event_rows = conn.execute("""
+            SELECT t.id, t.artist, t.title, MAX(ev.created_at) AS last_at
+            FROM adolar4u_listening_events ev
+            JOIN tracks t ON t.id=ev.track_id
+            WHERE ev.user_id=?
+            GROUP BY LOWER(TRIM(COALESCE(t.artist, ''))),
+                     LOWER(TRIM(COALESCE(t.title, '')))
+        """, (int(user_id),)).fetchall()
+        recommendation_rows = conn.execute("""
+            SELECT t.id, t.artist, t.title, MAX(rec.created_at) AS last_at
+            FROM adolar4u_recommendations rec
+            JOIN tracks t ON t.id=rec.track_id
+            WHERE rec.user_id=? AND rec.created_at>=?
+            GROUP BY LOWER(TRIM(COALESCE(t.artist, ''))),
+                     LOWER(TRIM(COALESCE(t.title, '')))
+        """, (int(user_id), cutoff)).fetchall()
+        recent_artist_rows = conn.execute("""
+            SELECT t.artist
+            FROM adolar4u_recommendations rec
+            JOIN tracks t ON t.id=rec.track_id
+            WHERE rec.user_id=? AND rec.created_at>=?
+            ORDER BY rec.created_at DESC, rec.id DESC
+            LIMIT ?
+        """, (int(user_id), cutoff, RECENT_ARTIST_WINDOW)).fetchall()
+
+    for row in [*play_rows, *event_rows]:
+        remember(logical_last_played, row, "last_at")
+    for row in recommendation_rows:
+        remember(logical_last_recommended, row, "last_at")
+    return {
+        "logical_last_played": logical_last_played,
+        "logical_last_recommended": logical_last_recommended,
+        "recent_artists": {
+            _key(row["artist"]) for row in recent_artist_rows if _key(row["artist"])
+        },
+    }
+
+
 def _affinity_maps(candidates: list[dict], user_id: int | None = None) -> tuple[dict[str, float], dict[str, float]]:
     artists: dict[str, float] = {}
     genres: dict[str, float] = {}
+    logical_signals: dict[str, tuple[str, str, float]] = {}
     for row in candidates:
         positive = (
             float(row["user_play_count"] or 0)
@@ -157,6 +246,12 @@ def _affinity_maps(candidates: list[dict], user_id: int | None = None) -> tuple[
             continue
         artist = _key(row["artist"])
         genre = _key(row["genre"])
+        logical = _logical_track_key(row)
+        existing = logical_signals.get(logical)
+        if existing is None or positive > existing[2]:
+            logical_signals[logical] = (artist, genre, positive)
+
+    for artist, genre, positive in logical_signals.values():
         if artist:
             artists[artist] = artists.get(artist, 0.0) + positive
         if genre:
@@ -183,7 +278,10 @@ def _affinity_maps(candidates: list[dict], user_id: int | None = None) -> tuple[
 def _latest_played_at(row: dict) -> float | None:
     """Return the newest durable play or Adolar4U event timestamp."""
     timestamps = []
-    for value in (row["last_played_at"], row["last_event_at"]):
+    for value in (
+        row.get("last_played_at"), row.get("last_event_at"),
+        row.get("_logical_last_played_at"),
+    ):
         if value is not None:
             timestamps.append(float(value))
     return max(timestamps, default=None)
@@ -201,6 +299,19 @@ def _recency_penalty(row: dict, now: float) -> float:
     return 0.0
 
 
+def _recommendation_recency_penalty(row: dict, now: float) -> float:
+    """Keep a queued song out across fresh client/server shuffle sessions."""
+    last_recommended = row.get("_logical_last_recommended_at")
+    if last_recommended is None:
+        return 0.0
+    age = max(0.0, now - float(last_recommended))
+    if age < 24 * 3600:
+        return 24.0
+    if age < RECOMMENDATION_COOLDOWN_DAYS * 86400:
+        return 6.0
+    return 0.0
+
+
 def _score_candidate(row: dict, artist_affinity: dict, genre_affinity: dict,
                      discovery: float, rng, now: float) -> tuple[float, str]:
     components: list[tuple[float, str, str]] = []
@@ -214,13 +325,12 @@ def _score_candidate(row: dict, artist_affinity: dict, genre_affinity: dict,
     completed = int(row["completed_count"] or 0)
     skipped = int(row["skipped_count"] or 0)
     early_skips = int(row["early_skips"] or 0)
+    playlist_exposures = int(row.get("playlist_exposure_count") or 0)
 
     if plays:
         add_component("play_count", math.log1p(plays) * 1.35, "Häufig gehört")
     if row["loved"] or row["library_loved"] or row["is_favorite"]:
         add_component("explicit_favorite", 1.5, "Favorit")
-    if row["in_personal_playlist"]:
-        add_component("personal_playlist", 2.6, "In deinen Playlists")
     if completed:
         add_component(
             "completed_history", min(3.0, math.log1p(completed) * 1.25),
@@ -248,6 +358,13 @@ def _score_candidate(row: dict, artist_affinity: dict, genre_affinity: dict,
             "average_completion", float(row["avg_completion"] or 0) * 1.2,
             "Hohe Hördauer",
         )
+    if playlist_exposures:
+        # A personal playlist is strong artist/genre evidence, but repeated
+        # exposure to the exact song is a reason to rest it in the radio. This
+        # is temporary saturation, never a dislike or negative profile signal.
+        penalties["playlist_saturation"] = min(
+            9.0, math.log1p(playlist_exposures) * 2.75,
+        )
 
     last_played = _latest_played_at(row)
     if last_played is not None:
@@ -257,6 +374,11 @@ def _score_candidate(row: dict, artist_affinity: dict, genre_affinity: dict,
             penalties["recency"] = recency_penalty
         if age > 30 * 86400 and (plays or completed):
             add_component("rediscovery", 0.9, "Lange nicht gehört")
+
+    last_recommended = row.get("_logical_last_recommended_at")
+    recommendation_penalty = _recommendation_recency_penalty(row, now)
+    if recommendation_penalty:
+        penalties["recommendation_recency"] = recommendation_penalty
 
     if not plays and not completed:
         add_component("discovery", discovery * 3.0, "Entdeckung")
@@ -285,16 +407,23 @@ def _score_candidate(row: dict, artist_affinity: dict, genre_affinity: dict,
             "completed_count": completed,
             "skipped_count": skipped,
             "early_skip_count": early_skips,
+            "playlist_exposure_count": playlist_exposures,
             "average_completion": round(float(row["avg_completion"] or 0), 6),
             "last_played_at": last_played,
             "hours_since_played": (
                 round(max(0.0, now - last_played) / 3600, 2)
                 if last_played is not None else None
             ),
+            "last_recommended_at": last_recommended,
+            "hours_since_recommended": (
+                round(max(0.0, now - float(last_recommended)) / 3600, 2)
+                if last_recommended is not None else None
+            ),
             "lastfm_loved": bool(row["loved"]),
             "library_loved": bool(row["library_loved"]),
             "local_favorite": bool(row["is_favorite"]),
             "personal_playlist": bool(row["in_personal_playlist"]),
+            "instrumental": bool(row.get("instrumental")),
             "artist_affinity": round(artist_affinity.get(_key(row["artist"]), 0.0), 6),
             "genre_affinity": round(genre_affinity.get(_key(row["genre"]), 0.0), 6),
         },
@@ -312,6 +441,86 @@ def _candidate_bucket(row: dict, artist_affinity: dict, genre_affinity: dict) ->
             or genre_affinity.get(_key(row["genre"]), 0.0) >= 0.35:
         return "similar"
     return "discovery"
+
+
+def _deduplicate_logical_candidates(candidates: list[dict]) -> list[dict]:
+    """Keep only the strongest file/edition for each exact artist/title."""
+    strongest: dict[str, dict] = {}
+    for row in candidates:
+        key = _logical_track_key(row)
+        current = strongest.get(key)
+        if current is None or float(row["_adolar4u_score"]) > float(current["_adolar4u_score"]):
+            strongest[key] = row
+    return list(strongest.values())
+
+
+def _prepare_startup_shortlist(
+    candidates: list[dict],
+    shortlist: list[dict],
+    artist_affinity: dict[str, float],
+    recent_artists: set[str],
+) -> tuple[list[dict], dict | None]:
+    """Choose a recognizable-but-new, non-instrumental session opener."""
+    if not shortlist:
+        return shortlist, None
+
+    def bridge_eligible(row: dict) -> bool:
+        artist = _key(row.get("artist"))
+        penalties = (row.get("_adolar4u_diagnostics") or {}).get("penalties") or {}
+        return bool(
+            row.get("adolar4u_bucket") == "similar"
+            and artist
+            and artist not in recent_artists
+            and artist_affinity.get(artist, 0.0) >= 0.55
+            and int(row.get("user_play_count") or 0) <= 2
+            and int(row.get("completed_count") or 0) <= 1
+            and int(row.get("early_skips") or 0) == 0
+            and not row.get("instrumental")
+            and not penalties.get("recency")
+            and not penalties.get("recommendation_recency")
+            and not penalties.get("playlist_saturation")
+        )
+
+    bridges = [row for row in candidates if bridge_eligible(row)]
+    bridge = max(
+        bridges,
+        key=lambda row: (
+            artist_affinity.get(_key(row.get("artist")), 0.0),
+            float(row["_adolar4u_score"]),
+        ),
+        default=None,
+    )
+    adjusted = list(shortlist)
+    if bridge is not None and all(int(row["id"]) != int(bridge["id"]) for row in adjusted):
+        same_artist = [
+            index for index, row in enumerate(adjusted)
+            if _key(row.get("artist")) == _key(bridge.get("artist"))
+        ]
+        same_bucket = [
+            index for index, row in enumerate(adjusted)
+            if row.get("adolar4u_bucket") == bridge.get("adolar4u_bucket")
+        ]
+        choices = same_artist or same_bucket or list(range(len(adjusted)))
+        replace_at = min(
+            choices, key=lambda index: float(adjusted[index]["_adolar4u_score"]),
+        )
+        adjusted[replace_at] = bridge
+
+    if bridge is not None:
+        bridge["adolar4u_reason"] = "Neuer Titel von bekanntem Künstler"
+        diagnostics = bridge.get("_adolar4u_diagnostics") or {}
+        diagnostics.setdefault("facts", {})["startup_bridge"] = True
+        bridge["_adolar4u_diagnostics"] = diagnostics
+        return adjusted, bridge
+
+    # Instrumental is a valid preference, just not the default first impression
+    # of a new session. Fall back to it only when the shortlist has no alternative.
+    non_instrumental = [row for row in adjusted if not row.get("instrumental")]
+    opener = max(
+        non_instrumental or adjusted,
+        key=lambda row: float(row["_adolar4u_score"]),
+    )
+    return adjusted, opener
 
 
 def _bucket_targets(count: int, discovery: float,
@@ -339,7 +548,8 @@ def _bucket_targets(count: int, discovery: float,
 
 def _choose_bucketed_candidates(candidates: list[dict], count: int,
                                 discovery: float,
-                                previous: dict[str, int] | None = None) -> list[dict]:
+                                previous: dict[str, int] | None = None,
+                                avoid_artists: set[str] | None = None) -> list[dict]:
     buckets = {key: [] for key in ("anchor", "similar", "familiar", "discovery")}
     for row in candidates:
         buckets[row["adolar4u_bucket"]].append(row)
@@ -348,6 +558,9 @@ def _choose_bucketed_candidates(candidates: list[dict], count: int,
 
     chosen: list[dict] = []
     used: set[int] = set()
+    used_songs: set[str] = set()
+    used_artists: set[str] = set()
+    avoid_artists = {_key(value) for value in (avoid_artists or set()) if _key(value)}
     targets = _bucket_targets(count, discovery, previous)
     if (not previous and count and buckets["anchor"]
             and buckets["anchor"][0]["_adolar4u_score"] >= 0
@@ -359,17 +572,63 @@ def _choose_bucketed_candidates(candidates: list[dict], count: int,
         if targets[donor] > 0:
             targets[donor] -= 1
             targets["anchor"] = 1
+    def take(row: dict) -> None:
+        chosen.append(row)
+        used.add(int(row["id"]))
+        used_songs.add(_logical_track_key(row))
+        artist = _key(row.get("artist"))
+        if artist:
+            used_artists.add(artist)
+
+    def eligible(row: dict, *, allow_recent_artist: bool,
+                 allow_repeated_artist: bool) -> bool:
+        if int(row["id"]) in used or _logical_track_key(row) in used_songs:
+            return False
+        artist = _key(row.get("artist"))
+        if artist and not allow_recent_artist and artist in avoid_artists:
+            return False
+        return not (
+            artist and not allow_repeated_artist and artist in used_artists
+        )
+
+    # Fill every requested group in three increasingly permissive passes.
+    # Large libraries should complete in the first pass. The fallbacks keep
+    # small/single-artist libraries playable without sacrificing group ratios.
     for bucket, target in targets.items():
-        for row in buckets[bucket][:target]:
-            chosen.append(row)
-            used.add(int(row["id"]))
+        remaining = target
+        for allow_recent, allow_repeated in ((False, False), (True, False), (True, True)):
+            for row in buckets[bucket]:
+                if remaining <= 0:
+                    break
+                if eligible(
+                    row, allow_recent_artist=allow_recent,
+                    allow_repeated_artist=allow_repeated,
+                ):
+                    take(row)
+                    remaining -= 1
+            if remaining <= 0:
+                break
 
     if len(chosen) < count:
         fallback = sorted(
-            (row for row in candidates if int(row["id"]) not in used),
+            (
+                row for row in candidates
+                if int(row["id"]) not in used
+                and _logical_track_key(row) not in used_songs
+            ),
             key=lambda row: row["_adolar4u_score"], reverse=True,
         )
-        chosen.extend(fallback[:count - len(chosen)])
+        for allow_recent, allow_repeated in ((False, False), (True, False), (True, True)):
+            for row in fallback:
+                if len(chosen) >= count:
+                    break
+                if eligible(
+                    row, allow_recent_artist=allow_recent,
+                    allow_repeated_artist=allow_repeated,
+                ):
+                    take(row)
+            if len(chosen) >= count:
+                break
     return chosen
 
 
@@ -507,8 +766,10 @@ def _format_track(row: dict) -> dict:
     for private in (
         "completed_count", "skipped_count", "early_skips", "avg_completion",
         "same_hour_completed", "last_event_at", "in_personal_playlist",
+        "playlist_exposure_count", "instrumental",
         "signal_strength", "library_loved", "is_favorite", "_adolar4u_score",
         "_adolar4u_diagnostics", "_adolar4u_candidate_rank",
+        "_logical_last_played_at", "_logical_last_recommended_at",
     ):
         row.pop(private, None)
     return row
@@ -533,7 +794,13 @@ def recommend_tracks(user_id: int, count=25, exclude_ids=None, shuffle_state=Non
     discovery = max(0.0, min(float(user_settings["discovery_level"]), 1.0))
     artist_affinity, genre_affinity = _affinity_maps(candidates, int(user_id))
     now = time.time()
+    diversity = _durable_diversity_context(int(user_id), now)
     for row in candidates:
+        logical = _logical_track_key(row)
+        row["_logical_last_played_at"] = diversity["logical_last_played"].get(logical)
+        row["_logical_last_recommended_at"] = diversity[
+            "logical_last_recommended"
+        ].get(logical)
         score, reason = _score_candidate(
             row, artist_affinity, genre_affinity, discovery, rng, now,
         )
@@ -542,6 +809,7 @@ def recommend_tracks(user_id: int, count=25, exclude_ids=None, shuffle_state=Non
             row, artist_affinity, genre_affinity,
         )
         row["adolar4u_reason"] = reason
+    candidates = _deduplicate_logical_candidates(candidates)
     candidates.sort(key=lambda row: row["_adolar4u_score"], reverse=True)
 
     if shuffle_state is None:
@@ -563,7 +831,14 @@ def recommend_tracks(user_id: int, count=25, exclude_ids=None, shuffle_state=Non
         )
     shortlist = _choose_bucketed_candidates(
         bucket_candidates, count, discovery, shuffle_state.adolar4u_bucket_counts,
+        avoid_artists=diversity["recent_artists"],
     )
+    startup_track = None
+    if shuffle_state.sequence_index == 0:
+        shortlist, startup_track = _prepare_startup_shortlist(
+            bucket_candidates, shortlist, artist_affinity,
+            diversity["recent_artists"],
+        )
     bucket_pool = dict(Counter(row["adolar4u_bucket"] for row in bucket_candidates))
     bucket_target = dict(Counter(row["adolar4u_bucket"] for row in shortlist))
     for row in shortlist:
@@ -586,16 +861,33 @@ def recommend_tracks(user_id: int, count=25, exclude_ids=None, shuffle_state=Non
         shuffle_state.unique_albums = int(stats.get("albums") or 0)
         shuffle_state.unique_genres = int(stats.get("genres") or 0)
 
-    selected = smart_shuffle.select_tracks(
-        shortlist, count, shuffle_state,
-        shuffle_state.total_tracks or len(candidates),
-        shuffle_state.unique_artists or 0,
-        shuffle_state.unique_albums or 0,
-        exclude_ids=excluded,
-        rng=rng,
-        unique_genres=shuffle_state.unique_genres or 0,
-        candidate_penalties=penalties,
-    )
+    selected = []
+    if startup_track is not None:
+        selected.extend(smart_shuffle.select_tracks(
+            [startup_track], 1, shuffle_state,
+            shuffle_state.total_tracks or len(candidates),
+            shuffle_state.unique_artists or 0,
+            shuffle_state.unique_albums or 0,
+            exclude_ids=excluded,
+            rng=rng,
+            unique_genres=shuffle_state.unique_genres or 0,
+            candidate_penalties=penalties,
+        ))
+    remaining = [
+        row for row in shortlist
+        if startup_track is None or int(row["id"]) != int(startup_track["id"])
+    ]
+    if len(selected) < count:
+        selected.extend(smart_shuffle.select_tracks(
+            remaining, count - len(selected), shuffle_state,
+            shuffle_state.total_tracks or len(candidates),
+            shuffle_state.unique_artists or 0,
+            shuffle_state.unique_albums or 0,
+            exclude_ids=excluded,
+            rng=rng,
+            unique_genres=shuffle_state.unique_genres or 0,
+            candidate_penalties=penalties,
+        ))
     if not user_settings["learning_paused"]:
         _record_recommendation_batch(
             int(user_id), selected,

@@ -119,6 +119,25 @@ class TrackPlayedRouteTests(TrackActionsTestBase):
         self.assertTrue(data["contributed"])
         self.assertEqual(data["play_count"], 1)
 
+    def test_other_radio_play_is_exposure_not_personal_taste(self):
+        with self._login(contributes_playcount=1):
+            response = self.client.post(
+                f"/api/track/{self.track_id}/played", json={"source": "radio"},
+            )
+        data = response.get_json()
+        self.assertTrue(data["contributed"])
+        self.assertFalse(data["personalized"])
+        with app_module.db.db() as conn:
+            personal = conn.execute(
+                "SELECT 1 FROM user_play_counts WHERE user_id=1 AND track_id=?",
+                (self.track_id,),
+            ).fetchone()
+            archive = conn.execute(
+                "SELECT play_count FROM tracks WHERE id=?", (self.track_id,),
+            ).fetchone()["play_count"]
+        self.assertIsNone(personal)
+        self.assertEqual(archive, 1)
+
 
 class TrackDiscoPlayedRouteTests(TrackActionsTestBase):
     def test_does_not_require_authentication(self):

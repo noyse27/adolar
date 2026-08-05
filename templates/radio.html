@@ -346,7 +346,7 @@ const CF_PRELOAD = 25;
 const CF_OUT     = 12;
 const CF_IN      =  8;
 
-const radio = { queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false, session: 0, stationId: 1, stationName: "Adolar Radio", station: null, tracksSinceJingle: 0 };
+const radio = { queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false, cfPending: false, cfToken: 0, cfFinish: null, session: 0, stationId: 1, stationName: "Adolar Radio", station: null, tracksSinceJingle: 0 };
 const LAST_RADIO_STATION_KEY = "adolar_radio_last_station_id";
 
 function savedStationId() {
@@ -587,7 +587,10 @@ function playTrack(track) {
   _playCounted  = false;
 
   radio.cfActive = false;
-  cancelAnimationFrame(radio.cfTimer);
+  radio.cfPending = false;
+  radio.cfFinish = null;
+  radio.cfToken++;
+  clearTimeout(radio.cfTimer);
   const inactiveEl = getInactive();
   inactiveEl.pause(); inactiveEl.removeAttribute("src"); inactiveEl.load();
 
@@ -611,7 +614,10 @@ function playJingle() {
   _scrobbled = true;
   _playCounted = true;
   radio.cfActive = false;
-  cancelAnimationFrame(radio.cfTimer);
+  radio.cfPending = false;
+  radio.cfFinish = null;
+  radio.cfToken++;
+  clearTimeout(radio.cfTimer);
   const inactiveEl = getInactive();
   inactiveEl.pause(); inactiveEl.removeAttribute("src"); inactiveEl.load();
   audio.volume = document.getElementById("volume").valueAsNumber;
@@ -738,62 +744,60 @@ function preloadNext() {
 }
 
 function startCrossfade() {
-  if (radio.cfActive || !radio.queue.length) return;
+  if (radio.cfActive || radio.cfPending || !radio.queue.length) return;
   if (isJingle(currentTrack)) return;
   if (jingleDueAfterCurrent()) return;
-  // Android/WebView suspends requestAnimationFrame while the app is hidden.
-  // In that state a crossfade would stay "active" forever and onEnded would
-  // deliberately not advance the queue. Let the normal ended path take over.
-  if (document.hidden) return;
   const inactive = getInactive();
+  if (!inactive.getAttribute("src")) preloadNext();
+  if (!inactive.getAttribute("src")) return;
 
-  const doFade = () => {
-    if (document.hidden || radio.cfActive) return;
+  // WebView2 may ignore preload="auto" until playback is requested. Start the
+  // second element muted first and begin the fade when play() really succeeds;
+  // waiting for canplay before play() can otherwise deadlock in the Companion.
+  const token = ++radio.cfToken;
+  radio.cfPending = true;
+  inactive.volume = 0;
+  const volSlider = document.getElementById("volume");
+  let completed = false;
+
+  const abortFade = () => {
+    if (completed || token !== radio.cfToken) return;
+    completed = true;
+    clearTimeout(radio.cfTimer);
+    radio.cfTimer = null;
+    radio.cfPending = false;
+    radio.cfActive = false;
+    radio.cfFinish = null;
+    inactive.pause(); inactive.removeAttribute("src"); inactive.load();
+    audio.volume = volSlider.valueAsNumber;
+  };
+
+  const beginFade = () => {
+    if (completed || token !== radio.cfToken || !radio.cfPending) return;
+    radio.cfPending = false;
     radio.cfActive = true;
     const dur = CF_IN * 1000;
-    let start = performance.now();
-    const volSlider = document.getElementById("volume");
-    let completed = false;
+    const start = performance.now();
 
     const finishFade = () => {
-      if (completed) return;
+      if (completed || token !== radio.cfToken) return;
       completed = true;
-      document.removeEventListener("visibilitychange", onVisibility);
-      cancelAnimationFrame(radio.cfTimer);
+      clearTimeout(radio.cfTimer);
+      radio.cfTimer = null;
       const old = audio;
+      // Complete telemetry while the outgoing element is still the active one.
+      finishA4UTrack("ended", true);
       audio = inactive;
       audio.volume = volSlider.valueAsNumber;
       old.pause(); old.removeAttribute("src"); old.load();
       radio.cfActive = false;
-      finishA4UTrack("ended", true);
+      radio.cfFinish = null;
       radioNext(true);
     };
-
-    const abortFade = () => {
-      if (completed) return;
-      completed = true;
-      document.removeEventListener("visibilitychange", onVisibility);
-      cancelAnimationFrame(radio.cfTimer);
-      inactive.pause(); inactive.removeAttribute("src"); inactive.load();
-      audio.volume = volSlider.valueAsNumber;
-      radio.cfActive = false;
-    };
-
-    inactive.volume = 0;
-    inactive.play().catch(abortFade);
-
-    const onVisibility = () => {
-      if (document.hidden) {
-        // Finish an already running fade immediately before WebView freezes RAF.
-        // The preloaded track is already playing, so playback remains continuous.
-        finishFade();
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
+    radio.cfFinish = finishFade;
 
     const tick = () => {
       if (completed) return;
-      if (document.hidden) { finishFade(); return; }
       const elapsed = performance.now() - start;
       const progress = Math.min(elapsed / dur, 1);
       const vol = volSlider.valueAsNumber;
@@ -801,18 +805,21 @@ function startCrossfade() {
       inactive.volume = Math.sin(progress * Math.PI / 2) * vol;
 
       if (progress < 1) {
-        radio.cfTimer = requestAnimationFrame(tick);
+        // Timers continue at a reduced cadence in minimized WebView2 windows;
+        // requestAnimationFrame is suspended completely there.
+        radio.cfTimer = setTimeout(tick, 50);
       } else {
         finishFade();
       }
     };
-    radio.cfTimer = requestAnimationFrame(tick);
+    tick();
   };
 
-  if (inactive.readyState >= 3) {
-    doFade();
+  const playResult = inactive.play();
+  if (playResult && typeof playResult.then === "function") {
+    playResult.then(beginFade).catch(abortFade);
   } else {
-    inactive.addEventListener("canplay", doFade, { once: true });
+    beginFade();
   }
 }
 
@@ -820,10 +827,19 @@ function startCrossfade() {
 function onPlay(e)  { if (e.target === audio) setPlayBtn(true); }
 function onPause(e) { if (e.target === audio) setPlayBtn(false); }
 function onEnded(e) {
-  if (e.target === audio && !radio.cfActive) {
-    finishA4UTrack("ended", true);
-    radioNext();
+  if (e.target !== audio) return;
+  if (radio.cfActive && radio.cfFinish) {
+    radio.cfFinish();
+    return;
   }
+  if (radio.cfPending) {
+    radio.cfToken++;
+    radio.cfPending = false;
+    const inactive = getInactive();
+    inactive.pause(); inactive.removeAttribute("src"); inactive.load();
+  }
+  finishA4UTrack("ended", true);
+  radioNext();
 }
 function onTimeUpdate(e) {
   if (e.target !== audio) return;
@@ -857,7 +873,11 @@ function onTimeUpdate(e) {
   if (!_playCounted && cur / dur >= 0.9) {
     _playCounted = true;
     if (currentTrack) {
-      fetch(`${API}/api/track/${currentTrack.id}/played`, { method: "POST" }).catch(() => {});
+      fetch(`${API}/api/track/${currentTrack.id}/played`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({source: a4uSource()}),
+      }).catch(() => {});
     }
   }
 }
@@ -877,7 +897,10 @@ document.getElementById("btn-lyrics-close").onclick = () => {
 document.getElementById("btn-next").onclick = () => {
   finishA4UTrack("manual_next");
   radio.cfActive = false;
-  cancelAnimationFrame(radio.cfTimer);
+  radio.cfPending = false;
+  radio.cfFinish = null;
+  radio.cfToken++;
+  clearTimeout(radio.cfTimer);
   const inactive = getInactive();
   inactive.pause(); inactive.removeAttribute("src"); inactive.load();
   audio.volume = document.getElementById("volume").valueAsNumber;

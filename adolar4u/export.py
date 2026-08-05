@@ -15,12 +15,16 @@ BONUS_KEYS = (
     "completed_history", "same_hour", "artist_affinity", "genre_affinity",
     "average_completion", "rediscovery", "discovery",
 )
-PENALTY_KEYS = ("early_skip", "skip_history", "recency")
+PENALTY_KEYS = (
+    "early_skip", "skip_history", "recency", "recommendation_recency",
+    "playlist_saturation",
+)
 FACT_KEYS = (
     "user_play_count", "completed_count", "skipped_count", "early_skip_count",
-    "average_completion", "last_played_at", "hours_since_played",
+    "playlist_exposure_count", "average_completion", "last_played_at",
+    "hours_since_played", "last_recommended_at", "hours_since_recommended",
     "lastfm_loved", "library_loved", "local_favorite", "personal_playlist",
-    "artist_affinity", "genre_affinity",
+    "artist_affinity", "genre_affinity", "instrumental", "startup_bridge",
 )
 
 

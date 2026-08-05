@@ -494,7 +494,7 @@ const progress   = $("progress");
 // completions, recency) instead of locking in a large stretch of tracks
 // scored from one stale profile snapshot — see docs/adolar4u-roadmap.md.
 const RADIO_REFILL_BATCH = 5;
-const radio = { active: false, browsingLibrary: false, queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false };
+const radio = { active: false, browsingLibrary: false, queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false, cfPending: false, cfToken: 0 };
 radio.stationId = 1;
 radio.stationName = "Adolar Radio";
 radio.station = null;
@@ -511,6 +511,8 @@ const listShuffle = {
 const normalCrossfade = {
   enabled: localStorage.getItem("adolar_crossfade") === "1",
   active: false,
+  pending: false,
+  token: 0,
   timer: null,
 };
 const lyricsUi = {
@@ -1736,9 +1738,7 @@ function playJingle() {
   state.currentTrack = item;
   _scrobbled = true;
   _playCounted = true;
-  radio.cfActive = false;
-  clearTimeout(radio.cfTimer);
-  audioB.pause(); audioB.removeAttribute("src"); audioB.load();
+  resetRadioCrossfadeBuffer();
   updatePlayerUI(item);
   audio.src = `${API}/api/radio-stations/${radio.stationId}/jingle`;
   audio.play().catch(() => {});
@@ -1908,6 +1908,7 @@ async function startRadio(station = null, initialPlaylist = null) {
   }
   stopListShuffle(false);
   resetNormalCrossfadeBuffer();
+  resetRadioCrossfadeBuffer();
   $("radio-test-banner")?.classList.remove("visible");
   radio.active = true;
   radio.browsingLibrary = false;
@@ -1987,10 +1988,7 @@ function showCurrentRadioQueue() {
 function stopRadio() {
   radio.active = false;
   radio.browsingLibrary = false;
-  radio.cfActive = false;
-  clearTimeout(radio.cfTimer);
-  audioB.pause(); audioB.removeAttribute("src"); audioB.load();
-  audio.volume = parseFloat($("volume").value) || 0.8;
+  resetRadioCrossfadeBuffer();
   updateRadioButton();
   updatePlaybackModeControls();
   if (state.currentTrack) updatePlayView(state.currentTrack);
@@ -2085,8 +2083,22 @@ function preloadNext(nextTrack) {
   audioB.load();
 }
 
+function resetRadioCrossfadeBuffer() {
+  radio.cfActive = false;
+  radio.cfPending = false;
+  radio.cfToken++;
+  clearTimeout(radio.cfTimer);
+  radio.cfTimer = null;
+  audioB.pause();
+  audioB.removeAttribute("src");
+  audioB.load();
+  audio.volume = parseFloat($("volume").value) || 0.8;
+}
+
 function resetNormalCrossfadeBuffer() {
   normalCrossfade.active = false;
+  normalCrossfade.pending = false;
+  normalCrossfade.token++;
   clearTimeout(normalCrossfade.timer);
   normalCrossfade.timer = null;
   if (!radio.active) {
@@ -2106,113 +2118,122 @@ function toggleNormalCrossfade() {
 }
 
 function startNormalCrossfade() {
-  if (radio.active || !normalCrossfade.enabled || normalCrossfade.active) return;
+  if (radio.active || !normalCrossfade.enabled || normalCrossfade.active || normalCrossfade.pending) return;
   const nextIndex = state.currentIdx + 1;
   const nextTrack = state.tracks[nextIndex];
   if (!nextTrack) return;
-  if (audioB.readyState < 3) {
-    audioB.addEventListener("canplay", startNormalCrossfade, { once: true });
-    return;
-  }
-
-  normalCrossfade.active = true;
-  const vol = parseFloat($("volume").value) || 0.8;
+  const token = ++normalCrossfade.token;
+  normalCrossfade.pending = true;
   audioB.volume = 0;
-  audioB.play().catch(() => {
-    resetNormalCrossfadeBuffer();
-    playTrack(nextIndex);
-  });
+  const beginFade = () => {
+    if (!normalCrossfade.pending || token !== normalCrossfade.token) return;
+    normalCrossfade.pending = false;
+    normalCrossfade.active = true;
+    const vol = parseFloat($("volume").value) || 0.8;
+    const startTime = performance.now();
+    const tick = () => {
+      if (!normalCrossfade.active || token !== normalCrossfade.token) return;
+      const elapsed = (performance.now() - startTime) / 1000;
+      const fadeOut = Math.min(elapsed / CF_OUT, 1);
+      const fadeIn = Math.min(Math.max(elapsed - (CF_OUT - CF_IN), 0) / CF_IN, 1);
+      audio.volume = vol * Math.cos(fadeOut * Math.PI / 2);
+      audioB.volume = vol * Math.sin(fadeIn * Math.PI / 2);
 
-  const startTime = performance.now();
-  const tick = () => {
-    if (!normalCrossfade.active) return;
-    const elapsed = (performance.now() - startTime) / 1000;
-    const fadeOut = Math.min(elapsed / CF_OUT, 1);
-    const fadeIn = Math.min(Math.max(elapsed - (CF_OUT - CF_IN), 0) / CF_IN, 1);
-    audio.volume = vol * Math.cos(fadeOut * Math.PI / 2);
-    audioB.volume = vol * Math.sin(fadeIn * Math.PI / 2);
+      if (elapsed < CF_OUT) {
+        normalCrossfade.timer = setTimeout(tick, 50);
+        return;
+      }
 
-    if (elapsed < CF_OUT) {
-      normalCrossfade.timer = setTimeout(tick, 50);
-      return;
-    }
-
-    const nextSrc = audioB.src;
-    const nextTime = audioB.currentTime;
-    audioB.pause();
-    audioB.removeAttribute("src");
-    audioB.load();
-    normalCrossfade.active = false;
-    normalCrossfade.timer = null;
-    finishAdolar4UTrack("ended", true);
-    state.currentIdx = nextIndex;
-    state.currentTrack = nextTrack;
-    _scrobbled = false;
-    _playCounted = false;
-    updatePlayerUI(nextTrack);
-    audio.src = nextSrc;
-    audio.currentTime = nextTime;
-    audio.volume = vol;
-    audio.play();
-    startAdolar4UTrack(nextTrack);
-    renderTracks();
-    if (listShuffle.active) ensureListShuffleQueue();
+      const nextSrc = audioB.src;
+      const nextTime = audioB.currentTime;
+      audioB.pause();
+      audioB.removeAttribute("src");
+      audioB.load();
+      normalCrossfade.active = false;
+      normalCrossfade.timer = null;
+      finishAdolar4UTrack("ended", true);
+      state.currentIdx = nextIndex;
+      state.currentTrack = nextTrack;
+      _scrobbled = false;
+      _playCounted = false;
+      updatePlayerUI(nextTrack);
+      audio.src = nextSrc;
+      audio.currentTime = nextTime;
+      audio.volume = vol;
+      audio.play();
+      startAdolar4UTrack(nextTrack);
+      renderTracks();
+      if (listShuffle.active) ensureListShuffleQueue();
+    };
+    tick();
   };
-  tick();
+
+  const playResult = audioB.play();
+  if (playResult && typeof playResult.then === "function") {
+    playResult.then(beginFade).catch(() => {
+      if (token !== normalCrossfade.token) return;
+      resetNormalCrossfadeBuffer();
+    });
+  } else {
+    beginFade();
+  }
 }
 
 function startCrossfade() {
-  if (radio.cfActive) return;
-  // Wait until audioB has enough data to play without interruption
-  if (audioB.readyState < 3) { // HAVE_FUTURE_DATA = 3
-    audioB.addEventListener("canplay", startCrossfade, { once: true });
-    return;
-  }
-  radio.cfActive = true;
-  const vol = parseFloat($("volume").value) || 0.8;
-
+  if (radio.cfActive || radio.cfPending) return;
+  const token = ++radio.cfToken;
+  radio.cfPending = true;
   audioB.volume = 0;
-  audioB.play().catch(() => {
-    // Autoplay blocked or src invalid — fall back to direct next
-    radio.cfActive = false;
-    radioNext().then(() => {
-      if (!radio.queue.length || isJingle(state.currentTrack)) return;
-      radio.browsingLibrary ? playRadioTrack(radio.queue[0]) : playTrack(0);
-    });
-  });
+  const beginFade = () => {
+    if (!radio.cfPending || token !== radio.cfToken) return;
+    radio.cfPending = false;
+    radio.cfActive = true;
+    const vol = parseFloat($("volume").value) || 0.8;
+    const startTime = performance.now();
+    const tick = () => {
+      if (!radio.cfActive || token !== radio.cfToken) return;
+      const elapsed = (performance.now() - startTime) / 1000;
+      const t_out = Math.min(elapsed / CF_OUT, 1);
+      const t_in  = Math.min(Math.max(elapsed - (CF_OUT - CF_IN), 0) / CF_IN, 1);
+      // Equal-power curve: constant perceived loudness
+      audio.volume  = vol * Math.cos(t_out * Math.PI / 2);
+      audioB.volume = vol * Math.sin(t_in  * Math.PI / 2);
 
-  const startTime = performance.now();
-  const tick = () => {
-    const elapsed = (performance.now() - startTime) / 1000;
-    const t_out = Math.min(elapsed / CF_OUT, 1);
-    const t_in  = Math.min(Math.max(elapsed - (CF_OUT - CF_IN), 0) / CF_IN, 1);
-    // Equal-power curve: constant perceived loudness
-    audio.volume  = vol * Math.cos(t_out * Math.PI / 2);
-    audioB.volume = vol * Math.sin(t_in  * Math.PI / 2);
-
-    if (elapsed < CF_OUT) {
-      radio.cfTimer = setTimeout(tick, 50);
-    } else {
-      const nextSrc  = audioB.src;
-      const nextTime = audioB.currentTime;
-      audioB.pause(); audioB.removeAttribute("src"); audioB.load();
-      radio.cfActive = false;
-      finishAdolar4UTrack("ended", true);
-      radioNext().then(() => {
-        if (!radio.queue.length) return;
-        _scrobbled = false;
-        _playCounted = false;
-        updatePlayerUI(radio.queue[0]);
-        audio.src = nextSrc;
-        audio.currentTime = nextTime;
-        audio.volume = vol;
-        audio.play();
-        startAdolar4UTrack(state.currentTrack);
-        renderTracks();
-      });
-    }
+      if (elapsed < CF_OUT) {
+        radio.cfTimer = setTimeout(tick, 50);
+      } else {
+        const nextSrc  = audioB.src;
+        const nextTime = audioB.currentTime;
+        audioB.pause(); audioB.removeAttribute("src"); audioB.load();
+        radio.cfActive = false;
+        radio.cfTimer = null;
+        finishAdolar4UTrack("ended", true);
+        radioNext().then(() => {
+          if (!radio.queue.length || token !== radio.cfToken) return;
+          _scrobbled = false;
+          _playCounted = false;
+          updatePlayerUI(radio.queue[0]);
+          audio.src = nextSrc;
+          audio.currentTime = nextTime;
+          audio.volume = vol;
+          audio.play();
+          startAdolar4UTrack(state.currentTrack);
+          renderTracks();
+        });
+      }
+    };
+    tick();
   };
-  tick();
+
+  const playResult = audioB.play();
+  if (playResult && typeof playResult.then === "function") {
+    playResult.then(beginFade).catch(() => {
+      if (token !== radio.cfToken) return;
+      resetRadioCrossfadeBuffer();
+    });
+  } else {
+    beginFade();
+  }
 }
 
 // ── Player events ─────────────────────────────────────────
@@ -2280,22 +2301,26 @@ audio.onended = async () => {
   finishAdolar4UTrack("ended", true);
   if (radio.active) {
     if (radio.cfActive) return; // crossfade already handles the transition
+    if (radio.cfPending) resetRadioCrossfadeBuffer();
     await radioNext();
     if (radio.queue.length && !isJingle(state.currentTrack)) {
       radio.browsingLibrary ? playRadioTrack(radio.queue[0]) : playTrack(0);
     }
   } else if (normalCrossfade.active) {
     return;
-  } else if (listShuffle.active) {
-    let next = state.currentIdx + 1;
-    if (next >= state.tracks.length) {
-      await ensureListShuffleQueue(true);
-      next = state.currentIdx + 1;
-    }
-    if (next < state.tracks.length) playTrack(next);
   } else {
-    const next = state.currentIdx + 1;
-    if (next < state.tracks.length) playTrack(next);
+    if (normalCrossfade.pending) resetNormalCrossfadeBuffer();
+    if (listShuffle.active) {
+      let next = state.currentIdx + 1;
+      if (next >= state.tracks.length) {
+        await ensureListShuffleQueue(true);
+        next = state.currentIdx + 1;
+      }
+      if (next < state.tracks.length) playTrack(next);
+    } else {
+      const next = state.currentIdx + 1;
+      if (next < state.tracks.length) playTrack(next);
+    }
   }
 };
 
@@ -2323,7 +2348,11 @@ audio.ontimeupdate = () => {
   if (!_playCounted && audio.currentTime / audio.duration >= 0.9) {
     _playCounted = true;
     if (state.currentTrack) {
-      fetch(`${API}/api/track/${state.currentTrack.id}/played`, { method: "POST" })
+      fetch(`${API}/api/track/${state.currentTrack.id}/played`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({source: adolar4uSource()}),
+      })
         .catch(() => {});
     }
   }
@@ -2366,10 +2395,7 @@ $("btn-prev").onclick = () => {
 $("btn-next").onclick = async () => {
   finishAdolar4UTrack("manual_next");
   if (radio.active) {
-    clearTimeout(radio.cfTimer);
-    radio.cfActive = false;
-    audioB.pause(); audioB.removeAttribute("src"); audioB.load();
-    audio.volume = parseFloat($("volume").value) || 0.8;
+    resetRadioCrossfadeBuffer();
     radioNext().then(() => {
       if (radio.queue.length && !isJingle(state.currentTrack)) playTrack(0);
     });
