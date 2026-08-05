@@ -38,7 +38,10 @@ Already implemented:
   candidates exist;
 - a full-strength repeat cooldown for the first 24 hours, followed by a weaker
   cooldown through day seven;
-- Smart Shuffle sequencing after personal ranking.
+- exact artist/title deduplication across duplicate library track IDs;
+- a durable recommendation cooldown plus recent-artist spacing across fresh
+  shuffle sessions and client restarts;
+- diversity-aware candidate-group membership before Smart Shuffle sequencing;
 - a private 60-day learning journal with versioned decision details, aggregate
   group shares, profile changes, and exact outcome linkage.
 - a user-scoped analysis export containing complete CSV decision/event/profile
@@ -57,7 +60,9 @@ admin. The new model is nevertheless user-scoped for future accounts.
 4. The newest durable play or listening event controls recency. A track heard
    within 24 hours gets the same strong cooldown regardless of whether it was
    heard one hour or 23 hours ago.
-5. Candidate membership is selected before Smart Shuffle performs spacing.
+5. Candidate membership is selected before Smart Shuffle performs final
+   sequencing. Membership itself must prefer logical-song and artist diversity;
+   Smart Shuffle cannot repair a shortlist already filled by one artist.
 6. Adolar4U remains private until the metadata baseline is understandable and
    stable in real listening.
 7. Raw-audio analysis, embeddings, nightly profile generation, and
@@ -87,6 +92,21 @@ admin. The new model is nevertheless user-scoped for future accounts.
     stale scoring snapshot before new listening events (skips, completions,
     recency) can influence the next fetch. Smaller batches trade a few extra
     fetches for faster adaptation.
+12. A queued recommendation is exposure history even when it never produces a
+    listening outcome. It must cool down the same logical artist/title across
+    fresh sessions, but it must never be interpreted as a skip or dislike.
+13. Duplicate files with the same normalized artist/title are one logical song
+    for affinity aggregation, recency, and candidate membership. Different
+    remix/version titles remain separate songs; artist spacing controls their
+    concentration.
+14. Listening source expresses confidence, not just provenance. Another
+    rule-based radio is exposure-only and may update recency, but cannot train
+    taste. Personal playlists train artist/genre affinity while repeated recent
+    starts create a decaying song-only saturation penalty.
+15. A new session should establish trust without replaying the obvious hit. A
+    scarcely heard non-instrumental song by a familiar artist is the preferred
+    bridge opener and remains part of the normal similar-group balance.
+    Instrumentals are not globally penalized or excluded.
 
 ## Current test phase
 
@@ -106,6 +126,9 @@ The test should answer these questions:
 - Are recommendation reasons plausible?
 - Does behavior remain sensible for repeated one-track queue requests from the
   Radio Companion or Android Auto?
+- Do app/station restarts avoid reconstructing the previous startup queue?
+- Do prolific artists and duplicate song files remain spaced without weakening
+  the intended discovery share?
 
 When reporting a surprising selection, preserve the track, approximate time,
 whether it was Favorite/Loved, when it last played, the recommendation reason,
@@ -124,6 +147,15 @@ new AI subsystem:
    profile changes, and listening outcomes; do not expose implementation
    buckets as a permanent public feature.
 5. Freeze a metadata-first baseline and its regression tests.
+
+The first evaluation after the durable-diversity baseline should use a new
+multi-day export to decide whether **exposure-normalized artist learning** is
+needed. That extension would learn artist affinity from completion/skip rates
+relative to recommendation opportunities instead of raw catalogue size or raw
+recommendation count. It is deliberately not bundled into the first correction:
+the new export must show whether durable spacing alone removes the observed
+large-discography bias. If it does not, exposure normalization is the next
+metadata-learning increment before scheduled profiles or audio features.
 
 Only after this baseline is trustworthy should the next larger milestone be
 selected.

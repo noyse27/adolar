@@ -1778,8 +1778,9 @@ def increment_play_count(track_id: int):
     return (row["play_count"], row["path"]) if row else (0, None)
 
 
-def record_user_play(user_id: int, track_id: int, contributes: bool) -> tuple[int | None, str | None]:
-    """Record a personal play and optionally increment the durable archive count."""
+def record_user_play(user_id: int, track_id: int, contributes: bool,
+                     record_personal: bool = True) -> tuple[int | None, str | None]:
+    """Record an archive play and, when meaningful, a personal taste play."""
     now = __import__("time").time()
     increment = 1 if contributes else 0
     with db() as conn:
@@ -1793,13 +1794,14 @@ def record_user_play(user_id: int, track_id: int, contributes: bool) -> tuple[in
         """, (increment, increment, track_id)).fetchone()
         if not track:
             return None, None
-        conn.execute("""
-            INSERT INTO user_play_counts (user_id, track_id, count, last_played_at)
-            VALUES (?, ?, 1, ?)
-            ON CONFLICT(user_id, track_id) DO UPDATE SET
-                count = count + 1,
-                last_played_at = excluded.last_played_at
-        """, (user_id, track_id, now))
+        if record_personal:
+            conn.execute("""
+                INSERT INTO user_play_counts (user_id, track_id, count, last_played_at)
+                VALUES (?, ?, 1, ?)
+                ON CONFLICT(user_id, track_id) DO UPDATE SET
+                    count = count + 1,
+                    last_played_at = excluded.last_played_at
+            """, (user_id, track_id, now))
     return track["play_count"], track["path"]
 
 

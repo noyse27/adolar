@@ -8,6 +8,7 @@ class SettingsUiTests(unittest.TestCase):
     def setUpClass(cls):
         project_root = Path(__file__).resolve().parents[1]
         cls.html = (project_root / "templates" / "index.html").read_text(encoding="utf-8")
+        cls.radio_html = (project_root / "templates" / "radio.html").read_text(encoding="utf-8")
         cls.javascript = (project_root / "static" / "js" / "app.js").read_text(encoding="utf-8")
 
     def test_admin_menu_and_modal_are_named_settings(self):
@@ -49,6 +50,27 @@ class SettingsUiTests(unittest.TestCase):
         self.assertIn('resetLyricsSearchParams();', self.javascript)
         for field in ("title", "artist", "album"):
             self.assertIn(f'id="lyrics-search-{field}"', self.html)
+
+    def test_companion_crossfade_primes_webview_media_and_survives_hidden_window(self):
+        crossfade = self.radio_html.split("function startCrossfade()", 1)[1]
+        crossfade = crossfade.split("// ── Audio events", 1)[0]
+        self.assertIn("const playResult = inactive.play();", crossfade)
+        self.assertIn("playResult.then(beginFade).catch(abortFade);", crossfade)
+        self.assertIn("radio.cfTimer = setTimeout(tick, 50);", crossfade)
+        self.assertNotIn("inactive.readyState", crossfade)
+        self.assertNotIn("document.hidden", crossfade)
+
+    def test_main_player_crossfade_primes_media_before_fading(self):
+        normal_crossfade = self.javascript.split("function startNormalCrossfade()", 1)[1]
+        normal_crossfade = normal_crossfade.split("function startCrossfade()", 1)[0]
+        radio_crossfade = self.javascript.split("function startCrossfade()", 1)[1]
+        radio_crossfade = radio_crossfade.split("// ── Player events", 1)[0]
+        self.assertIn("const playResult = audioB.play();", normal_crossfade)
+        self.assertIn("playResult.then(beginFade)", normal_crossfade)
+        self.assertIn("const playResult = audioB.play();", radio_crossfade)
+        self.assertIn("playResult.then(beginFade)", radio_crossfade)
+        self.assertNotIn("audioB.readyState", normal_crossfade)
+        self.assertNotIn("audioB.readyState", radio_crossfade)
 
 
 if __name__ == "__main__":
