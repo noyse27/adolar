@@ -31,6 +31,7 @@ import libraries
 import library_context
 import lyrics
 import scanner
+import smart_rules
 import smart_shuffle
 import tasks
 
@@ -716,6 +717,22 @@ def api_playlist_editor_defaults():
     if not _auth.can(g.user, "create_playlists"):
         return jsonify({"error": "forbidden"}), 403
     return jsonify({"name": db.next_playlist_name(g.user["id"])})
+
+
+@app.post("/api/smart-rules/parse")
+def api_smart_rules_parse():
+    if not (_auth.can(g.user, "create_playlists") or
+            _auth.can(g.user, "create_radio_stations")):
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        parsed = smart_rules.parse_smart_rule(data.get("text"))
+        parsed["filter"] = db.validate_radio_filter(parsed["filter"])
+    except smart_rules.SmartRuleParseError as exc:
+        return jsonify({"error": exc.user_message}), 400
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    return jsonify(parsed)
 
 
 @app.post("/api/playlist-editor/preview")

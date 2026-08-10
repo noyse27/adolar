@@ -102,6 +102,26 @@ class ValidateRadioFilterTests(unittest.TestCase):
                 "mode": "all", "rules": [{"field": "not-a-real-field", "op": "eq", "value": 1}],
             })
 
+    def test_smart_editor_metadata_is_preserved_only_at_root(self):
+        clean = db.validate_radio_filter({
+            "mode": "all",
+            "rules": [{"field": "artist", "op": "equals", "value": "Queen"}],
+            "editor_version": 2,
+            "editor_mode": "smart",
+            "smart": {"text": "Interpret ist Queen", "interpretation": "Interpret ist exakt Queen"},
+        })
+        self.assertEqual(clean["editor_mode"], "smart")
+        self.assertEqual(clean["smart"]["text"], "Interpret ist Queen")
+        self.assertEqual(clean["rules"][0]["op"], "equals")
+
+    def test_genre_rejects_exact_match_operator(self):
+        with self.assertRaises(errors.ValidationError):
+            db.validate_radio_filter({
+                "mode": "all", "rules": [
+                    {"field": "genre", "op": "equals", "value": "Rap"},
+                ],
+            })
+
     def test_unknown_mode_falls_back_to_all(self):
         clean = db.validate_radio_filter({"mode": "bogus", "rules": []})
         self.assertEqual(clean["mode"], "all")
@@ -206,6 +226,15 @@ class RadioFilterSqlTests(unittest.TestCase):
         })
         self.assertEqual(sql, "t.added_at >= unixepoch('now', ?)")
         self.assertEqual(params, ["-2 months"])
+
+    def test_named_text_field_equals_is_case_insensitive_and_not_a_like(self):
+        sql, params = db._radio_filter_sql({
+            "mode": "all", "rules": [
+                {"field": "artist", "op": "equals", "value": "Queen"},
+            ],
+        })
+        self.assertEqual(sql, "LOWER(COALESCE(t.artist, '')) = ?")
+        self.assertEqual(params, ["queen"])
 
 
 class RadioStationCrudTests(RadioTestBase):

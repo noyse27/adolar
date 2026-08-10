@@ -1358,6 +1358,7 @@ def validate_radio_filter(filter_def) -> dict:
     def walk(node, depth=0):
         if depth > 4:
             raise errors.ValidationError("Filter ist zu tief verschachtelt (maximal 4 Ebenen).")
+        source = node if isinstance(node, dict) else {}
         node = _normalize_radio_filter(node)
         out = {"mode": node["mode"], "rules": []}
         for rule in node["rules"]:
@@ -1372,7 +1373,10 @@ def validate_radio_filter(filter_def) -> dict:
             op = rule.get("op")
             value = rule.get("value")
             if field in _RADIO_TEXT_FIELDS:
-                if op not in ("contains", "not_contains"):
+                allowed_ops = ("contains", "not_contains") if field == "genre" else (
+                    "contains", "not_contains", "equals", "not_equals",
+                )
+                if op not in allowed_ops:
                     raise errors.ValidationError(
                         f"Ungültiger Operator für Textfeld '{field}'.")
                 value = str(value or "").strip()
@@ -1411,6 +1415,13 @@ def validate_radio_filter(filter_def) -> dict:
                 })
             else:
                 raise errors.ValidationError("Unbekanntes Filterfeld.")
+        if depth == 0 and source.get("editor_mode") == "smart":
+            smart = source.get("smart") if isinstance(source.get("smart"), dict) else {}
+            text = str(smart.get("text") or "").strip()[:2000]
+            interpretation = str(smart.get("interpretation") or "").strip()[:2000]
+            out["editor_version"] = 2
+            out["editor_mode"] = "smart"
+            out["smart"] = {"text": text, "interpretation": interpretation}
         return out
     return walk(filter_def)
 
@@ -1443,11 +1454,16 @@ def _radio_filter_sql(filter_def) -> tuple[str, list]:
             field, op, value = rule["field"], rule["op"], rule["value"]
             if field in _RADIO_TEXT_FIELDS:
                 col = _RADIO_TEXT_FIELDS[field]
-                expr = f"LOWER(COALESCE({col}, '')) LIKE ? ESCAPE '\\'"
-                if op == "not_contains":
-                    expr = f"NOT ({expr})"
-                parts.append(expr)
-                params.append(_like_pattern(str(value).casefold()))
+                if op in ("equals", "not_equals"):
+                    comparison = "!=" if op == "not_equals" else "="
+                    parts.append(f"LOWER(COALESCE({col}, '')) {comparison} ?")
+                    params.append(str(value).casefold())
+                else:
+                    expr = f"LOWER(COALESCE({col}, '')) LIKE ? ESCAPE '\\'"
+                    if op == "not_contains":
+                        expr = f"NOT ({expr})"
+                    parts.append(expr)
+                    params.append(_like_pattern(str(value).casefold()))
             elif field == "decade":
                 start, end = int(value), int(value) + 9
                 if op == "eq":

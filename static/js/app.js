@@ -2421,6 +2421,9 @@ updatePlaybackModeControls();
 let _radioStations = [];
 let _editingRadioStation = null;
 let _radioDraftAfterTest = null;
+let _radioRuleMode = "normal";
+let _radioSmartFilter = null;
+let _radioSmartInterpretation = "";
 
 const RADIO_FIELDS = {
   title: "Titel",
@@ -2435,7 +2438,10 @@ const RADIO_FIELDS = {
 const RADIO_TEXT_OPS = {
   contains: "enthält",
   not_contains: "enthält nicht",
+  equals: "ist",
+  not_equals: "ist nicht",
 };
+const RADIO_GENRE_OPS = {contains: "enthält", not_contains: "enthält nicht"};
 const RADIO_NUM_OPS = {
   eq: "ist",
   ne: "ist nicht",
@@ -2447,7 +2453,45 @@ const RADIO_AGE_UNITS = {days: "Tagen", weeks: "Wochen", months: "Monaten", year
 
 function _opsForField(field) {
   if (field === "added") return RADIO_ADDED_OPS;
+  if (field === "genre") return RADIO_GENRE_OPS;
   return ["title", "artist", "album", "genre"].includes(field) ? RADIO_TEXT_OPS : RADIO_NUM_OPS;
+}
+
+async function requestSmartRuleParse(text) {
+  const response = await fetch(`${API}/api/smart-rules/parse`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({text}),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Smarte Regeln konnten nicht erzeugt werden.");
+  return data;
+}
+
+function setRadioRuleMode(mode) {
+  _radioRuleMode = mode === "smart" ? "smart" : "normal";
+  $("radio-normal-rule-editor").style.display = _radioRuleMode === "normal" ? "block" : "none";
+  $("radio-smart-rule-editor").style.display = _radioRuleMode === "smart" ? "grid" : "none";
+  $("radio-rule-mode-normal").classList.toggle("active", _radioRuleMode === "normal");
+  $("radio-rule-mode-smart").classList.toggle("active", _radioRuleMode === "smart");
+}
+
+async function generateRadioSmartRules() {
+  const err = $("radio-error");
+  err.style.display = "none";
+  const text = $("radio-smart-rule-text").value.trim();
+  try {
+    const parsed = await requestSmartRuleParse(text);
+    _radioSmartFilter = parsed.filter;
+    _radioSmartInterpretation = parsed.interpretation || "";
+    $("radio-smart-rule-interpretation").textContent = `Interpretation: ${_radioSmartInterpretation}`;
+  } catch (error) {
+    _radioSmartFilter = null;
+    _radioSmartInterpretation = "";
+    $("radio-smart-rule-interpretation").textContent = "";
+    err.textContent = error.message;
+    err.style.display = "block";
+  }
 }
 
 function _setRadioRuleValueControl(row, rule = {}) {
@@ -2569,9 +2613,21 @@ function openRadioEditor(station = null) {
   $("radio-jingle-status").textContent = station?.has_jingle ? "Jingle vorhanden" : "";
   $("radio-error").style.display = "none";
   const filter = station?.filter || { mode: "all", rules: [] };
+  const smartMode = filter.editor_mode === "smart";
+  _radioSmartFilter = smartMode ? {mode: filter.mode, rules: filter.rules || []} : null;
+  _radioSmartInterpretation = smartMode ? (filter.smart?.interpretation || "") : "";
+  $("radio-smart-rule-text").value = smartMode ? (filter.smart?.text || "") : "";
+  $("radio-smart-rule-interpretation").textContent = _radioSmartInterpretation
+    ? `Interpretation: ${_radioSmartInterpretation}` : "";
+  $("radio-smart-rule-text").oninput = () => {
+    _radioSmartFilter = null;
+    _radioSmartInterpretation = "";
+    $("radio-smart-rule-interpretation").textContent = "Text geändert – Regeln bitte neu erzeugen.";
+  };
+  const normalFilter = smartMode ? {mode:"all", rules:[]} : filter;
   const allRules = [];
   const anyRules = [];
-  (filter.rules || []).forEach(rule => {
+  (normalFilter.rules || []).forEach(rule => {
     if (rule.rules && rule.mode === "any") anyRules.push(...rule.rules);
     else if (!rule.rules) allRules.push(rule);
   });
@@ -2579,6 +2635,7 @@ function openRadioEditor(station = null) {
   $("radio-rules-any").innerHTML = "";
   (allRules.length ? allRules : [{field:"artist", op:"contains", value:""}]).forEach(r => addRadioRule("all", r));
   anyRules.forEach(r => addRadioRule("any", r));
+  setRadioRuleMode(smartMode ? "smart" : "normal");
   $("radio-editor").style.display = "block";
 }
 
@@ -2598,16 +2655,30 @@ function restoreRadioEditorDraft(draft) {
   $("radio-jingle-delete").style.display = draft.has_jingle ? "inline-flex" : "none";
   $("radio-jingle-status").textContent = draft.has_jingle ? "Jingle vorhanden" : "";
   $("radio-error").style.display = "none";
+  const smartMode = draft.filter?.editor_mode === "smart";
+  _radioSmartFilter = smartMode
+    ? {mode: draft.filter.mode, rules: draft.filter.rules || []} : null;
+  _radioSmartInterpretation = smartMode ? (draft.filter.smart?.interpretation || "") : "";
+  $("radio-smart-rule-text").value = smartMode ? (draft.filter.smart?.text || "") : "";
+  $("radio-smart-rule-interpretation").textContent = _radioSmartInterpretation
+    ? `Interpretation: ${_radioSmartInterpretation}` : "";
+  $("radio-smart-rule-text").oninput = () => {
+    _radioSmartFilter = null;
+    _radioSmartInterpretation = "";
+    $("radio-smart-rule-interpretation").textContent = "Text geändert – Regeln bitte neu erzeugen.";
+  };
   $("radio-rules-all").innerHTML = "";
   $("radio-rules-any").innerHTML = "";
   const allRules = [];
   const anyRules = [];
-  (draft.filter?.rules || []).forEach(rule => {
+  const normalFilter = smartMode ? {mode:"all", rules:[]} : (draft.filter || {});
+  (normalFilter.rules || []).forEach(rule => {
     if (rule.rules && rule.mode === "any") anyRules.push(...rule.rules);
     else if (!rule.rules) allRules.push(rule);
   });
   (allRules.length ? allRules : [{field:"artist", op:"contains", value:""}]).forEach(r => addRadioRule("all", r));
   anyRules.forEach(r => addRadioRule("any", r));
+  setRadioRuleMode(smartMode ? "smart" : "normal");
   $("radio-editor").style.display = "block";
 }
 
@@ -2655,6 +2726,17 @@ function readRadioRuleRows(group) {
 }
 
 function buildRadioFilterFromEditor() {
+  if (_radioRuleMode === "smart") {
+    const text = $("radio-smart-rule-text").value.trim();
+    if (!_radioSmartFilter) throw new Error("Bitte die smarten Regeln zuerst erzeugen.");
+    return {
+      mode: _radioSmartFilter.mode,
+      rules: _radioSmartFilter.rules,
+      editor_version: 2,
+      editor_mode: "smart",
+      smart: {text, interpretation: _radioSmartInterpretation},
+    };
+  }
   const allRules = readRadioRuleRows("all");
   const anyRules = readRadioRuleRows("any");
   const rules = [...allRules];
@@ -2731,11 +2813,19 @@ async function saveRadioStation() {
     err.style.display = "block";
     return;
   }
+  let filter;
+  try {
+    filter = buildRadioFilterFromEditor();
+  } catch (error) {
+    err.textContent = error.message;
+    err.style.display = "block";
+    return;
+  }
   const payload = {
     name,
     description: $("radio-desc").value.trim(),
     scope: $("radio-scope").value,
-    filter: buildRadioFilterFromEditor(),
+    filter,
   };
   const url = _editingRadioStation
     ? `${API}/api/radio-stations/${_editingRadioStation.id}`
@@ -2766,7 +2856,14 @@ async function saveRadioStation() {
 async function testRadioStationFilter() {
   const err = $("radio-error");
   err.style.display = "none";
-  const filter = buildRadioFilterFromEditor();
+  let filter;
+  try {
+    filter = buildRadioFilterFromEditor();
+  } catch (error) {
+    err.textContent = error.message;
+    err.style.display = "block";
+    return;
+  }
   _radioDraftAfterTest = {
     editingStation: _editingRadioStation,
     name: $("radio-name").value.trim(),
@@ -4277,7 +4374,11 @@ const PLE_FIELDS = {
   title: "Titel", artist: "Interpret", album: "Album", genre: "Genre",
   year: "Jahr", decade: "Jahrzehnt", playcount: "Playcount", added: "Hinzugefügt",
 };
-const PLE_TEXT_OPS = {contains: "enthält", not_contains: "enthält nicht"};
+const PLE_TEXT_OPS = {
+  contains: "enthält", not_contains: "enthält nicht",
+  equals: "ist", not_equals: "ist nicht",
+};
+const PLE_GENRE_OPS = {contains: "enthält", not_contains: "enthält nicht"};
 const PLE_NUM_OPS = {eq: "ist", ne: "ist nicht", gt: "ist größer", lt: "ist kleiner"};
 const PLE_ADDED_OPS = {before: "vor", within_last: "innerhalb der letzten"};
 let pleTracks = [];
@@ -4287,10 +4388,40 @@ let pleDragIndex = null;
 let pleSearchTimer = null;
 let pleDirty = false;
 let pleInputsBound = false;
+let pleRuleMode = "normal";
+let pleSmartFilter = null;
+let pleSmartInterpretation = "";
 
 function pleOps(field) {
   if (field === "added") return PLE_ADDED_OPS;
+  if (field === "genre") return PLE_GENRE_OPS;
   return ["title", "artist", "album", "genre"].includes(field) ? PLE_TEXT_OPS : PLE_NUM_OPS;
+}
+
+function pleSetRuleMode(mode) {
+  pleRuleMode = mode === "smart" ? "smart" : "normal";
+  $("ple-normal-rule-editor").style.display = pleRuleMode === "normal" ? "block" : "none";
+  $("ple-smart-rule-editor").style.display = pleRuleMode === "smart" ? "grid" : "none";
+  $("ple-rule-mode-normal").classList.toggle("active", pleRuleMode === "normal");
+  $("ple-rule-mode-smart").classList.toggle("active", pleRuleMode === "smart");
+  pleDirty = true;
+}
+
+async function pleGenerateSmartRules() {
+  pleSetStatus("Smarte Regeln werden erzeugt…");
+  try {
+    const parsed = await requestSmartRuleParse($("ple-smart-rule-text").value.trim());
+    pleSmartFilter = parsed.filter;
+    pleSmartInterpretation = parsed.interpretation || "";
+    $("ple-smart-rule-interpretation").textContent = `Interpretation: ${pleSmartInterpretation}`;
+    pleDirty = true;
+    pleSetStatus("Smarte Regeln erzeugt");
+  } catch (error) {
+    pleSmartFilter = null;
+    pleSmartInterpretation = "";
+    $("ple-smart-rule-interpretation").textContent = "";
+    pleSetStatus(error.message, true);
+  }
 }
 
 function pleSetRuleValueControl(row, rule = {}) {
@@ -4362,6 +4493,23 @@ function pleReadRules(group) {
 }
 
 function pleCurrentFilter() {
+  if (pleRuleMode === "smart") {
+    if (!pleSmartFilter) throw new Error("Bitte die smarten Regeln zuerst erzeugen.");
+    return {
+      editor_version: 2,
+      editor_mode: "smart",
+      smart: {
+        text: $("ple-smart-rule-text").value.trim(),
+        interpretation: pleSmartInterpretation,
+      },
+      search: {
+        title: $("ple-search-title").value.trim(),
+        artist: $("ple-search-artist").value.trim(),
+        album: $("ple-search-album").value.trim(),
+      },
+      rules: pleSmartFilter,
+    };
+  }
   const allRules = pleReadRules("all");
   const anyRules = pleReadRules("any");
   if (anyRules.length) allRules.push({mode: "any", rules: anyRules});
@@ -4383,7 +4531,13 @@ function pleRestoreFilter(saved) {
   $("ple-search-album").value = search.album || "";
   $("ple-rules-all").innerHTML = "";
   $("ple-rules-any").innerHTML = "";
-  const root = saved?.rules || {mode: "all", rules: []};
+  const smartMode = saved?.editor_mode === "smart";
+  pleSmartFilter = smartMode ? (saved.rules || {mode:"all", rules:[]}) : null;
+  pleSmartInterpretation = smartMode ? (saved.smart?.interpretation || "") : "";
+  $("ple-smart-rule-text").value = smartMode ? (saved.smart?.text || "") : "";
+  $("ple-smart-rule-interpretation").textContent = pleSmartInterpretation
+    ? `Interpretation: ${pleSmartInterpretation}` : "";
+  const root = smartMode ? {mode:"all", rules:[]} : (saved?.rules || {mode:"all", rules:[]});
   (root.rules || []).forEach(rule => {
     if (rule?.rules) {
       (rule.rules || []).forEach(child => pleAddRule(rule.mode === "any" ? "any" : "all", child));
@@ -4394,6 +4548,7 @@ function pleRestoreFilter(saved) {
   if (!$("ple-rules-all").children.length && !$("ple-rules-any").children.length) {
     pleAddRule("all", {field:"artist", op:"contains", value:""});
   }
+  pleSetRuleMode(smartMode ? "smart" : "normal");
 }
 
 function pleBindInputs() {
@@ -4405,6 +4560,12 @@ function pleBindInputs() {
       clearTimeout(pleSearchTimer);
       pleSearchTimer = setTimeout(pleRunPreview, 320);
     });
+  });
+  $("ple-smart-rule-text").addEventListener("input", () => {
+    pleSmartFilter = null;
+    pleSmartInterpretation = "";
+    $("ple-smart-rule-interpretation").textContent = "Text geändert – Regeln bitte neu erzeugen.";
+    pleDirty = true;
   });
   document.querySelectorAll('input[name="ple-save-type"]').forEach(input => {
     input.addEventListener("change", () => {
@@ -4430,7 +4591,7 @@ async function openPlaylistEditor(playlist = null) {
   if (pleEditing) {
     try { saved = JSON.parse(pleEditing.filters || "{}"); } catch {}
   }
-  pleRestoreFilter(saved.editor_version === 1 ? saved : {});
+  pleRestoreFilter([1, 2].includes(saved.editor_version) ? saved : {});
   if (pleEditing) {
     pleSetStatus("Playlist wird geladen…");
     const response = await fetch(`/api/playlists/${pleEditing.id}/tracks`);
@@ -4696,12 +4857,12 @@ async function pleSave() {
   }
   const button = $("ple-save-confirm");
   button.disabled = true;
-  const payload = {
-    name, type, filters:pleCurrentFilter(),
-    sort:pleEditing?.sort || "artist",
-    track_ids:pleTracks.map(track => track.id),
-  };
   try {
+    const payload = {
+      name, type, filters:pleCurrentFilter(),
+      sort:pleEditing?.sort || "artist",
+      track_ids:pleTracks.map(track => track.id),
+    };
     const response = await fetch(
       pleEditing ? `/api/playlists/${pleEditing.id}` : "/api/playlists",
       {method:pleEditing ? "PUT" : "POST", headers:{"Content-Type":"application/json"},
