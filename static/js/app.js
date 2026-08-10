@@ -2430,6 +2430,7 @@ const RADIO_FIELDS = {
   year: "Jahr",
   decade: "Jahrzehnt",
   playcount: "Playcount",
+  added: "Hinzugefügt",
 };
 const RADIO_TEXT_OPS = {
   contains: "enthält",
@@ -2441,9 +2442,28 @@ const RADIO_NUM_OPS = {
   gt: "ist größer",
   lt: "ist kleiner",
 };
+const RADIO_ADDED_OPS = {before: "vor", within_last: "innerhalb der letzten"};
+const RADIO_AGE_UNITS = {days: "Tagen", weeks: "Wochen", months: "Monaten", years: "Jahren"};
 
 function _opsForField(field) {
+  if (field === "added") return RADIO_ADDED_OPS;
   return ["title", "artist", "album", "genre"].includes(field) ? RADIO_TEXT_OPS : RADIO_NUM_OPS;
+}
+
+function _setRadioRuleValueControl(row, rule = {}) {
+  const field = row.querySelector(".radio-field").value;
+  const valueWrap = row.querySelector(".radio-rule-value-wrap");
+  if (field === "added") {
+    const value = Number.isFinite(Number(rule.value)) ? Math.max(1, Number(rule.value)) : 1;
+    const unit = RADIO_AGE_UNITS[rule.unit] ? rule.unit : "days";
+    valueWrap.innerHTML = `
+      <input class="radio-input radio-value" type="number" min="1" step="1" value="${value}">
+      <select class="radio-select radio-unit">${Object.entries(RADIO_AGE_UNITS).map(([v,l]) =>
+        `<option value="${v}" ${v === unit ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+  } else {
+    const value = esc(rule.value ?? "").replace(/"/g, "&quot;");
+    valueWrap.innerHTML = `<input class="radio-input radio-value" type="text" value="${value}">`;
+  }
 }
 
 async function loadRadioStations() {
@@ -2603,17 +2623,18 @@ function addRadioRule(group, rule = {}) {
   const field = rule.field || "title";
   const ops = _opsForField(field);
   const op = rule.op && ops[rule.op] ? rule.op : Object.keys(ops)[0];
-  const val = esc(rule.value ?? "").replace(/"/g, "&quot;");
   row.innerHTML = `
     <select class="radio-select radio-field">${Object.entries(RADIO_FIELDS).map(([v,l]) => `<option value="${v}" ${v===field?"selected":""}>${l}</option>`).join("")}</select>
     <select class="radio-select radio-op">${Object.entries(ops).map(([v,l]) => `<option value="${v}" ${v===op?"selected":""}>${l}</option>`).join("")}</select>
-    <input class="radio-input radio-value" type="text" value="${val}">
+    <span class="radio-rule-value-wrap"></span>
     <button class="icon-btn danger radio-rule-remove" title="Entfernen"><i class="ti ti-minus"></i></button>`;
   const fieldEl = row.querySelector(".radio-field");
   const opEl = row.querySelector(".radio-op");
+  _setRadioRuleValueControl(row, rule);
   fieldEl.onchange = () => {
     const nextOps = _opsForField(fieldEl.value);
     opEl.innerHTML = Object.entries(nextOps).map(([v,l]) => `<option value="${v}">${l}</option>`).join("");
+    _setRadioRuleValueControl(row);
   };
   row.querySelector(".radio-rule-remove").onclick = () => row.remove();
   wrap.appendChild(row);
@@ -2621,11 +2642,16 @@ function addRadioRule(group, rule = {}) {
 
 function readRadioRuleRows(group) {
   const wrap = group === "any" ? $("radio-rules-any") : $("radio-rules-all");
-  return [...wrap.querySelectorAll(".radio-rule-row")].map(row => ({
-    field: row.querySelector(".radio-field").value,
-    op: row.querySelector(".radio-op").value,
-    value: row.querySelector(".radio-value").value.trim(),
-  })).filter(r => r.value !== "");
+  return [...wrap.querySelectorAll(".radio-rule-row")].map(row => {
+    const rule = {
+      field: row.querySelector(".radio-field").value,
+      op: row.querySelector(".radio-op").value,
+      value: row.querySelector(".radio-value").value.trim(),
+    };
+    const unit = row.querySelector(".radio-unit");
+    if (unit) rule.unit = unit.value;
+    return rule;
+  }).filter(r => r.value !== "");
 }
 
 function buildRadioFilterFromEditor() {
@@ -4249,10 +4275,11 @@ function updateSavePlaylistBtn() { /* removed */ }
 // ── Playlist editor ──────────────────────────────────────────────────────────
 const PLE_FIELDS = {
   title: "Titel", artist: "Interpret", album: "Album", genre: "Genre",
-  year: "Jahr", decade: "Jahrzehnt", playcount: "Playcount",
+  year: "Jahr", decade: "Jahrzehnt", playcount: "Playcount", added: "Hinzugefügt",
 };
 const PLE_TEXT_OPS = {contains: "enthält", not_contains: "enthält nicht"};
 const PLE_NUM_OPS = {eq: "ist", ne: "ist nicht", gt: "ist größer", lt: "ist kleiner"};
+const PLE_ADDED_OPS = {before: "vor", within_last: "innerhalb der letzten"};
 let pleTracks = [];
 let pleResults = [];
 let pleEditing = null;
@@ -4262,7 +4289,28 @@ let pleDirty = false;
 let pleInputsBound = false;
 
 function pleOps(field) {
+  if (field === "added") return PLE_ADDED_OPS;
   return ["title", "artist", "album", "genre"].includes(field) ? PLE_TEXT_OPS : PLE_NUM_OPS;
+}
+
+function pleSetRuleValueControl(row, rule = {}) {
+  const field = row.querySelector(".ple-rule-field").value;
+  const valueWrap = row.querySelector(".ple-rule-value-wrap");
+  if (field === "added") {
+    const value = Number.isFinite(Number(rule.value)) ? Math.max(1, Number(rule.value)) : 1;
+    const unit = RADIO_AGE_UNITS[rule.unit] ? rule.unit : "days";
+    valueWrap.innerHTML = `
+      <input class="ple-input ple-rule-value" type="number" min="1" step="1" value="${value}">
+      <select class="ple-select ple-rule-unit">${Object.entries(RADIO_AGE_UNITS).map(([v,l]) =>
+        `<option value="${v}" ${v === unit ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+  } else {
+    valueWrap.innerHTML = '<input class="ple-input ple-rule-value" placeholder="Wert">';
+    valueWrap.querySelector(".ple-rule-value").value = rule.value ?? "";
+  }
+  valueWrap.querySelectorAll("input, select").forEach(node => {
+    node.oninput = () => { pleDirty = true; };
+    node.onchange = () => { pleDirty = true; };
+  });
 }
 
 function pleSetStatus(message, error = false) {
@@ -4283,17 +4331,17 @@ function pleAddRule(group, rule = {}) {
       `<option value="${value}" ${value === field ? "selected" : ""}>${label}</option>`).join("")}</select>
     <select class="ple-select ple-rule-op">${Object.entries(ops).map(([value,label]) =>
       `<option value="${value}" ${value === op ? "selected" : ""}>${label}</option>`).join("")}</select>
-    <input class="ple-input ple-rule-value" placeholder="Wert">
+    <span class="ple-rule-value-wrap"></span>
     <button class="ple-danger" type="button" title="Regel entfernen">×</button>`;
-  row.querySelector(".ple-rule-value").value = rule.value ?? "";
+  pleSetRuleValueControl(row, rule);
   row.querySelector(".ple-rule-field").onchange = event => {
     const opSelect = row.querySelector(".ple-rule-op");
     opSelect.innerHTML = Object.entries(pleOps(event.target.value))
       .map(([value,label]) => `<option value="${value}">${label}</option>`).join("");
+    pleSetRuleValueControl(row);
     pleDirty = true;
   };
   row.querySelector(".ple-rule-op").onchange = () => { pleDirty = true; };
-  row.querySelector(".ple-rule-value").oninput = () => { pleDirty = true; };
   row.querySelector("button").onclick = () => { row.remove(); pleDirty = true; };
   wrap.appendChild(row);
   pleDirty = true;
@@ -4301,11 +4349,16 @@ function pleAddRule(group, rule = {}) {
 
 function pleReadRules(group) {
   return [...$(group === "any" ? "ple-rules-any" : "ple-rules-all")
-    .querySelectorAll(".ple-rule-row")].map(row => ({
-      field: row.querySelector(".ple-rule-field").value,
-      op: row.querySelector(".ple-rule-op").value,
-      value: row.querySelector(".ple-rule-value").value.trim(),
-    })).filter(rule => rule.value);
+    .querySelectorAll(".ple-rule-row")].map(row => {
+      const rule = {
+        field: row.querySelector(".ple-rule-field").value,
+        op: row.querySelector(".ple-rule-op").value,
+        value: row.querySelector(".ple-rule-value").value.trim(),
+      };
+      const unit = row.querySelector(".ple-rule-unit");
+      if (unit) rule.unit = unit.value;
+      return rule;
+    }).filter(rule => rule.value);
 }
 
 function pleCurrentFilter() {

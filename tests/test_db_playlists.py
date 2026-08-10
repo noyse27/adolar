@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -252,6 +253,21 @@ class GetPlaylistTracksTests(PlaylistTestBase):
         result = db.get_playlist_tracks(system_playlist["id"], user_id=1)
         self.assertIsInstance(result, list)
 
+    def test_newest_added_sort_uses_added_at_not_reindex_time(self):
+        with db.db() as conn:
+            conn.execute(
+                "UPDATE tracks SET added_at=100, indexed_at=300 WHERE id=?",
+                (self.track_a,),
+            )
+            conn.execute(
+                "UPDATE tracks SET added_at=200, indexed_at=100 WHERE id=?",
+                (self.track_b,),
+            )
+        _, tracks = db.search_tracks(
+            page=1, per_page=100, sort="newest_added", count=False, user_id=1,
+        )
+        self.assertEqual([track["id"] for track in tracks[:2]], [self.track_b, self.track_a])
+
     def test_smart_playlist_with_editor_filters_matches_by_rule(self):
         saved = {
             "editor_version": 1,
@@ -297,6 +313,44 @@ class GetPlaylistFilterTracksTests(PlaylistTestBase):
         saved = {"search": {}, "rules": {"mode": "all", "rules": []}}
         tracks = db.get_playlist_filter_tracks(saved, user_id=1, sort="artist")
         self.assertEqual([t["artist"] for t in tracks], ["Aardvark", "Zebra"])
+
+    def test_added_before_only_returns_tracks_older_than_the_period(self):
+        with db.db() as conn:
+            conn.execute(
+                "UPDATE tracks SET added_at=? WHERE id=?",
+                (time.time() - 10 * 86400, self.track_a),
+            )
+            conn.execute(
+                "UPDATE tracks SET added_at=? WHERE id=?",
+                (time.time() - 2 * 86400, self.track_b),
+            )
+        saved = {
+            "search": {},
+            "rules": {"mode": "all", "rules": [
+                {"field": "added", "op": "before", "value": 7, "unit": "days"},
+            ]},
+        }
+        tracks = db.get_playlist_filter_tracks(saved, user_id=1)
+        self.assertEqual([track["id"] for track in tracks], [self.track_a])
+
+    def test_added_within_last_only_returns_recent_tracks(self):
+        with db.db() as conn:
+            conn.execute(
+                "UPDATE tracks SET added_at=? WHERE id=?",
+                (time.time() - 100 * 86400, self.track_a),
+            )
+            conn.execute(
+                "UPDATE tracks SET added_at=? WHERE id=?",
+                (time.time() - 20 * 86400, self.track_b),
+            )
+        saved = {
+            "search": {},
+            "rules": {"mode": "all", "rules": [
+                {"field": "added", "op": "within_last", "value": 2, "unit": "months"},
+            ]},
+        }
+        tracks = db.get_playlist_filter_tracks(saved, user_id=1)
+        self.assertEqual([track["id"] for track in tracks], [self.track_b])
 
 
 if __name__ == "__main__":

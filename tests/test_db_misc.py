@@ -52,6 +52,36 @@ class GenresAndStatsTests(MiscTestBase):
         self.assertEqual(db.get_stats(), {"total_tracks": 0, "total_size_gb": 0})
 
 
+class TrackTimestampTests(MiscTestBase):
+    @staticmethod
+    def _track_data(mtime):
+        return {
+            "path": "/music/timestamp.mp3", "title": "Timestamp", "artist": "Artist",
+            "album": "Album", "album_artist": "Artist", "genre": "Rock", "year": 2020,
+            "track_no": 1, "duration": 180, "bitrate": 320, "size": 1234,
+            "cover_hash": None, "bpm": None, "mtime": mtime, "play_count": 0,
+            "loved": False,
+        }
+
+    def test_reindex_updates_indexed_at_but_preserves_added_at(self):
+        db.upsert_track(self._track_data(100.0))
+        with db.db() as conn:
+            conn.execute(
+                "UPDATE tracks SET added_at=111, indexed_at=222 WHERE path=?",
+                ("/music/timestamp.mp3",),
+            )
+
+        db.upsert_track(self._track_data(200.0))
+
+        with db.db() as conn:
+            row = conn.execute(
+                "SELECT added_at, indexed_at FROM tracks WHERE path=?",
+                ("/music/timestamp.mp3",),
+            ).fetchone()
+        self.assertEqual(row["added_at"], 111)
+        self.assertGreater(row["indexed_at"], 222)
+
+
 class CoverTests(MiscTestBase):
     def test_save_cover_then_get_cover_round_trips(self):
         db.save_cover("hash123", b"binarydata", "image/png")

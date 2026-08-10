@@ -321,6 +321,7 @@ def init_db():
                 play_count  INTEGER NOT NULL DEFAULT 0,
                 play_count_tag_dirty INTEGER NOT NULL DEFAULT 0,
                 loved       INTEGER NOT NULL DEFAULT 0,
+                added_at    REAL DEFAULT (unixepoch()),
                 indexed_at  REAL DEFAULT (unixepoch())
             );
 
@@ -454,6 +455,7 @@ def init_db():
             "ALTER TABLE tracks ADD COLUMN play_count_tag_dirty INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tracks ADD COLUMN loved INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tracks ADD COLUMN album_artist TEXT",
+            "ALTER TABLE tracks ADD COLUMN added_at REAL",
             "ALTER TABLE users ADD COLUMN contributes_playcount INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE radio_stations ADD COLUMN description TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE radio_stations ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'",
@@ -475,6 +477,10 @@ def init_db():
         ]:
             with contextlib.suppress(Exception):
                 conn.execute(migration)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tracks_added_at
+            ON tracks(added_at DESC)
+        """)
         conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS control.idx_connection_log_client
             ON connection_log(client_key) WHERE client_key IS NOT NULL
@@ -506,6 +512,16 @@ def init_db():
                 INSERT INTO tracks_fts(rowid, title, artist, album, genre)
                 VALUES (new.id, new.title, new.artist, new.album, new.genre);
             END;
+        """)
+        # Existing libraries did not distinguish the first import from a
+        # later re-index. Preserve the best timestamp we have once; future
+        # updates never touch added_at again. This runs after narrowing the
+        # FTS update trigger so a timestamp-only migration cannot churn an
+        # external-content index created for a legacy tracks table.
+        conn.execute("""
+            UPDATE tracks
+            SET added_at=COALESCE(indexed_at, unixepoch())
+            WHERE added_at IS NULL
         """)
         queued = conn.execute("""
             INSERT OR IGNORE INTO settings (key, value)
@@ -842,7 +858,7 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
 
     if sort in _PC_SORTS:
         if sort == "newest_added":
-            order_expr = "t.indexed_at DESC"
+            order_expr = "t.added_at DESC"
         elif sort == "loved_at":
             # Sort by when track was loved on Last.fm (desc), loved tracks first
             order_expr = "l.loved_at DESC NULLS LAST, t.artist, t.title"
@@ -1273,6 +1289,12 @@ _RADIO_NUM_FIELDS = {
     "decade": "t.year",
     "playcount": "COALESCE(upc.count, 0)",
 }
+_RADIO_AGE_UNITS = {
+    "days": "days",
+    "weeks": "days",
+    "months": "months",
+    "years": "years",
+}
 
 
 def _track_rows_to_dicts(rows) -> list[dict]:
@@ -1368,6 +1390,25 @@ def validate_radio_filter(filter_def) -> dict:
                 if field == "decade":
                     num = (num // 10) * 10
                 out["rules"].append({"field": field, "op": op, "value": num})
+            elif field == "added":
+                if op not in ("before", "within_last"):
+                    raise errors.ValidationError(
+                        "Ungültiger Operator für Feld 'added'.")
+                try:
+                    num = int(value)
+                except (TypeError, ValueError):
+                    raise errors.ValidationError(
+                        "Ungültiger Zahlenwert für Feld 'added'.") from None
+                unit = rule.get("unit")
+                if num < 1:
+                    raise errors.ValidationError(
+                        "Der Zeitraum für 'added' muss mindestens 1 sein.")
+                if unit not in _RADIO_AGE_UNITS:
+                    raise errors.ValidationError(
+                        "Ungültige Zeiteinheit für Feld 'added'.")
+                out["rules"].append({
+                    "field": field, "op": op, "value": num, "unit": unit,
+                })
             else:
                 raise errors.ValidationError("Unbekanntes Filterfeld.")
         return out
@@ -1421,6 +1462,12 @@ def _radio_filter_sql(filter_def) -> tuple[str, list]:
                 elif op == "lt":
                     parts.append("t.year < ?")
                     params.append(start)
+            elif field == "added":
+                amount = int(value) * (7 if rule["unit"] == "weeks" else 1)
+                modifier = f"-{amount} {_RADIO_AGE_UNITS[rule['unit']]}"
+                comparison = "<=" if op == "before" else ">="
+                parts.append(f"t.added_at {comparison} unixepoch('now', ?)")
+                params.append(modifier)
             else:
                 col = _RADIO_NUM_FIELDS[field]
                 sql_op = {"eq": "=", "ne": "!=", "gt": ">", "lt": "<"}[op]
