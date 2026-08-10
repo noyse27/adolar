@@ -35,6 +35,25 @@ all clients.
 become a recurring playback complaint or when player/scanner work already
 touches the relevant metadata path.
 
+## LRCLIB Lyricsfile 1.0 support
+
+**Idea:** Add support for LRCLIB's proposed YAML-based Lyricsfile format,
+including optional word-level timing. Existing LRC and plain lyrics remain the
+compatible fallback and must continue to work unchanged.
+
+**Why later:** The rich format and its API integration are currently described
+upstream as a concept and implementation plan. Building against it before the
+optional `lyricsfile` field is stable in the production get/search API would
+risk avoidable rework.
+
+**Recheck trigger:** The field is observable and stable in LRCLIB's production
+API, with representative fixtures available.
+
+**Grooming:** See the
+[Lyrics roadmap and Lyricsfile grooming](lyrics-roadmap.md) for the proposed
+data model, priority rules, migration, client impact, work packages, and test
+matrix.
+
 ## Spotify integration for new-release discovery
 
 **Idea:** Surface real "new releases" alongside the static local MP3 library —
