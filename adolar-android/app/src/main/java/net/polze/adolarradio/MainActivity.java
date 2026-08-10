@@ -184,6 +184,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        migrateWebViewSession();
         orbitronMedium = ResourcesCompat.getFont(this, R.font.orbitron_medium);
         orbitronBold = ResourcesCompat.getFont(this, R.font.orbitron_bold);
         requestNotificationPermissionIfNeeded();
@@ -962,6 +963,7 @@ public class MainActivity extends Activity {
                     AdolarPrefs.apiUrl(this), "adolar_session=; Max-Age=0; Path=/"
             );
             cookies.flush();
+            AdolarPrefs.clearSessionCookie(this);
             mainHandler.post(() -> {
                 if (generation != accountGeneration) return;
                 signedIn = false;
@@ -1224,8 +1226,15 @@ public class MainActivity extends Activity {
             connection.setReadTimeout(12000);
             connection.setRequestProperty("Accept", "application/json");
             connection.setRequestProperty("X-Adolar-Product", "android");
-            String cookie = CookieManager.getInstance().getCookie(base);
-            if (cookie != null && !cookie.isEmpty()) {
+            String cookie = AdolarPrefs.getSessionCookie(this);
+            if (cookie.isEmpty()) {
+                String webViewCookie = CookieManager.getInstance().getCookie(base);
+                if (webViewCookie != null && !webViewCookie.isEmpty()) {
+                    AdolarPrefs.storeSessionCookie(this, webViewCookie);
+                    cookie = AdolarPrefs.getSessionCookie(this);
+                }
+            }
+            if (!cookie.isEmpty()) {
                 connection.setRequestProperty("Cookie", cookie);
             }
             if (body != null) {
@@ -1244,6 +1253,7 @@ public class MainActivity extends Activity {
                         && "Set-Cookie".equalsIgnoreCase(header.getKey())) {
                     for (String value : header.getValue()) {
                         CookieManager.getInstance().setCookie(base, value);
+                        AdolarPrefs.storeSessionCookie(this, value);
                     }
                 }
             }
@@ -1270,6 +1280,17 @@ public class MainActivity extends Activity {
             }
         }
         return result.toString();
+    }
+
+    private void migrateWebViewSession() {
+        if (!AdolarPrefs.hasServerUrl(this)
+                || !AdolarPrefs.getSessionCookie(this).isEmpty()) {
+            return;
+        }
+        String cookie = CookieManager.getInstance().getCookie(AdolarPrefs.apiUrl(this));
+        if (cookie != null && !cookie.isEmpty()) {
+            AdolarPrefs.storeSessionCookie(this, cookie);
+        }
     }
 
     private void showCover(String address) {

@@ -495,7 +495,7 @@ const progress   = $("progress");
 // completions, recency) instead of locking in a large stretch of tracks
 // scored from one stale profile snapshot — see docs/adolar4u-roadmap.md.
 const RADIO_REFILL_BATCH = 5;
-const radio = { active: false, browsingLibrary: false, queue: [], playedIds: [], shuffleSession: null, refillPromise: null, cfTimer: null, cfActive: false, cfPending: false, cfToken: 0 };
+const radio = { active: false, browsingLibrary: false, queue: [], history: [], playedIds: [], shuffleSession: null, refillPromise: null, cfTimer: null, cfActive: false, cfPending: false, cfToken: 0 };
 radio.stationId = 1;
 radio.stationName = "Adolar Radio";
 radio.station = null;
@@ -1374,7 +1374,7 @@ function updatePlayView(track) {
   $("play-view-meta").textContent = meta.join(" · ");
 
   const sourceIndex = state.tracks.findIndex(item => String(item.id) === String(track.id));
-  $("play-view-prev").disabled = radio.active || sourceIndex <= 0;
+  $("play-view-prev").disabled = radio.active ? !radio.history.length : sourceIndex <= 0;
   $("play-view-next").disabled = radio.active
     ? radio.queue.length <= 1
     : sourceIndex < 0 || sourceIndex >= state.tracks.length - 1;
@@ -1999,6 +1999,7 @@ async function startRadio(station = null, initialPlaylist = null) {
   radio.active = true;
   radio.browsingLibrary = false;
   radio.queue  = [];
+  radio.history = [];
   radio.playedIds = [];
   radio.shuffleSession = null;
   radio.refillPromise = null;
@@ -2124,6 +2125,8 @@ async function radioNext() {
   // shift played track out
   const done = radio.queue.shift();
   if (done) {
+    radio.history.push(done);
+    if (radio.history.length > 100) radio.history = radio.history.slice(-100);
     radio.playedIds.push(done.id);
     radio.tracksSinceJingle++;
   }
@@ -2542,8 +2545,30 @@ audioA.volume = 0.8;
 audioB.volume = 0.8;
 
 $("btn-prev").onclick = () => {
-  if (radio.active) return;
+  if (audio.currentTime > 5) {
+    audio.currentTime = 0;
+    return;
+  }
+  if (radio.active) {
+    const previous = radio.history.pop();
+    if (!previous) {
+      audio.currentTime = 0;
+      return;
+    }
+    finishAdolar4UTrack("manual_previous");
+    resetRadioCrossfadeBuffer();
+    radio.playedIds.pop();
+    radio.tracksSinceJingle = Math.max(0, radio.tracksSinceJingle - 1);
+    radio.queue.unshift(previous);
+    state.tracks = [...radio.queue];
+    state.currentIdx = 0;
+    state.currentTrack = previous;
+    playTrack(0);
+    return;
+  }
+  resetNormalCrossfadeBuffer();
   if (state.currentIdx > 0) playTrack(state.currentIdx - 1);
+  else audio.currentTime = 0;
 };
 $("btn-next").onclick = async () => {
   finishAdolar4UTrack("manual_next");

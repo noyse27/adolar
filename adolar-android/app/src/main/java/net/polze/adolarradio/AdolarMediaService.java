@@ -84,6 +84,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     private static final long AUDIO_CACHE_BYTES = 384L * 1024L * 1024L;
     private static final long CROSSFADE_MS = 8000L;
     private static final long CROSSFADE_TICK_MS = 50L;
+    private static final long PREVIOUS_TRACK_THRESHOLD_MS = 5000L;
     private static SimpleCache sharedAudioCache;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -97,6 +98,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     private Track currentTrack;
     private Track preloadedTrack;
     private final ArrayDeque<Track> upcomingTracks = new ArrayDeque<>();
+    private final ArrayDeque<Track> previousTracks = new ArrayDeque<>();
     private boolean queueRequestInFlight;
     private boolean crossfadeActive;
     private Runnable crossfadeStep;
@@ -143,6 +145,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         public void onPlaybackStateChanged(int state) {
             if (state == Player.STATE_ENDED) {
                 if (!crossfadeActive) {
+                    rememberCurrentTrack();
                     finishCurrentTrack(true, "ended");
                     promotePreloadedTrack(false);
                 }
@@ -201,6 +204,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             cancelCrossfade();
             clearPlayers();
             upcomingTracks.clear();
+            previousTracks.clear();
             preloadedTrack = null;
             finishCurrentTrack(false, "track_change");
             currentStationId = station.id;
@@ -220,13 +224,26 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         @Override
         public void onSkipToNext() {
             cancelCrossfade();
+            rememberCurrentTrack();
             finishCurrentTrack(false, "manual_next");
             promotePreloadedTrack(false);
         }
 
         @Override
         public void onSkipToPrevious() {
-            player.seekTo(0);
+            if (player.getCurrentPosition() > PREVIOUS_TRACK_THRESHOLD_MS || previousTracks.isEmpty()) {
+                player.seekTo(0);
+                return;
+            }
+            cancelCrossfade();
+            Track previous = previousTracks.removeLast();
+            Track interrupted = currentTrack;
+            if (preloadedTrack != null) upcomingTracks.addFirst(preloadedTrack);
+            if (interrupted != null) upcomingTracks.addFirst(interrupted);
+            finishCurrentTrack(false, "manual_previous");
+            clearPlayers();
+            preloadedTrack = null;
+            startTrack(previous);
         }
 
         @Override
@@ -242,6 +259,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             finishCurrentTrack(false, "stop");
             clearPlayers();
             upcomingTracks.clear();
+            previousTracks.clear();
             preloadedTrack = null;
             updatePlaybackState(PlaybackStateCompat.STATE_STOPPED, null);
             stopForeground(true);
@@ -608,6 +626,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
                     mainHandler.postDelayed(this, CROSSFADE_TICK_MS);
                     return;
                 }
+                rememberCurrentTrack();
                 finishCurrentTrack(true, "ended");
                 completePlayerPromotion();
                 Log.d(TAG, "crossfade end durationMs="
@@ -756,6 +775,12 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
                 track, completed ? "completed" : "skipped", reason, player.getCurrentPosition(), track.durationMs
         );
         currentTrack = null;
+    }
+
+    private void rememberCurrentTrack() {
+        if (currentTrack == null) return;
+        previousTracks.addLast(currentTrack);
+        if (previousTracks.size() > 100) previousTracks.removeFirst();
     }
 
     private void sendListeningEvent(
