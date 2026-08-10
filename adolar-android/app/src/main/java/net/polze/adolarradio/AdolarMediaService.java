@@ -19,6 +19,7 @@ import android.util.Log;
 import android.view.KeyEvent;
 import android.webkit.CookieManager;
 
+import androidx.annotation.OptIn;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.media.MediaBrowserServiceCompat;
@@ -29,6 +30,7 @@ import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.MediaSource;
@@ -59,6 +61,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * gapless track transitions — a hand-rolled dual-MediaPlayer approach was
  * tried first and repeatedly left playback silent after a track change.
  */
+@OptIn(markerClass = UnstableApi.class)
 public class AdolarMediaService extends MediaBrowserServiceCompat {
     private static final String TAG = "AdolarMediaService";
     private static final String ROOT_ID = "adolar_root";
@@ -71,6 +74,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             "net.polze.adolarradio.metadata.HAS_LYRICS";
     private static final String PLAYBACK_CHANNEL_ID = "adolar_playback";
     private static final int PLAYBACK_NOTIFICATION_ID = 1001;
+    private static final long PREVIOUS_TRACK_THRESHOLD_MS = 5000;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final String listeningSession = "android-auto-" + UUID.randomUUID();
@@ -78,10 +82,12 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     private MediaSessionCompat mediaSession;
     private ExoPlayer player;
     private Track currentTrack;
+    private final List<Track> previousTracks = new ArrayList<>();
     // At most one track is ever queued ahead of the currently playing one;
     // this is the source of truth for what it is once ExoPlayer transitions
     // to it, so onMediaItemTransition never needs to inspect the MediaItem.
     private Track queuedNextTrack;
+    private boolean restoringPreviousTrack;
     private int currentStationId = 1;
     private String currentStationName = "Adolar Radio";
     private String currentStationEngine = "shuffle";
@@ -126,6 +132,10 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
 
         @Override
         public void onMediaItemTransition(MediaItem mediaItem, int reason) {
+            if (restoringPreviousTrack) {
+                restoringPreviousTrack = false;
+                return;
+            }
             if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
                     && reason != Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
                 return;
@@ -133,9 +143,13 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             if (queuedNextTrack == null) {
                 return;
             }
+            Track finishedTrack = currentTrack;
             finishCurrentTrack(
                     true, reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ? "ended" : "manual_next"
             );
+            if (finishedTrack != null) {
+                previousTracks.add(finishedTrack);
+            }
             Track promoted = queuedNextTrack;
             queuedNextTrack = null;
             currentTrack = promoted;
@@ -208,7 +222,44 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
 
         @Override
         public void onSkipToPrevious() {
-            player.seekTo(0);
+            if (currentTrack == null || player.getMediaItemCount() == 0) {
+                return;
+            }
+            if (player.getCurrentPosition() > PREVIOUS_TRACK_THRESHOLD_MS) {
+                player.seekTo(0);
+                return;
+            }
+            if (previousTracks.isEmpty() || !player.hasPreviousMediaItem()) {
+                player.seekTo(0);
+                return;
+            }
+
+            Track previousTrack = previousTracks.remove(previousTracks.size() - 1);
+            Track skippedTrack = currentTrack;
+            finishCurrentTrack(false, "manual_previous");
+
+            // Discard the already preloaded future track. The track we are
+            // leaving becomes the single queued successor of the restored one.
+            int currentIndex = player.getCurrentMediaItemIndex();
+            int futureStartIndex = currentIndex + 1;
+            if (futureStartIndex < player.getMediaItemCount()) {
+                player.removeMediaItems(futureStartIndex, player.getMediaItemCount());
+            }
+            queuedNextTrack = skippedTrack;
+            currentTrack = previousTrack;
+            restoringPreviousTrack = true;
+            player.seekToPreviousMediaItem();
+
+            mediaSession.setActive(true);
+            updateMetadata(previousTrack);
+            requestLyricsIfMissing(previousTrack);
+            sendListeningEvent(previousTrack, "started", null, 0, previousTrack.durationMs);
+            updatePlaybackState(
+                    player.isPlaying()
+                            ? PlaybackStateCompat.STATE_PLAYING
+                            : PlaybackStateCompat.STATE_PAUSED,
+                    null
+            );
         }
 
         @Override
@@ -223,6 +274,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             player.stop();
             player.clearMediaItems();
             queuedNextTrack = null;
+            previousTracks.clear();
             updatePlaybackState(PlaybackStateCompat.STATE_STOPPED, null);
             stopForeground(true);
             foregroundStarted = false;
@@ -337,6 +389,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         List<Station> stations = new ArrayList<>();
         HttpURLConnection connection = null;
         try {
+            migrateWebViewSessionWithShortRetry();
             connection = openConnection(AdolarPrefs.apiUrl(this) + "/api/radio-stations", "GET");
             if (!isSuccessful(connection)) {
                 return stations;
@@ -375,9 +428,13 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
                     return;
                 }
                 if (track == null) {
+                    String message = "adolar4u".equals(currentStationEngine)
+                            && sessionCookie().isEmpty()
+                            ? "Sender nicht verfügbar. Für Adolar4U bitte in der Handy-App anmelden."
+                            : "Sender vorübergehend nicht verfügbar. Bitte erneut versuchen.";
                     updatePlaybackState(
                             PlaybackStateCompat.STATE_ERROR,
-                            "Sender nicht verfügbar. Für Adolar4U bitte in der Handy-App anmelden."
+                            message
                     );
                 } else {
                     startTrack(track);
@@ -434,6 +491,8 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     private void startTrack(Track track) {
         currentTrack = track;
         queuedNextTrack = null;
+        previousTracks.clear();
+        restoringPreviousTrack = false;
         mediaSession.setActive(true);
         updateMetadata(track);
         requestLyricsIfMissing(track);
@@ -629,8 +688,32 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     }
 
     private String sessionCookie() {
+        String persisted = AdolarPrefs.getSessionCookie(this);
+        if (!persisted.isEmpty()) {
+            return persisted;
+        }
         String cookie = CookieManager.getInstance().getCookie(AdolarPrefs.apiUrl(this));
-        return cookie == null ? "" : cookie;
+        if (cookie != null && !cookie.isEmpty()) {
+            AdolarPrefs.storeSessionCookie(this, cookie);
+            return AdolarPrefs.getSessionCookie(this);
+        }
+        return "";
+    }
+
+    private void migrateWebViewSessionWithShortRetry() {
+        if (!AdolarPrefs.getSessionCookie(this).isEmpty()) {
+            return;
+        }
+        // One-time upgrade path for installations whose login still only lives
+        // in CookieManager. It also absorbs the WebView-store startup race.
+        for (int attempt = 0; attempt < 5 && sessionCookie().isEmpty(); attempt++) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     private void sendConnectionHeartbeat(boolean playing, long position) {
