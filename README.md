@@ -100,6 +100,7 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - [Adolar4U current status and roadmap](docs/adolar4u-roadmap.md)
 - [Adolar4U architecture and privacy model](docs/adolar4u.md)
 - [Adolar4U private validation guide](docs/adolar4u-testing.md)
+- [Lyrics roadmap and Lyricsfile grooming](docs/lyrics-roadmap.md)
 
 ## Quick Start (Docker)
 
