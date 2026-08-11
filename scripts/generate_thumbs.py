@@ -5,8 +5,8 @@ Run this as a background process on the server to pre-generate all cover
 thumbnails before starting Adolar, or to fill gaps without a full rescan.
 
 Usage:
-    python generate_thumbs.py
-    python generate_thumbs.py --workers 4   # parallel generation
+    python scripts/generate_thumbs.py
+    python scripts/generate_thumbs.py --workers 4   # parallel generation
 """
 
 import argparse
@@ -19,8 +19,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger("generate_thumbs")
 
-# Ensure app modules are importable
-sys.path.insert(0, os.path.dirname(__file__))
+# Executing this file directly adds scripts/, not the project root, to sys.path.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 
 def main():
@@ -33,8 +35,8 @@ def main():
                         help="Show failed cover hashes")
     args = parser.parse_args()
 
-    from app import _THUMB_DIR, _THUMB_SIZE, _thumb_path
-    from db import get_connection
+    from adolar.application import _THUMB_DIR, _THUMB_SIZE, _thumb_path
+    from adolar.db import get_connection
 
     os.makedirs(_THUMB_DIR, exist_ok=True)
 

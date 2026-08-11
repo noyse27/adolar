@@ -13,9 +13,9 @@ _temp_dir = tempfile.TemporaryDirectory()
 os.environ.setdefault("DB_PATH", os.path.join(_temp_dir.name, "adolar4u-test.db"))
 os.environ.setdefault("CONTROL_DB_PATH", os.path.join(_temp_dir.name, "adolar4u-test-control.db"))
 
-import adolar4u
-import adolar4u.recommender as recommender
-import app as app_module
+from adolar import adolar4u
+from adolar import application as app_module
+from adolar.adolar4u import recommender
 
 
 class Adolar4UTests(unittest.TestCase):

@@ -265,5 +265,5 @@ Last.fm setup instructions, not only in internal architecture documentation.
 - `adolar4u/schema.py`: module-owned database schema
 - `smart_shuffle.py`: final sequencing state, including cumulative group counts
 - `db.py`: personal Last.fm, Favorites, migrations, and station integration
-- `app.py`: APIs and synchronization jobs
+- `adolar/application.py`: APIs and synchronization jobs
 - `tests/test_adolar4u.py`: regression and isolation tests

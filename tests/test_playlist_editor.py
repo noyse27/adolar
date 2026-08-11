@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-import app as app_module
+from adolar import application as app_module
 
 
 class PlaylistEditorTests(unittest.TestCase):
@@ -158,7 +158,7 @@ class PlaylistEditorTests(unittest.TestCase):
 
     def test_web_ui_contains_editor_type_and_export_controls(self):
         page = (
-            os.path.join(os.path.dirname(app_module.__file__), "templates", "index.html")
+            os.path.join(app_module.PROJECT_ROOT, "templates", "index.html")
         )
         with open(page, encoding="utf-8") as handle:
             html = handle.read()

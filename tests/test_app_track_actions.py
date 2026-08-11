@@ -11,7 +11,7 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-trackactions-import-control.db"),
 )
 
-import app as app_module
+from adolar import application as app_module
 
 
 def _make_mp3(path: str) -> None:

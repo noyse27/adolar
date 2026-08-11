@@ -9,7 +9,7 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-misc-import-control.db"),
 )
 
-import db
+from adolar import db
 
 
 class MiscTestBase(unittest.TestCase):

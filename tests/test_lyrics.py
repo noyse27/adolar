@@ -14,10 +14,8 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp.name, "lyrics-import-control.db"),
 )
 
-import app as app_module
-import auth
-import db
-import lyrics
+from adolar import application as app_module
+from adolar import auth, db, lyrics
 
 
 def make_mp3(path: str, title="Song", artist="Artist") -> None:

@@ -7,7 +7,7 @@ _temp_dir = tempfile.TemporaryDirectory()
 os.environ["DB_PATH"] = os.path.join(_temp_dir.name, "adolar-test.db")
 os.environ["CONTROL_DB_PATH"] = os.path.join(_temp_dir.name, "adolar-test-control.db")
 
-import app as app_module
+from adolar import application as app_module
 
 
 def candidate(track_id, artist, album, bpm=120):

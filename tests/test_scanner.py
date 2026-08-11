@@ -6,8 +6,7 @@ from unittest import mock
 
 from mutagen.id3 import APIC, ID3, PCNT, TBPM, TIT2, TPE1, TPE2, TXXX
 
-import db
-import scanner
+from adolar import db, scanner
 
 
 def _make_mp3(path: str, **tags) -> None:
@@ -185,7 +184,7 @@ class RunScanIntegrationTests(unittest.TestCase):
             mock.patch.object(db, "DB_PATH", os.path.join(self.temp.name, "adolar.db")),
             mock.patch.object(db, "CONTROL_DB_PATH", os.path.join(self.temp.name, "control.db")),
             # Skip the real post-scan BPM/thumbnail background jobs: they pull in
-            # librosa/PIL/app.py, which is unrelated to whether run_scan indexed
+            # librosa/PIL/application.py, which is unrelated to whether run_scan indexed
             # the files correctly.
             mock.patch.object(scanner, "run_bpm_scan"),
             mock.patch.object(scanner, "run_thumb_generation"),

@@ -9,7 +9,7 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_temp_dir.name, "adolar-backup-config-test-control.db"),
 )
 
-import app as app_module
+from adolar import application as app_module
 
 
 class BackupRootSettingTests(unittest.TestCase):
