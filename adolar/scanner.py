@@ -328,8 +328,8 @@ def run_thumb_generation(trigger: str = "manual"):
 
             from PIL import Image
 
-            from .application import _THUMB_DIR, _THUMB_SIZE, _thumb_path
             from .db import get_connection
+            from .routes.media import _THUMB_DIR, _THUMB_SIZE, _thumb_path
 
             conn = get_connection()
             rows = conn.execute("SELECT hash, data, mime FROM covers").fetchall()

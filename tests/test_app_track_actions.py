@@ -12,6 +12,7 @@ os.environ.setdefault(
 )
 
 from adolar import application as app_module
+from adolar.routes import media as media_routes
 
 
 def _make_mp3(path: str) -> None:
@@ -181,18 +182,18 @@ class PlayCountTagsSyncRouteTests(TrackActionsTestBase):
         self.assertEqual(response.status_code, 403)
 
     def test_starts_the_background_flush(self):
-        with self._login(role="admin"), mock.patch.object(app_module, "_flush_play_count_tags"):
+        with self._login(role="admin"), mock.patch.object(media_routes, "flush_play_count_tags"):
             response = self.client.post("/api/playcount-tags/sync")
         self.assertEqual(response.status_code, 200)
 
     def test_returns_409_when_already_running(self):
-        app_module._play_count_tag_sync["running"] = True
+        media_routes._play_count_tag_sync["running"] = True
         try:
             with self._login(role="admin"):
                 response = self.client.post("/api/playcount-tags/sync")
             self.assertEqual(response.status_code, 409)
         finally:
-            app_module._play_count_tag_sync["running"] = False
+            media_routes._play_count_tag_sync["running"] = False
 
 
 class FlushPlayCountTagsTests(TrackActionsTestBase):
@@ -209,9 +210,9 @@ class FlushPlayCountTagsTests(TrackActionsTestBase):
                 "VALUES ('untagged.mp3', 'Untagged', 5, 1)",
             )
 
-        app_module._flush_play_count_tags()
+        media_routes.flush_play_count_tags()
 
-        self.assertEqual(app_module._play_count_tag_sync["written"], 1)
+        self.assertEqual(media_routes._play_count_tag_sync["written"], 1)
         self.assertEqual(app_module.db.get_dirty_play_count_tags(), [])
         self.assertEqual(ID3(path)["PCNT"].count, 5)
 
@@ -224,9 +225,9 @@ class FlushPlayCountTagsTests(TrackActionsTestBase):
                 "VALUES ('song.mp3', 'Song', 5, 1)",
             ).lastrowid
 
-        app_module._flush_play_count_tags()
+        media_routes.flush_play_count_tags()
 
-        self.assertEqual(app_module._play_count_tag_sync["written"], 1)
+        self.assertEqual(media_routes._play_count_tag_sync["written"], 1)
         self.assertEqual(app_module.db.get_dirty_play_count_tags(), [])
         tags = ID3(path)
         self.assertEqual(tags["PCNT"].count, 5)
@@ -248,7 +249,7 @@ class FlushPlayCountTagsTests(TrackActionsTestBase):
                 "VALUES ('song.mp3', 'Song', 3, 1)",
             )
 
-        app_module._flush_play_count_tags()
+        media_routes.flush_play_count_tags()
 
         with app_module.db.db() as conn:
             stored = conn.execute("SELECT play_count FROM tracks WHERE path='song.mp3'").fetchone()[0]
@@ -261,24 +262,24 @@ class FlushPlayCountTagsTests(TrackActionsTestBase):
                 "VALUES ('gone.mp3', 'Gone', 1, 1)",
             )
 
-        app_module._flush_play_count_tags()
+        media_routes.flush_play_count_tags()
 
-        self.assertEqual(app_module._play_count_tag_sync["failed"], 1)
+        self.assertEqual(media_routes._play_count_tag_sync["failed"], 1)
         self.assertEqual(len(app_module.db.get_dirty_play_count_tags()), 1)
 
     def test_is_a_no_op_when_already_running(self):
-        app_module._play_count_tag_sync["running"] = True
+        media_routes._play_count_tag_sync["running"] = True
         try:
             with app_module.db.db() as conn:
                 conn.execute(
                     "INSERT INTO tracks (path, title, play_count, play_count_tag_dirty) "
                     "VALUES ('song.mp3', 'Song', 1, 1)",
                 )
-            app_module._flush_play_count_tags()
+            media_routes.flush_play_count_tags()
             # Guard clause returns immediately; nothing gets processed.
             self.assertEqual(len(app_module.db.get_dirty_play_count_tags()), 1)
         finally:
-            app_module._play_count_tag_sync["running"] = False
+            media_routes._play_count_tag_sync["running"] = False
 
 
 if __name__ == "__main__":
