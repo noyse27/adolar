@@ -5,10 +5,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 
-import adolar4u
-import errors
-import library_context
-import smart_shuffle
+from . import adolar4u, errors, library_context, smart_shuffle
 
 DB_PATH = os.environ.get("DB_PATH", "/data/adolar.db")
 

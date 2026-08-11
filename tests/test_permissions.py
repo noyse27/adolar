@@ -7,7 +7,7 @@ _temp_dir = tempfile.TemporaryDirectory()
 os.environ.setdefault("DB_PATH", os.path.join(_temp_dir.name, "adolar-permissions-test.db"))
 os.environ.setdefault("CONTROL_DB_PATH", os.path.join(_temp_dir.name, "adolar-permissions-test-control.db"))
 
-import app as app_module
+from adolar import application as app_module
 
 
 class SafeNextUrlTests(unittest.TestCase):

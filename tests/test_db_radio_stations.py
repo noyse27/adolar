@@ -10,8 +10,7 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-radio-import-control.db"),
 )
 
-import db
-import errors
+from adolar import db, errors
 
 
 class RadioTestBase(unittest.TestCase):

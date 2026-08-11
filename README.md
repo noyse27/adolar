@@ -115,6 +115,12 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - [Adolar4U architecture and privacy model](docs/adolar4u.md)
 - [Adolar4U private validation guide](docs/adolar4u-testing.md)
 
+The Python server lives in the `adolar/` package. `wsgi.py` is the production
+entry point, while `run.py` starts a local installation. Maintenance commands
+that are not part of the server package live in `scripts/`; the Windows
+companion and Android client remain independent projects in `companion/` and
+`adolar-android/`.
+
 ## Quick Start (Docker)
 
 ```yaml
@@ -213,7 +219,7 @@ For large libraries, pre-generate all thumbnails before first use:
 
 ```bash
 docker exec adolar pip install Pillow   # first time only
-docker exec -it adolar python generate_thumbs.py --workers 4
+docker exec -it adolar python scripts/generate_thumbs.py --workers 4
 ```
 
 Thumbnails are stored in `/data/thumbs/` (persistent volume) and survive container restarts.

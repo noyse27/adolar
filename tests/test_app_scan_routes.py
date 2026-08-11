@@ -9,7 +9,7 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-scanroutes-import-control.db"),
 )
 
-import app as app_module
+from adolar import application as app_module
 
 
 class ScanRouteTestBase(unittest.TestCase):

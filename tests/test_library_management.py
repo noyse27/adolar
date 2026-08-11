@@ -6,7 +6,7 @@ from unittest import mock
 _temp_dir = tempfile.TemporaryDirectory()
 os.environ.setdefault("DB_PATH", os.path.join(_temp_dir.name, "adolar-library-mgmt-import.db"))
 
-import app as app_module
+from adolar import application as app_module
 
 
 class LibraryManagementTests(unittest.TestCase):

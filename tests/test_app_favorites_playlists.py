@@ -9,8 +9,8 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-favplaylists-import-control.db"),
 )
 
-import app as app_module
-import db
+from adolar import application as app_module
+from adolar import db
 
 
 class FavoritesPlaylistsTestBase(unittest.TestCase):

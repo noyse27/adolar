@@ -9,8 +9,10 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-tasks-import-control.db"),
 )
 
-import db  # noqa: E402
-import tasks  # noqa: E402
+from adolar import (
+    db,  # noqa: E402
+    tasks,  # noqa: E402
+)
 
 
 class TasksTestBase(unittest.TestCase):

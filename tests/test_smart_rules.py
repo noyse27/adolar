@@ -1,6 +1,6 @@
 import unittest
 
-import smart_rules
+from adolar import smart_rules
 
 
 class SmartRuleParserTests(unittest.TestCase):

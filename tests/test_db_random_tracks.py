@@ -9,7 +9,7 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-random-import-control.db"),
 )
 
-import db
+from adolar import db
 
 
 class GetRandomTracksTests(unittest.TestCase):
@@ -54,7 +54,7 @@ class GetRandomTracksTests(unittest.TestCase):
         self.assertTrue(returned_ids.isdisjoint(excluded_ids))
 
     def test_shuffle_state_total_tracks_gets_populated_on_first_call(self):
-        import smart_shuffle
+        from adolar import smart_shuffle
         state = smart_shuffle.ShuffleState(context="random")
         self.assertIsNone(state.total_tracks)
         db.get_random_tracks(count=3, shuffle_state=state)
@@ -62,7 +62,7 @@ class GetRandomTracksTests(unittest.TestCase):
         self.assertEqual(state.unique_artists, 3)
 
     def test_reusing_a_shuffle_state_does_not_repeat_stats_query(self):
-        import smart_shuffle
+        from adolar import smart_shuffle
         state = smart_shuffle.ShuffleState(
             context="random", total_tracks=999, unique_artists=999,
             unique_albums=999, unique_genres=999,

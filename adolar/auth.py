@@ -9,7 +9,7 @@ from urllib.parse import quote
 from flask import g, jsonify, redirect, request
 from werkzeug.security import check_password_hash, generate_password_hash
 
-import db
+from . import db
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 # Development-only bypass: every request runs as a local "dev-admin" account.

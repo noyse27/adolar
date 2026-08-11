@@ -4,7 +4,7 @@ what's currently running and what ran recently.
 
 Database backups already track their own status/history in backup_service.py
 (file-based, so the separate scheduler thread and a future standalone backup
-process would both see it) — that isn't duplicated here. app.py's monitor
+process would both see it) — that isn't duplicated here. application.py's monitor
 endpoint merges both sources into one "tasks" view instead.
 """
 
@@ -13,7 +13,7 @@ import logging
 import threading
 import time
 
-import db
+from . import db
 
 log = logging.getLogger(__name__)
 

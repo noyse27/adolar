@@ -22,7 +22,7 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-migpreserve-import-control.db"),
 )
 
-import db  # noqa: E402
+from adolar import db  # noqa: E402
 
 
 class LegacyMigrationPreservesCrossReferencedDataTests(unittest.TestCase):

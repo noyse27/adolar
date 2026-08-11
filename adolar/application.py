@@ -22,24 +22,31 @@ from flask_cors import CORS
 from werkzeug.http import http_date
 from werkzeug.utils import secure_filename
 
-import adolar4u
-import auth as _auth
-import backup_service
-import db
-import errors
-import lastfm
-import libraries
-import library_context
-import lyrics
-import scanner
-import smart_rules
-import smart_shuffle
-import tasks
+from . import (
+    adolar4u,
+    backup_service,
+    db,
+    errors,
+    lastfm,
+    libraries,
+    library_context,
+    lyrics,
+    scanner,
+    smart_rules,
+    smart_shuffle,
+    tasks,
+)
+from . import auth as _auth
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-app = Flask(__name__)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+app = Flask(
+    __name__,
+    static_folder=os.path.join(PROJECT_ROOT, "static"),
+    template_folder=os.path.join(PROJECT_ROOT, "templates"),
+)
 app.secret_key = os.environ.get("SECRET_KEY", os.urandom(32))
 APP_VERSION = "1.8.0"
 
@@ -1900,7 +1907,7 @@ def miniplayer():
 
 @app.get("/hilfe/manual.html")
 def manual():
-    return send_file(os.path.join(app.root_path, "hilfe", "manual.html"))
+    return send_file(os.path.join(PROJECT_ROOT, "hilfe", "manual.html"))
 
 
 @app.get("/radio")
@@ -3110,7 +3117,7 @@ def api_bpm_tags():
         updated = 0
         total = 0
         try:
-            from db import get_connection
+            from .db import get_connection
             conn = get_connection()
             rows = conn.execute("SELECT id, path FROM tracks").fetchall()
             conn.close()

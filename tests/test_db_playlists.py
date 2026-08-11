@@ -11,8 +11,7 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-playlists-import-control.db"),
 )
 
-import db
-import errors
+from adolar import db, errors
 
 
 class PlaylistTestBase(unittest.TestCase):

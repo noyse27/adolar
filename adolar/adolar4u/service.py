@@ -7,7 +7,7 @@ import math
 import time
 from collections import defaultdict
 
-import errors
+from .. import errors
 
 EVENT_TYPES = {"started", "skipped", "completed"}
 EVENT_SOURCES = {"library", "playlist", "shuffle", "radio", "adolar4u", "unknown"}
@@ -20,7 +20,7 @@ GLOBAL_DEFAULTS = {
 
 
 def _db_module():
-    import db
+    from .. import db
     return db
 
 

@@ -29,7 +29,7 @@ FACT_KEYS = (
 
 
 def _db_module():
-    import db
+    from .. import db
     return db
 
 

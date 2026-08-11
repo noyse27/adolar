@@ -4,8 +4,7 @@ import threading
 import unittest
 from unittest import mock
 
-import db
-import library_context
+from adolar import db, library_context
 
 
 class LibraryContextTests(unittest.TestCase):

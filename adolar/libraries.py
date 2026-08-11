@@ -2,7 +2,7 @@
 
 Stored as a small JSON file outside any content database, so it survives
 switching which content database is active and is visible to every Gunicorn
-worker. app.py reads the active entry at the start of each request and binds
+worker. application.py reads the active entry at the start of each request and binds
 its music/database paths as an immutable request-local snapshot.
 """
 
@@ -11,7 +11,7 @@ import os
 import threading
 import uuid
 
-import errors
+from . import errors
 
 _LOCK = threading.Lock()
 

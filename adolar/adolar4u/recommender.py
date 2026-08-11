@@ -11,8 +11,7 @@ import time
 import uuid
 from collections import Counter
 
-import smart_shuffle
-
+from .. import smart_shuffle
 from .service import get_global_settings, get_seed_affinities, get_user_settings
 
 ALGORITHM_VERSION = "metadata-v4-source-aware-bridge-1"
@@ -35,7 +34,7 @@ SKIP_PENALTY_SMOOTHING = 3.0
 
 
 def _db_module():
-    import db
+    from .. import db
     return db
 
 

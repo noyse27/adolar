@@ -9,8 +9,7 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-auth-import-control.db"),
 )
 
-import auth
-import db
+from adolar import auth, db
 
 
 class AuthTestBase(unittest.TestCase):
