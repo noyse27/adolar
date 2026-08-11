@@ -2242,8 +2242,13 @@ def api_track_played(track_id):
     if not user:
         abort(401)
 
+    source = str((request.get_json(silent=True) or {}).get("source") or "unknown")
+    source = source.strip().lower()
     contributes = bool(user.get("contributes_playcount"))
-    new_count, _ = db.record_user_play(user["id"], track_id, contributes)
+    record_personal = source != "radio"
+    new_count, _ = db.record_user_play(
+        user["id"], track_id, contributes, record_personal=record_personal,
+    )
     if new_count is None:
         abort(404)
 
@@ -2251,6 +2256,7 @@ def api_track_played(track_id):
         "ok": True,
         "play_count": new_count if contributes else None,
         "contributed": contributes,
+        "personalized": record_personal,
     })
 
 

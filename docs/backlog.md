@@ -8,6 +8,33 @@ them alone.
 Each entry: what the idea is, why it's blocked or hard right now, and what
 would have to change for it to become worth doing.
 
+## ReplayGain / MP3Gain tags during playback
+
+**Idea:** Use existing loudness information from audio tags for optional
+playback normalization. Prefer `REPLAYGAIN_TRACK_GAIN` for radio and shuffled
+playback; where an album is played in sequence, optionally use
+`REPLAYGAIN_ALBUM_GAIN`. Respect associated peak values to avoid clipping.
+Recognize MP3Gain-related APEv2 metadata where it provides usable ReplayGain
+values, but never rewrite the audio file or its tags during playback.
+
+**Why later:** Gain has to be applied consistently in every player (web app,
+`/radio`/Windows Companion and Android) and combined correctly with the user's
+volume and both sides of a crossfade. MP3Gain tags also need careful
+interpretation: undo/min-max bookkeeping is not automatically a playback-gain
+value. Missing, malformed or extreme values must always fall back to unchanged
+playback volume.
+
+**Implementation outline:** Read and cache supported gain/peak fields during
+scanning, expose normalized dB values with track metadata, clamp them to a safe
+range, and calculate effective volume as user volume × replay gain × fade
+curve. Add a user setting for Off / Track / Album (automatic radio behavior),
+plus tests for mixed tagged/untagged queues, clipping prevention, crossfade and
+all clients.
+
+**Recheck trigger:** Prioritize when audible level jumps between library tracks
+become a recurring playback complaint or when player/scanner work already
+touches the relevant metadata path.
+
 ## Spotify integration for new-release discovery
 
 **Idea:** Surface real "new releases" alongside the static local MP3 library —

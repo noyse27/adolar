@@ -39,6 +39,11 @@ The first implementation milestone provides:
 - bounded anchor, similar, familiar, and discovery candidate groups;
 - personal Last.fm Loved and local Adolar Favorites as deduplicated taste signals;
 - recommendation reasons returned with each selected track;
+- logical artist/title deduplication across duplicate library track IDs;
+- durable seven-day recommendation cooldown and recent-artist spacing that
+  survive fresh shuffle sessions and client restarts;
+- diversity-aware bucket membership that prefers one title per artist before
+  relaxing for genuinely small or single-artist libraries;
 - a private, versioned recommendation journal with exact score components,
   queue composition, profile snapshots, and linked listening outcomes;
 - Smart Shuffle sequencing after personal candidate ranking.
@@ -51,6 +56,14 @@ Bayesian-smoothed ratios: a single skip is a mild dampener, and only repeated
 skips approach the full penalty (see roadmap decision 8). Audio embeddings,
 key/mood/energy analysis, and collaborative ranking are later milestones; their
 switches are marked as being in preparation in the UI.
+
+Listening sources have different semantics. Library, personal-playlist,
+shuffle, and Adolar4U outcomes can shape taste. Another rule-based radio is
+exposure-only: it updates repeat recency, but its completion, skip, and play do
+not increase or decrease personal taste. Personal-playlist membership supports
+artist and genre affinity rather than directly boosting the exact song;
+repeated playlist starts within fourteen days create a temporary song-only
+saturation penalty.
 
 ## Data model
 
@@ -71,6 +84,20 @@ listening events to the exact recommendation without timestamp guessing.
 Diagnostic records are personal, obey learning pause, are retained for at most
 60 days, and are removed with the personal learning history. A logging failure
 must never prevent a playable queue.
+
+The recommendation journal also supplies cross-session diversity state. A
+queued title receives a strong cooldown for 24 hours and a weaker cooldown
+through day seven, even when it has not produced a listening outcome yet.
+Exact normalized artist/title duplicates share this cooldown and listening
+recency. The latest twelve recommended artists are avoided when alternatives
+exist. These are selection safeguards, not negative taste feedback.
+
+At the true start of a shuffle session, Adolar4U prefers a bridge track when
+available: a scarcely heard, non-instrumental song by an artist with established
+affinity and no recent or negative signal. It counts toward the normal similar
+group, so repeated restarts cannot change the long-term mix. Instrumentals stay
+fully eligible after the opener and may still open when no suitable alternative
+exists; the lyrics instrumental marker is not treated as a dislike.
 
 Direct Loved/Favorite playback is capped through candidate groups. Explicit
 favorites primarily seed artist and genre affinity and cannot fill an entire
@@ -108,9 +135,11 @@ The recommendation engine will remain hybrid and explainable:
 2. Score taste fit, time context, replay affinity, skip risk, novelty, and the
    configured discovery share.
 3. Add transition quality from BPM, key, energy, and mood.
-4. Pass ranked candidates to Smart Shuffle for track, artist, album, and genre
-   spacing.
-5. Return a short reason that can support a future "Why this track?" UI.
+4. Build diversity-aware candidate groups with logical-song deduplication and
+   durable artist/title spacing.
+5. Pass the resulting membership to Smart Shuffle for final track, artist,
+   album, genre, and BPM sequencing.
+6. Return a short reason that can support a future "Why this track?" UI.
 
 Audio extraction and embeddings will be background jobs with versioned feature
 records. They must not run when global audio analysis is disabled and must never

@@ -86,7 +86,42 @@ Expected:
 - after deletion the station falls back to existing play counts, favourites,
   and playlists.
 
-## 6. Radio Companion
+## 6. Durable diversity and restarts
+
+Use a library with duplicate files/editions of at least one song and an artist
+with a large catalogue. Start Adolar4U, note the first queue, stop it, and start
+it again several times. Also test a normal session long enough to trigger
+several queue refills.
+
+Expected:
+
+- a fresh shuffle session does not reconstruct the previous startup queue;
+- the same normalized artist/title stays cooled down across different track
+  IDs and across client or server restarts;
+- a five-track batch uses different artists when alternatives exist;
+- an artist with many albums or remixes does not occupy several positions just
+  because more of its files entered the candidate sample;
+- small and single-artist libraries still remain playable because diversity
+  restrictions relax when no alternatives exist;
+- recommendation cooldown affects exposure only and is not learned as a skip
+  or dislike.
+
+For source semantics, play one title almost completely through another
+rule-based radio and repeatedly play another title from a personal playlist.
+Then start a fresh Adolar4U session.
+
+Expected:
+
+- the other-radio title is protected by recency but creates no completion,
+  skip, play-count, artist, or genre preference;
+- repeated personal-playlist exposure rests the exact song temporarily while
+  its artist and genre remain positive profile evidence;
+- position one prefers a scarcely heard non-instrumental song by a familiar
+  artist when such a bridge candidate exists;
+- an instrumental may appear later and may still open when there is no suitable
+  non-instrumental alternative.
+
+## 7. Radio Companion
 
 Log into the Radio Companion with the same opted-in account and reload its
 station list.
@@ -98,7 +133,7 @@ Expected:
 - completed tracks, manual Next actions, and crossfade transitions are recorded;
 - a recommendation reason appears below the current artist.
 
-## 7. Learning history
+## 8. Learning history
 
 Open **Adolar4U -> Lernhistorie** after several station sessions and compare 7,
 14, 30, and 60 days.

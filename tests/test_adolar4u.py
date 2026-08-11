@@ -430,6 +430,216 @@ class Adolar4UTests(unittest.TestCase):
             sequential.append(bucket)
         self.assertEqual(sequential.count("anchor"), 3)
 
+    def test_logical_song_deduplication_keeps_only_strongest_track_id(self):
+        candidates = [
+            {
+                "id": 9001, "artist": "Chrom", "title": "Down Below",
+                "_adolar4u_score": 8.0,
+            },
+            {
+                "id": 9002, "artist": " chrom ", "title": " down below ",
+                "_adolar4u_score": 12.0,
+            },
+            {
+                "id": 9003, "artist": "Chrom", "title": "Regret & Testify",
+                "_adolar4u_score": 10.0,
+            },
+        ]
+
+        deduplicated = recommender._deduplicate_logical_candidates(candidates)
+
+        self.assertEqual({row["id"] for row in deduplicated}, {9002, 9003})
+
+    def test_bucket_membership_spreads_artists_before_relaxing(self):
+        candidates = []
+        for index in range(8):
+            candidates.append({
+                "id": 9100 + index,
+                "artist": ":wumpscut:",
+                "title": f"Remix {index}",
+                "_adolar4u_score": 100 - index,
+                "adolar4u_bucket": "discovery",
+            })
+        for index in range(8):
+            candidates.append({
+                "id": 9200 + index,
+                "artist": f"Other Artist {index}",
+                "title": f"Other Track {index}",
+                "_adolar4u_score": 80 - index,
+                "adolar4u_bucket": "discovery",
+            })
+
+        selected = recommender._choose_bucketed_candidates(
+            candidates, 5, discovery=0.7, avoid_artists={":wumpscut:"},
+        )
+
+        self.assertEqual(len(selected), 5)
+        self.assertEqual(len({row["artist"] for row in selected}), 5)
+        self.assertNotIn(":wumpscut:", {row["artist"] for row in selected})
+
+    def test_fresh_session_avoids_recent_logical_song_across_track_ids(self):
+        now = 2_000_000_000.0
+        with app_module.db.db() as conn:
+            for track_id, path, title, artist in (
+                (9301, "recent-edition.mp3", "Same Song", "Repeat Artist"),
+                (9302, "duplicate-edition.mp3", " same song ", " repeat artist "),
+                (9303, "alternative.mp3", "Different Song", "Fresh Artist"),
+            ):
+                conn.execute("""
+                    INSERT OR REPLACE INTO tracks
+                        (id, path, title, artist, album, genre, duration, bpm)
+                    VALUES (?, ?, ?, ?, 'Diversity', 'Electronic', 240, 120)
+                """, (track_id, path, title, artist))
+            conn.execute("""
+                INSERT INTO adolar4u_recommendation_batches
+                    (id, user_id, algorithm_version, requested_count,
+                     candidate_count, discovery_level, created_at)
+                VALUES ('recent-diversity-batch', ?, 'old-version', 1, 2, 0.7, ?)
+            """, (self.USER_ID, now - 60))
+            conn.execute("""
+                INSERT INTO adolar4u_recommendations
+                    (batch_id, user_id, track_id, queue_position,
+                     candidate_rank, bucket, reason, score, created_at)
+                VALUES ('recent-diversity-batch', ?, 9301, 1, 1,
+                        'discovery', 'Entdeckung', 10, ?)
+            """, (self.USER_ID, now - 60))
+
+        def candidate(track_id, title, artist):
+            return {
+                "id": track_id, "path": f"{track_id}.mp3", "title": title,
+                "artist": artist, "album": "Diversity", "genre": "Electronic",
+                "year": 2026, "track_no": 1, "duration": 240, "bitrate": 320,
+                "size": 1, "cover_hash": None, "bpm": 120, "loved": 0,
+                "library_loved": 0, "user_play_count": 0,
+                "last_played_at": None, "completed_count": 0,
+                "skipped_count": 0, "early_skips": 0, "avg_completion": 0,
+                "same_hour_completed": 0, "last_event_at": None,
+                "is_favorite": 0, "in_personal_playlist": 0,
+                "signal_strength": 0,
+            }
+
+        candidates = [
+            candidate(9302, " same song ", " repeat artist "),
+            candidate(9303, "Different Song", "Fresh Artist"),
+        ]
+        stats = {"total": 2, "artists": 2, "albums": 2, "genres": 1}
+        adolar4u.update_global_settings({"enabled": True})
+        adolar4u.update_user_settings(self.USER_ID, {
+            "enabled": True, "discovery_level": 0.7,
+        })
+
+        with mock.patch.object(
+            recommender, "_load_candidates",
+            side_effect=lambda *_args, **_kwargs: (
+                [dict(row) for row in candidates], stats,
+            ),
+        ), mock.patch.object(recommender.time, "time", return_value=now):
+            selected = adolar4u.recommend_tracks(
+                self.USER_ID, count=1,
+                shuffle_state=recommender.smart_shuffle.ShuffleState(
+                    context=f"adolar4u:{self.USER_ID}"
+                ),
+                rng=random.Random(3),
+            )
+
+        self.assertEqual(selected[0]["id"], 9303)
+        self.assertEqual(
+            recommender.ALGORITHM_VERSION,
+            "metadata-v4-source-aware-bridge-1",
+        )
+
+    def test_other_radio_events_only_affect_recency_not_taste(self):
+        track_id = 9401
+        now = 2_000_000_000.0
+        with app_module.db.db() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO tracks
+                    (id, path, title, artist, album, genre, duration)
+                VALUES (?, 'source-aware.mp3', 'Source Aware', 'Listener',
+                        'Signals', 'Electronic', 240)
+            """, (track_id,))
+            for index, event_type in enumerate(("started", "completed", "skipped")):
+                conn.execute("""
+                    INSERT INTO adolar4u_listening_events
+                        (user_id, track_id, event_type, position_seconds,
+                         duration_seconds, completion_ratio, source,
+                         client_event_id, created_at)
+                    VALUES (?, ?, ?, 240, 240, 1, 'radio', ?, ?)
+                """, (
+                    self.USER_ID, track_id, event_type,
+                    f"radio-source-{index}", now - 60,
+                ))
+            for index, event_type in enumerate(("started", "completed")):
+                conn.execute("""
+                    INSERT INTO adolar4u_listening_events
+                        (user_id, track_id, event_type, position_seconds,
+                         duration_seconds, completion_ratio, source,
+                         client_event_id, created_at)
+                    VALUES (?, ?, ?, 240, 240, 1, 'playlist', ?, unixepoch())
+                """, (
+                    self.USER_ID, track_id, event_type,
+                    f"playlist-source-{index}",
+                ))
+
+        candidates, _ = recommender._load_candidates(self.USER_ID)
+        row = next(row for row in candidates if row["id"] == track_id)
+
+        self.assertEqual(row["completed_count"], 1)
+        self.assertEqual(row["skipped_count"], 0)
+        self.assertEqual(row["playlist_exposure_count"], 1)
+        self.assertIsNotNone(row["last_event_at"])
+
+    def test_playlist_exposure_saturates_track_without_negative_profile_signal(self):
+        row = {
+            "user_play_count": 8, "loved": 0, "library_loved": 0,
+            "is_favorite": 0, "in_personal_playlist": 1,
+            "completed_count": 4, "skipped_count": 0, "early_skips": 0,
+            "same_hour_completed": 0, "avg_completion": 1.0,
+            "playlist_exposure_count": 8, "artist": "Playlist Artist",
+            "genre": "Electronic", "last_played_at": None,
+            "last_event_at": None,
+        }
+
+        recommender._score_candidate(
+            row, {"playlist artist": 1.0}, {"electronic": 1.0},
+            0.4, random.Random(4), 2_000_000_000.0,
+        )
+        diagnostics = row["_adolar4u_diagnostics"]
+
+        self.assertGreater(diagnostics["penalties"]["playlist_saturation"], 5)
+        self.assertNotIn("personal_playlist", diagnostics["bonuses"])
+        self.assertGreater(diagnostics["bonuses"]["artist_affinity"], 0)
+
+    def test_startup_prefers_non_instrumental_bridge_track(self):
+        frequent = {
+            "id": 9501, "artist": "Known Artist", "title": "Frequent",
+            "user_play_count": 80, "completed_count": 10, "early_skips": 0,
+            "instrumental": 0, "adolar4u_bucket": "familiar",
+            "_adolar4u_score": 20.0, "_adolar4u_diagnostics": {"penalties": {}},
+        }
+        instrumental = {
+            "id": 9502, "artist": "Other Known", "title": "Instrumental",
+            "user_play_count": 0, "completed_count": 0, "early_skips": 0,
+            "instrumental": 1, "adolar4u_bucket": "similar",
+            "_adolar4u_score": 15.0, "_adolar4u_diagnostics": {"penalties": {}},
+        }
+        bridge = {
+            "id": 9503, "artist": "Known Artist", "title": "Rare Track",
+            "user_play_count": 1, "completed_count": 0, "early_skips": 0,
+            "instrumental": 0, "adolar4u_bucket": "similar",
+            "_adolar4u_score": 8.0, "_adolar4u_diagnostics": {"penalties": {}},
+        }
+
+        shortlist, opener = recommender._prepare_startup_shortlist(
+            [frequent, instrumental, bridge], [frequent, instrumental],
+            {"known artist": 0.95, "other known": 0.8}, set(),
+        )
+
+        self.assertEqual(opener["id"], bridge["id"])
+        self.assertIn(bridge, shortlist)
+        self.assertEqual(opener["adolar4u_reason"], "Neuer Titel von bekanntem Künstler")
+        self.assertTrue(opener["_adolar4u_diagnostics"]["facts"]["startup_bridge"])
+
     def test_new_shuffle_session_continues_durable_bucket_balance(self):
         adolar4u.update_global_settings({"enabled": True})
         adolar4u.update_user_settings(self.USER_ID, {
