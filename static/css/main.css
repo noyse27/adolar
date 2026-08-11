@@ -794,6 +794,17 @@
       margin-bottom: 8px;
       align-items: center;
     }
+    .radio-rule-value-wrap,
+    .ple-rule-value-wrap {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+      gap: 5px;
+      min-width: 0;
+    }
+    .radio-rule-value-wrap > :only-child,
+    .ple-rule-value-wrap > :only-child {
+      grid-column: 1 / -1;
+    }
     .radio-error {
       display: none;
       margin-top: 10px;

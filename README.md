@@ -1,6 +1,6 @@
 # Adolar
 
-Current version: **1.7.1**
+Current version: **1.8.0**
 
 A self-hosted music archive web app for Synology NAS (or any Docker host). Browse, search, and stream your local MP3/FLAC/M4A collection from any browser — no cloud required.
 
@@ -20,7 +20,7 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Fast paging** — COUNT cached after first page, subsequent pages skip DB count entirely
 - **HTTP range streaming** — seekable audio in the browser
 - **Resilient NAS streaming** — bounded Gunicorn thread workers isolate slow or paused audio clients instead of timing out an entire worker
-- **Configurable radio stations** — global and private smart radio stations with admin/user ownership, filter builder, test mode, and optional station jingles
+- **Configurable radio stations** — global and private smart radio stations with admin/user ownership, filter builder, relative “date added” rules, test mode, and optional station jingles
 - **Smart Shuffle** — shuffle the complete current search, filter result, or static playlist with session-wide track cooldown, dynamic artist/album spacing, proportional genre distribution, BPM-smoothed transitions, and an automatically refilled 100-track queue; explicit genre filters remain untouched
 - **Radio playback** — equal-power crossfade (12s out / 8s in), next track pre-buffered; crossfade skipped for short tracks and station jingles
 - **Optional library crossfade** — persistent crossfade switch for normal playback, playlists, and shuffled queues; kept separate from Radio playback
@@ -40,7 +40,7 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Per-user play counts** — each user tracks their own play history; optionally authorized users contribute plays to a durable archive count
 - **Durable archive counts** — the highest value from database, Last.fm, or file tag wins; changed tags are written nightly or manually
 - **Playlists** — smart playlists, static playlists, four global system playlists, and one protected personal Favorites playlist per user
-- **Playlist editor** — visual editor with track search, rule-based smart filters, drag-and-drop ordering, random fill, and portable `.adolarplaylist` import/export
+- **Playlist editor** — visual editor with track search, rule-based smart filters including relative “date added” periods, drag-and-drop ordering, random fill, and portable `.adolarplaylist` import/export
 - **Database backups** — consistent SQLite snapshots with integrity check, SHA-256 checksum, jingle archive, daily automatic runs, and retention policy
 - **Connection monitor** — admin overview of connected clients with heartbeats and masked IP addresses
 - **Background job monitor** — admin System Monitor shows currently running and recently finished library scans, BPM analysis, thumbnail generation, database optimization, and backups, with progress and manual/automatic trigger
@@ -49,6 +49,18 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Bookmark button** — add any track to a personal playlist directly from the track list; create new playlists on the fly
 - **Radio favorites** — the Radio companion uses the same personal Favorites list as the Web player
 - **DE / EN interface** — language switch in topbar
+
+## What's new in 1.8.0
+
+- Radio stations and smart playlists can filter tracks by when they were added:
+  either older than a period (`before`) or added within the most recent number
+  of days, weeks, months, or years (`within the last`).
+- Track records now keep an immutable `added_at` timestamp separate from the
+  last indexing time. Re-indexing a changed file no longer makes it appear as
+  newly added, and the global **Newest 100** playlist now sorts by the stable
+  addition time. Existing libraries are migrated automatically on startup;
+  their previous `indexed_at` value is retained as the best available initial
+  addition time.
 
 ## What's new in 1.7.1
 

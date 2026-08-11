@@ -70,6 +70,32 @@ class ValidateRadioFilterTests(unittest.TestCase):
         })
         self.assertEqual(clean["rules"][0]["value"], 1980)
 
+    def test_added_rule_keeps_relative_age_and_unit(self):
+        clean = db.validate_radio_filter({
+            "mode": "all", "rules": [
+                {"field": "added", "op": "before", "value": "3", "unit": "weeks"},
+            ],
+        })
+        self.assertEqual(clean["rules"], [{
+            "field": "added", "op": "before", "value": 3, "unit": "weeks",
+        }])
+
+    def test_added_rule_accepts_within_last(self):
+        clean = db.validate_radio_filter({
+            "mode": "all", "rules": [
+                {"field": "added", "op": "within_last", "value": 2, "unit": "months"},
+            ],
+        })
+        self.assertEqual(clean["rules"][0]["op"], "within_last")
+
+    def test_added_rule_rejects_invalid_unit(self):
+        with self.assertRaises(errors.ValidationError):
+            db.validate_radio_filter({
+                "mode": "all", "rules": [
+                    {"field": "added", "op": "before", "value": 3, "unit": "hours"},
+                ],
+            })
+
     def test_unknown_field_raises(self):
         with self.assertRaises(errors.ValidationError):
             db.validate_radio_filter({
@@ -162,6 +188,24 @@ class RadioFilterSqlTests(unittest.TestCase):
             "mode": "all", "rules": [{"field": "genre", "op": "not_contains", "value": "Jazz"}],
         })
         self.assertIn("NOT (", sql)
+
+    def test_added_before_uses_an_index_timestamp_cutoff(self):
+        sql, params = db._radio_filter_sql({
+            "mode": "all", "rules": [
+                {"field": "added", "op": "before", "value": 2, "unit": "weeks"},
+            ],
+        })
+        self.assertEqual(sql, "t.added_at <= unixepoch('now', ?)")
+        self.assertEqual(params, ["-14 days"])
+
+    def test_added_within_last_uses_the_recent_side_of_the_cutoff(self):
+        sql, params = db._radio_filter_sql({
+            "mode": "all", "rules": [
+                {"field": "added", "op": "within_last", "value": 2, "unit": "months"},
+            ],
+        })
+        self.assertEqual(sql, "t.added_at >= unixepoch('now', ?)")
+        self.assertEqual(params, ["-2 months"])
 
 
 class RadioStationCrudTests(RadioTestBase):

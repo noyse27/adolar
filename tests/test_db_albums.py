@@ -186,7 +186,8 @@ class AlbumArtistMigrationBackfillTests(unittest.TestCase):
                 play_count_tag_dirty INTEGER NOT NULL DEFAULT 0, loved INTEGER NOT NULL DEFAULT 0,
                 indexed_at REAL DEFAULT (unixepoch())
             );
-            INSERT INTO tracks (id, path, title, mtime) VALUES (1, '/music/a.mp3', 'A', 1700000000.0);
+            INSERT INTO tracks (id, path, title, mtime, indexed_at)
+            VALUES (1, '/music/a.mp3', 'A', 1700000000.0, 1700000100.0);
         """)
         conn.commit()
         conn.close()
@@ -205,6 +206,15 @@ class AlbumArtistMigrationBackfillTests(unittest.TestCase):
             conn.execute("UPDATE tracks SET mtime=1234.5 WHERE id=1")
         db.init_db()
         self.assertEqual(self._mtime(), 1234.5)
+
+    def test_added_at_migration_preserves_the_best_existing_timestamp(self):
+        db.init_db()
+        with db.db() as conn:
+            row = conn.execute(
+                "SELECT added_at, indexed_at FROM tracks WHERE id=1"
+            ).fetchone()
+        self.assertEqual(row["added_at"], 1700000100.0)
+        self.assertEqual(row["indexed_at"], 1700000100.0)
 
 
 if __name__ == "__main__":
