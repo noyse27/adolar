@@ -19,6 +19,7 @@ import psutil
 from flask import Flask, abort, g, jsonify, make_response, redirect, render_template, request, send_file
 from flask import session as flask_session
 from flask_cors import CORS
+from werkzeug.http import http_date
 from werkzeug.utils import secure_filename
 
 import adolar4u
@@ -31,6 +32,7 @@ import libraries
 import library_context
 import lyrics
 import scanner
+import smart_rules
 import smart_shuffle
 import tasks
 
@@ -716,6 +718,22 @@ def api_playlist_editor_defaults():
     if not _auth.can(g.user, "create_playlists"):
         return jsonify({"error": "forbidden"}), 403
     return jsonify({"name": db.next_playlist_name(g.user["id"])})
+
+
+@app.post("/api/smart-rules/parse")
+def api_smart_rules_parse():
+    if not (_auth.can(g.user, "create_playlists") or
+            _auth.can(g.user, "create_radio_stations")):
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        parsed = smart_rules.parse_smart_rule(data.get("text"))
+        parsed["filter"] = db.validate_radio_filter(parsed["filter"])
+    except smart_rules.SmartRuleParseError as exc:
+        return jsonify({"error": exc.user_message}), 400
+    except errors.ValidationError as exc:
+        return _client_error(exc.user_message, exc)
+    return jsonify(parsed)
 
 
 @app.post("/api/playlist-editor/preview")
@@ -2106,6 +2124,43 @@ def api_cover(hash_):
 
 # ── Audio streaming ───────────────────────────────────────────────────────────
 
+_stream_response_lock = threading.Lock()
+_active_stream_responses = 0
+
+
+def _begin_stream_response(track_id: int, status: int, range_header: str | None) -> tuple[float, int]:
+    global _active_stream_responses
+    with _stream_response_lock:
+        _active_stream_responses += 1
+        active = _active_stream_responses
+    started = _time.perf_counter()
+    logging.getLogger(__name__).info(
+        "audio stream start track=%s status=%s range=%s active=%s",
+        track_id, status, range_header or "full", active,
+    )
+    return started, active
+
+
+def _end_stream_response(track_id: int, started: float) -> None:
+    global _active_stream_responses
+    with _stream_response_lock:
+        _active_stream_responses = max(0, _active_stream_responses - 1)
+        active = _active_stream_responses
+    logging.getLogger(__name__).info(
+        "audio stream end track=%s duration_ms=%.1f active=%s",
+        track_id, (_time.perf_counter() - started) * 1000, active,
+    )
+
+
+def _set_stream_cache_headers(response, *, etag: str, last_modified: str, immutable: bool):
+    response.headers["ETag"] = f'"{etag}"'
+    response.headers["Last-Modified"] = last_modified
+    response.headers["Accept-Ranges"] = "bytes"
+    response.headers["Cache-Control"] = (
+        "private, max-age=31536000, immutable" if immutable else "private, no-cache"
+    )
+    return response
+
 @app.get("/api/stream/<int:track_id>")
 def api_stream(track_id):
     _touch_disco()
@@ -2120,26 +2175,60 @@ def api_stream(track_id):
     if path is None or not os.path.isfile(path):
         abort(404)
 
+    stat = os.stat(path)
+    size = stat.st_size
+    # SQLite stores scanner mtimes as REAL; microseconds preserve the available
+    # precision while producing exactly the same key from the live stat result.
+    version = f"{int(stat.st_mtime * 1_000_000)}-{size}"
+    etag = f"track-{track_id}-{version}"
+    last_modified = http_date(stat.st_mtime)
+    immutable = request.args.get("v") == version
+    not_modified = request.if_none_match and request.if_none_match.contains(etag)
+    if not not_modified and not request.if_none_match and request.if_modified_since:
+        not_modified = stat.st_mtime <= request.if_modified_since.timestamp() + 1
+    if not_modified:
+        response = make_response("", 304)
+        return _set_stream_cache_headers(
+            response, etag=etag, last_modified=last_modified, immutable=immutable,
+        )
+
     range_header = request.headers.get("Range")
-    size = os.path.getsize(path)
+    if_range = request.headers.get("If-Range")
+    if if_range and if_range not in {f'"{etag}"', last_modified}:
+        range_header = None
     mime = _guess_mime(path)
 
     if range_header:
         byte1, byte2 = _parse_range(range_header, size)
         if byte1 is None:
-            return "", 416  # Range Not Satisfiable
+            response = make_response("", 416)
+            response.headers["Content-Range"] = f"bytes */{size}"
+            return _set_stream_cache_headers(
+                response, etag=etag, last_modified=last_modified, immutable=immutable,
+            )
         length = byte2 - byte1 + 1
+        started, _active = _begin_stream_response(track_id, 206, range_header)
 
         def generate():
-            with open(path, "rb") as f:
-                f.seek(byte1)
-                remaining = length
-                while remaining:
-                    chunk = f.read(min(65536, remaining))
-                    if not chunk:
-                        break
-                    remaining -= len(chunk)
-                    yield chunk
+            first_chunk = True
+            try:
+                with open(path, "rb") as f:
+                    f.seek(byte1)
+                    remaining = length
+                    while remaining:
+                        chunk = f.read(min(65536, remaining))
+                        if not chunk:
+                            break
+                        if first_chunk:
+                            first_chunk = False
+                            logging.getLogger(__name__).info(
+                                "audio stream first-byte track=%s ttfb_ms=%.1f",
+                                track_id, (_time.perf_counter() - started) * 1000,
+                            )
+                        remaining -= len(chunk)
+                        yield chunk
+            finally:
+                _end_stream_response(track_id, started)
 
         from flask import Response
         headers = {
@@ -2148,9 +2237,17 @@ def api_stream(track_id):
             "Content-Length": length,
             "Content-Type": mime,
         }
-        return Response(generate(), 206, headers=headers)
+        response = Response(generate(), 206, headers=headers)
+        return _set_stream_cache_headers(
+            response, etag=etag, last_modified=last_modified, immutable=immutable,
+        )
 
-    return send_file(path, mimetype=mime, conditional=True)
+    started, _active = _begin_stream_response(track_id, 200, None)
+    response = send_file(path, mimetype=mime, conditional=False)
+    response.call_on_close(lambda: _end_stream_response(track_id, started))
+    return _set_stream_cache_headers(
+        response, etag=etag, last_modified=last_modified, immutable=immutable,
+    )
 
 
 def _guess_mime(path):
@@ -2692,6 +2789,7 @@ def api_radio_station_jingle_stream(station_id):
 
 @app.get("/api/radio-stations/<int:station_id>/tracks")
 def api_radio_station_tracks(station_id):
+    started = _time.perf_counter()
     _touch_disco()
     count = min(_int_arg("count", 25, min_val=1, max_val=100), 100)
     exclude = [int(x) for x in request.args.getlist("exclude") if x.isdigit()]
@@ -2713,6 +2811,10 @@ def api_radio_station_tracks(station_id):
         return jsonify({"error": "station not found"}), 404
     response = jsonify(tracks)
     response.headers["X-Shuffle-Session"] = token
+    logging.getLogger(__name__).info(
+        "radio queue station=%s count=%s duration_ms=%.1f",
+        station_id, len(tracks), (_time.perf_counter() - started) * 1000,
+    )
     return response
 
 

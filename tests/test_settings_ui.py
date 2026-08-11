@@ -65,12 +65,26 @@ class SettingsUiTests(unittest.TestCase):
         normal_crossfade = normal_crossfade.split("function startCrossfade()", 1)[0]
         radio_crossfade = self.javascript.split("function startCrossfade()", 1)[1]
         radio_crossfade = radio_crossfade.split("// ── Player events", 1)[0]
-        self.assertIn("const playResult = audioB.play();", normal_crossfade)
-        self.assertIn("playResult.then(beginFade)", normal_crossfade)
-        self.assertIn("const playResult = audioB.play();", radio_crossfade)
-        self.assertIn("playResult.then(beginFade)", radio_crossfade)
-        self.assertNotIn("audioB.readyState", normal_crossfade)
-        self.assertNotIn("audioB.readyState", radio_crossfade)
+        self.assertIn("const incoming = getInactiveAudio();", normal_crossfade)
+        self.assertIn("const playResult = incoming.play();", normal_crossfade)
+        self.assertIn("playResult.then(() =>", normal_crossfade)
+        self.assertIn("finishAudioHandoff(incoming, \"normal\");", normal_crossfade)
+        self.assertNotIn("audio.src = nextSrc", normal_crossfade)
+        self.assertIn("const playResult = incoming.play();", radio_crossfade)
+        self.assertIn("playResult.then(() =>", radio_crossfade)
+        self.assertIn("finishAudioHandoff(incoming, \"radio\");", radio_crossfade)
+        self.assertIn("bufferedAhead(incoming)", normal_crossfade)
+        self.assertIn("bufferedAhead(incoming)", radio_crossfade)
+
+    def test_radio_refill_is_non_blocking_until_the_queue_is_empty(self):
+        radio_next = self.javascript.split("async function radioNext()", 1)[1]
+        radio_next = radio_next.split("function preloadNext", 1)[0]
+        self.assertIn("const refill = refillRadioQueue();", radio_next)
+        self.assertIn("if (!radio.queue.length) await refill;", radio_next)
+
+    def test_both_audio_slots_receive_guarded_player_events(self):
+        self.assertIn("for (const [slot, name] of [[audioA, \"A\"], [audioB, \"B\"]])", self.javascript)
+        self.assertIn("if (event.currentTarget !== audio) return;", self.javascript)
 
 
 if __name__ == "__main__":

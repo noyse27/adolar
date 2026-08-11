@@ -563,24 +563,40 @@
         <div id="radio-jingle-status" style="grid-column:1/-1;color:var(--text-tertiary);font-size:12px"></div>
       </div>
 
-      <div class="radio-builder-group">
-        <div class="radio-builder-head">
-          <div class="radio-builder-title">Alles der folgenden</div>
-          <button class="radio-secondary-btn" onclick="addRadioRule('all')">
-            <i class="ti ti-plus"></i><span>Regel hinzufügen</span>
-          </button>
-        </div>
-        <div id="radio-rules-all"></div>
+      <div class="smart-rule-mode" role="group" aria-label="Regelmodus">
+        <button id="radio-rule-mode-normal" class="smart-rule-mode-btn active" type="button" onclick="setRadioRuleMode('normal')">Normale Regeln</button>
+        <button id="radio-rule-mode-smart" class="smart-rule-mode-btn" type="button" onclick="setRadioRuleMode('smart')">Smarte Eingabe</button>
       </div>
 
-      <div class="radio-builder-group">
-        <div class="radio-builder-head">
-          <div class="radio-builder-title">Eines der folgenden</div>
-          <button class="radio-secondary-btn" onclick="addRadioRule('any')">
-            <i class="ti ti-plus"></i><span>Regel hinzufügen</span>
-          </button>
+      <div id="radio-normal-rule-editor">
+        <div class="radio-builder-group">
+          <div class="radio-builder-head">
+            <div class="radio-builder-title">Alles der folgenden</div>
+            <button class="radio-secondary-btn" onclick="addRadioRule('all')">
+              <i class="ti ti-plus"></i><span>Regel hinzufügen</span>
+            </button>
+          </div>
+          <div id="radio-rules-all"></div>
         </div>
-        <div id="radio-rules-any"></div>
+
+        <div class="radio-builder-group">
+          <div class="radio-builder-head">
+            <div class="radio-builder-title">Eines der folgenden</div>
+            <button class="radio-secondary-btn" onclick="addRadioRule('any')">
+              <i class="ti ti-plus"></i><span>Regel hinzufügen</span>
+            </button>
+          </div>
+          <div id="radio-rules-any"></div>
+        </div>
+      </div>
+
+      <div id="radio-smart-rule-editor" class="smart-rule-panel" style="display:none">
+        <label for="radio-smart-rule-text">Beschreibe die gewünschten Titel</label>
+        <textarea id="radio-smart-rule-text" class="smart-rule-text" rows="4" maxlength="2000" placeholder="Album enthält Bravo oder Ronny und Jahrzehnt ist 1980 oder 1990 und Genre ist Hiphop oder Rap"></textarea>
+        <button class="radio-primary-btn" type="button" onclick="generateRadioSmartRules()">
+          <i class="ti ti-sparkles"></i><span>Regeln erzeugen</span>
+        </button>
+        <div id="radio-smart-rule-interpretation" class="smart-rule-interpretation"></div>
       </div>
 
       <div id="radio-error" class="radio-error"></div>
@@ -1003,15 +1019,27 @@
           <details class="ple-tool">
             <summary>Regel-Playlist</summary>
             <div class="ple-tool-content">
-              <div class="ple-rule-group">
-                <div class="ple-rule-head"><span>Alle der folgenden</span>
-                  <button class="ple-mini-btn" type="button" onclick="pleAddRule('all')">+ Regel</button></div>
-                <div id="ple-rules-all"></div>
+              <div class="smart-rule-mode" role="group" aria-label="Regelmodus">
+                <button id="ple-rule-mode-normal" class="smart-rule-mode-btn active" type="button" onclick="pleSetRuleMode('normal')">Normale Regeln</button>
+                <button id="ple-rule-mode-smart" class="smart-rule-mode-btn" type="button" onclick="pleSetRuleMode('smart')">Smarte Eingabe</button>
               </div>
-              <div class="ple-rule-group">
-                <div class="ple-rule-head"><span>Eines der folgenden</span>
-                  <button class="ple-mini-btn" type="button" onclick="pleAddRule('any')">+ Regel</button></div>
-                <div id="ple-rules-any"></div>
+              <div id="ple-normal-rule-editor">
+                <div class="ple-rule-group">
+                  <div class="ple-rule-head"><span>Alle der folgenden</span>
+                    <button class="ple-mini-btn" type="button" onclick="pleAddRule('all')">+ Regel</button></div>
+                  <div id="ple-rules-all"></div>
+                </div>
+                <div class="ple-rule-group">
+                  <div class="ple-rule-head"><span>Eines der folgenden</span>
+                    <button class="ple-mini-btn" type="button" onclick="pleAddRule('any')">+ Regel</button></div>
+                  <div id="ple-rules-any"></div>
+                </div>
+              </div>
+              <div id="ple-smart-rule-editor" class="smart-rule-panel" style="display:none">
+                <label for="ple-smart-rule-text">Beschreibe die gewünschten Titel</label>
+                <textarea id="ple-smart-rule-text" class="smart-rule-text" rows="5" maxlength="2000" placeholder="Album enthält Bravo oder Ronny und Jahrzehnt ist 1980 oder 1990 und Genre ist Hiphop oder Rap"></textarea>
+                <button class="ple-primary ple-wide" type="button" onclick="pleGenerateSmartRules()">Regeln erzeugen</button>
+                <div id="ple-smart-rule-interpretation" class="smart-rule-interpretation"></div>
               </div>
               <button class="ple-primary ple-wide" type="button" onclick="pleRunPreview()">Regeln anwenden</button>
             </div>

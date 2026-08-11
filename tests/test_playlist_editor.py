@@ -144,6 +144,18 @@ class PlaylistEditorTests(unittest.TestCase):
         )
         self.assertEqual(app_module.db.next_playlist_name(self.USER_ID), "Neue Playlist 5")
 
+    def test_smart_rule_api_builds_independent_or_groups(self):
+        with self._login():
+            response = self.client.post("/api/smart-rules/parse", json={
+                "text": "Album enthält Bravo oder Ronny und Jahrzehnt ist 1980 oder 1990 "
+                        "und Genre ist Hiphop oder Rap",
+            })
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["filter"]["mode"], "all")
+        self.assertEqual(len(data["filter"]["rules"]), 3)
+        self.assertTrue(all(group["mode"] == "any" for group in data["filter"]["rules"]))
+
     def test_web_ui_contains_editor_type_and_export_controls(self):
         page = (
             os.path.join(os.path.dirname(app_module.__file__), "templates", "index.html")

@@ -346,6 +346,11 @@ const CF_PRELOAD = 25;
 const CF_OUT     = 12;
 const CF_IN      =  8;
 
+function streamUrl(track) {
+  const version = track?.stream_version ? `?v=${encodeURIComponent(track.stream_version)}` : "";
+  return `${API}/api/stream/${track.id}${version}`;
+}
+
 const radio = { queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false, cfPending: false, cfToken: 0, cfFinish: null, session: 0, stationId: 1, stationName: "Adolar Radio", station: null, tracksSinceJingle: 0 };
 const LAST_RADIO_STATION_KEY = "adolar_radio_last_station_id";
 
@@ -595,7 +600,7 @@ function playTrack(track) {
   inactiveEl.pause(); inactiveEl.removeAttribute("src"); inactiveEl.load();
 
   updateUI(track);
-  audio.src = `${API}/api/stream/${track.id}`;
+  audio.src = streamUrl(track);
   audio.play().catch(() => {});
   startA4UTrack(track);
 
@@ -738,7 +743,7 @@ function preloadNext() {
   if (isJingle(currentTrack)) return;
   if (jingleDueAfterCurrent()) return;
   const next = radio.queue[0];
-  inactive.src = `${API}/api/stream/${next.id}`;
+  inactive.src = streamUrl(next);
   inactive.preload = "auto";
   inactive.load();
 }

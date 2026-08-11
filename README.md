@@ -24,6 +24,8 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Smart Shuffle** — shuffle the complete current search, filter result, or static playlist with session-wide track cooldown, dynamic artist/album spacing, proportional genre distribution, BPM-smoothed transitions, and an automatically refilled 100-track queue; explicit genre filters remain untouched
 - **Radio playback** — equal-power crossfade (12s out / 8s in), next track pre-buffered; crossfade skipped for short tracks and station jingles
 - **Optional library crossfade** — persistent crossfade switch for normal playback, playlists, and shuffled queues; kept separate from Radio playback
+- **Atomic playback handoff** — the Web player keeps the already-buffered incoming audio slot, refills radio queues off the critical path, and validates buffered duration before fading
+- **Native Android crossfade** — dual Media3 ExoPlayers provide an eight-second equal-power transition backed by a shared version-safe 384 MB disk cache and a five-track local queue
 - **Clear Radio exit** — stop the active station and return directly to the library from the Radio button or Now Playing view
 - **AdolarRadio** — Windows companion app: native window, auto-starts radio, About dialog, buildable to `.exe`
 - **Mini-player** — popup window with cover art, controls, progress bar, Last.fm love button
