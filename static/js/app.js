@@ -484,8 +484,9 @@ window.addEventListener("resize", () => {
 });
 
 // ── DOM ───────────────────────────────────────────────────
-const audio      = $("audio");
+const audioA     = $("audio");
 const audioB     = $("audio-b");
+let audio        = audioA;
 const playBtn    = $("play-btn");
 const progress   = $("progress");
 
@@ -494,7 +495,7 @@ const progress   = $("progress");
 // completions, recency) instead of locking in a large stretch of tracks
 // scored from one stale profile snapshot — see docs/adolar4u-roadmap.md.
 const RADIO_REFILL_BATCH = 5;
-const radio = { active: false, browsingLibrary: false, queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false, cfPending: false, cfToken: 0 };
+const radio = { active: false, browsingLibrary: false, queue: [], playedIds: [], shuffleSession: null, refillPromise: null, cfTimer: null, cfActive: false, cfPending: false, cfToken: 0 };
 radio.stationId = 1;
 radio.stationName = "Adolar Radio";
 radio.station = null;
@@ -524,6 +525,54 @@ const lyricsUi = {
 const CF_PRELOAD = 25; // seconds before end: start buffering next track
 const CF_OUT     = 12; // seconds before end: start fade-out
 const CF_IN      =  8; // fade-in duration
+const CF_MIN_BUFFER = CF_IN + 3;
+const playbackMetrics = [];
+
+function recordPlaybackMetric(event, details = {}) {
+  const entry = { event, at: performance.now(), wallTime: new Date().toISOString(), ...details };
+  playbackMetrics.push(entry);
+  if (playbackMetrics.length > 300) playbackMetrics.shift();
+  globalThis.__adolarPlaybackMetrics = playbackMetrics;
+  console.debug("[Adolar playback]", entry);
+}
+
+function streamUrl(track) {
+  const version = track?.stream_version ? `?v=${encodeURIComponent(track.stream_version)}` : "";
+  return `${API}/api/stream/${track.id}${version}`;
+}
+
+function getInactiveAudio() {
+  return audio === audioA ? audioB : audioA;
+}
+
+function clearAudioSlot(slot) {
+  slot.pause();
+  slot.removeAttribute("src");
+  slot.removeAttribute("data-track-id");
+  slot.load();
+}
+
+function bufferedAhead(slot) {
+  const position = slot.currentTime || 0;
+  for (let i = 0; i < slot.buffered.length; i++) {
+    if (slot.buffered.start(i) <= position + 0.05 && slot.buffered.end(i) >= position) {
+      return Math.max(0, slot.buffered.end(i) - position);
+    }
+  }
+  return 0;
+}
+
+function finishAudioHandoff(incoming, mode) {
+  const outgoing = audio;
+  audio = incoming;
+  audio.volume = parseFloat($("volume").value) || 0.8;
+  clearAudioSlot(outgoing);
+  recordPlaybackMetric("handoff-end", {
+    mode,
+    trackId: incoming.dataset.trackId || null,
+    bufferedSeconds: bufferedAhead(incoming),
+  });
+}
 
 // ── Optional Adolar4U listening signals ──────────────────
 const adolar4uTelemetry = {
@@ -1712,11 +1761,13 @@ function playTrack(idx) {
 
   updatePlayerUI(t);
   if (!playViewState.openedOnce && !playViewState.dismissed) openPlayView(true);
-  audio.src = `${API}/api/stream/${t.id}`;
+  audio.dataset.trackId = String(t.id);
+  audio.src = streamUrl(t);
   audio.play();
   startAdolar4UTrack(t);
   renderTracks();
   if (listShuffle.active) ensureListShuffleQueue();
+  queueMicrotask(preloadUpcomingTrack);
 }
 
 function playRadioTrack(track) {
@@ -1726,10 +1777,12 @@ function playRadioTrack(track) {
   _scrobbled = false;
   _playCounted = false;
   updatePlayerUI(track);
-  audio.src = `${API}/api/stream/${track.id}`;
+  audio.dataset.trackId = String(track.id);
+  audio.src = streamUrl(track);
   audio.play();
   startAdolar4UTrack(track);
   renderTracks();
+  queueMicrotask(preloadUpcomingTrack);
 }
 
 function playJingle() {
@@ -1740,6 +1793,7 @@ function playJingle() {
   _playCounted = true;
   resetRadioCrossfadeBuffer();
   updatePlayerUI(item);
+  audio.removeAttribute("data-track-id");
   audio.src = `${API}/api/radio-stations/${radio.stationId}/jingle`;
   audio.play().catch(() => {});
   renderTracks();
@@ -1894,11 +1948,43 @@ async function loadRadioQueue(count, excludeIds = []) {
   if (radio.shuffleSession) p.set("shuffle_session", radio.shuffleSession);
   const stationId = radio.stationId || 1;
   try {
+    const started = performance.now();
     const res = await fetch(`${API}/api/radio-stations/${stationId}/tracks?${p}`);
     if (!res.ok) throw new Error("station failed");
     radio.shuffleSession = res.headers.get("X-Shuffle-Session") || radio.shuffleSession;
-    return await res.json();
+    const tracks = await res.json();
+    recordPlaybackMetric("radio-refill", {
+      stationId,
+      count: tracks.length,
+      durationMs: performance.now() - started,
+    });
+    return tracks;
   } catch { return []; }
+}
+
+function refillRadioQueue() {
+  if (!radio.active) return Promise.resolve([]);
+  if (radio.refillPromise) return radio.refillPromise;
+  const session = radio.session;
+  const excluded = radio.playedIds.slice(-100).concat(radio.queue.map(track => track.id));
+  radio.refillPromise = loadRadioQueue(RADIO_REFILL_BATCH, excluded).then(fresh => {
+    if (!radio.active || radio.session !== session) return [];
+    const known = new Set(radio.queue.map(track => Number(track.id)));
+    const unique = fresh.filter(track => !known.has(Number(track.id)));
+    radio.queue.push(...unique);
+    if (radio.playedIds.length > 100) radio.playedIds = radio.playedIds.slice(-100);
+    if (!radio.browsingLibrary) {
+      state.tracks = [...radio.queue];
+      state.total = radio.queue.length;
+      $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
+      renderTracks();
+    }
+    preloadUpcomingTrack();
+    return unique;
+  }).finally(() => {
+    if (radio.session === session) radio.refillPromise = null;
+  });
+  return radio.refillPromise;
 }
 
 async function startRadio(station = null, initialPlaylist = null) {
@@ -1915,6 +2001,7 @@ async function startRadio(station = null, initialPlaylist = null) {
   radio.queue  = [];
   radio.playedIds = [];
   radio.shuffleSession = null;
+  radio.refillPromise = null;
   radio.tracksSinceJingle = 0;
   if (station) {
     radio.stationId = station.id;
@@ -1925,7 +2012,7 @@ async function startRadio(station = null, initialPlaylist = null) {
   updatePlaybackModeControls();
   closeRadioPanel();
 
-  // Fetch 5 tracks first → play immediately, then fetch remaining in background
+  // Establish enough of the queue for an immediate track and a deterministic preload.
   const initial = initialPlaylist?.slice(0, 5) || await loadRadioQueue(5);
   if (!initial.length) { stopRadio(); return; }
 
@@ -1947,6 +2034,7 @@ async function startRadio(station = null, initialPlaylist = null) {
       $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
       renderTracks();
     }
+    preloadUpcomingTrack();
   });
 }
 
@@ -1989,6 +2077,7 @@ function stopRadio() {
   radio.active = false;
   radio.browsingLibrary = false;
   resetRadioCrossfadeBuffer();
+  radio.refillPromise = null;
   updateRadioButton();
   updatePlaybackModeControls();
   if (state.currentTrack) updatePlayView(state.currentTrack);
@@ -2039,12 +2128,10 @@ async function radioNext() {
     radio.tracksSinceJingle++;
   }
 
-  // refill: when queue drops to RADIO_REFILL_BATCH, load that many more
+  // Refill in the background. Only a genuinely empty queue may wait for I/O.
   if (radio.queue.length <= RADIO_REFILL_BATCH) {
-    const fresh = await loadRadioQueue(RADIO_REFILL_BATCH, radio.playedIds.slice(-100));
-    radio.queue.push(...fresh);
-    // trim playedIds to last 100 to avoid unbounded growth
-    if (radio.playedIds.length > 100) radio.playedIds = radio.playedIds.slice(-100);
+    const refill = refillRadioQueue();
+    if (!radio.queue.length) await refill;
   }
 
   if (!radio.queue.length) { stopRadio(); return; }
@@ -2071,16 +2158,31 @@ async function radioNext() {
   state.currentTrack = radio.queue[0];
   renderTracks();
   $("result-count").textContent = `${radio.stationName || t().radio} – ${radio.queue.length} Tracks`;
+  preloadUpcomingTrack();
 }
 
 function preloadNext(nextTrack) {
-  // Buffer the next track silently so it's ready when crossfade starts
+  if (!nextTrack || String(nextTrack.id).startsWith("jingle-")) return;
   preloadTrackArtwork(nextTrack);
-  if (audioB.getAttribute("src")) return; // already preloading
-  audioB.src = `${API}/api/stream/${nextTrack.id}`;
-  audioB.volume = 0;
-  audioB.preload = "auto";
-  audioB.load();
+  const inactive = getInactiveAudio();
+  if (inactive.dataset.trackId === String(nextTrack.id) && inactive.getAttribute("src")) return;
+  clearAudioSlot(inactive);
+  inactive.dataset.trackId = String(nextTrack.id);
+  inactive.src = streamUrl(nextTrack);
+  inactive.volume = 0;
+  inactive.preload = "auto";
+  const started = performance.now();
+  inactive.dataset.preloadStarted = String(started);
+  recordPlaybackMetric("preload-url-set", {trackId: nextTrack.id, url: inactive.src});
+  inactive.load();
+}
+
+function preloadUpcomingTrack() {
+  if (radio.active) {
+    if (!jingleDueAfterCurrent()) preloadNext(radio.queue[1]);
+    return;
+  }
+  if (normalCrossfade.enabled) preloadNext(state.tracks[state.currentIdx + 1]);
 }
 
 function resetRadioCrossfadeBuffer() {
@@ -2089,9 +2191,7 @@ function resetRadioCrossfadeBuffer() {
   radio.cfToken++;
   clearTimeout(radio.cfTimer);
   radio.cfTimer = null;
-  audioB.pause();
-  audioB.removeAttribute("src");
-  audioB.load();
+  clearAudioSlot(getInactiveAudio());
   audio.volume = parseFloat($("volume").value) || 0.8;
 }
 
@@ -2102,9 +2202,7 @@ function resetNormalCrossfadeBuffer() {
   clearTimeout(normalCrossfade.timer);
   normalCrossfade.timer = null;
   if (!radio.active) {
-    audioB.pause();
-    audioB.removeAttribute("src");
-    audioB.load();
+    clearAudioSlot(getInactiveAudio());
     audio.volume = parseFloat($("volume").value) || 0.8;
   }
 }
@@ -2122,13 +2220,25 @@ function startNormalCrossfade() {
   const nextIndex = state.currentIdx + 1;
   const nextTrack = state.tracks[nextIndex];
   if (!nextTrack) return;
+  const incoming = getInactiveAudio();
+  const outgoing = audio;
+  if (incoming.dataset.trackId !== String(nextTrack.id)) {
+    preloadNext(nextTrack);
+    return;
+  }
+  const available = bufferedAhead(incoming);
+  if (available < CF_MIN_BUFFER) {
+    recordPlaybackMetric("crossfade-buffer-insufficient", {mode: "normal", trackId: nextTrack.id, bufferedSeconds: available});
+    return;
+  }
   const token = ++normalCrossfade.token;
   normalCrossfade.pending = true;
-  audioB.volume = 0;
+  incoming.volume = 0;
   const beginFade = () => {
     if (!normalCrossfade.pending || token !== normalCrossfade.token) return;
     normalCrossfade.pending = false;
     normalCrossfade.active = true;
+    recordPlaybackMetric("handoff-start", {mode: "normal", trackId: nextTrack.id, bufferedSeconds: bufferedAhead(incoming)});
     const vol = parseFloat($("volume").value) || 0.8;
     const startTime = performance.now();
     const tick = () => {
@@ -2136,19 +2246,14 @@ function startNormalCrossfade() {
       const elapsed = (performance.now() - startTime) / 1000;
       const fadeOut = Math.min(elapsed / CF_OUT, 1);
       const fadeIn = Math.min(Math.max(elapsed - (CF_OUT - CF_IN), 0) / CF_IN, 1);
-      audio.volume = vol * Math.cos(fadeOut * Math.PI / 2);
-      audioB.volume = vol * Math.sin(fadeIn * Math.PI / 2);
+      outgoing.volume = vol * Math.cos(fadeOut * Math.PI / 2);
+      incoming.volume = vol * Math.sin(fadeIn * Math.PI / 2);
 
       if (elapsed < CF_OUT) {
         normalCrossfade.timer = setTimeout(tick, 50);
         return;
       }
 
-      const nextSrc = audioB.src;
-      const nextTime = audioB.currentTime;
-      audioB.pause();
-      audioB.removeAttribute("src");
-      audioB.load();
       normalCrossfade.active = false;
       normalCrossfade.timer = null;
       finishAdolar4UTrack("ended", true);
@@ -2157,20 +2262,22 @@ function startNormalCrossfade() {
       _scrobbled = false;
       _playCounted = false;
       updatePlayerUI(nextTrack);
-      audio.src = nextSrc;
-      audio.currentTime = nextTime;
-      audio.volume = vol;
-      audio.play();
+      finishAudioHandoff(incoming, "normal");
       startAdolar4UTrack(nextTrack);
       renderTracks();
       if (listShuffle.active) ensureListShuffleQueue();
+      preloadUpcomingTrack();
     };
     tick();
   };
 
-  const playResult = audioB.play();
+  const playStarted = performance.now();
+  const playResult = incoming.play();
   if (playResult && typeof playResult.then === "function") {
-    playResult.then(beginFade).catch(() => {
+    playResult.then(() => {
+      recordPlaybackMetric("preload-play-resolved", {mode: "normal", durationMs: performance.now() - playStarted});
+      beginFade();
+    }).catch(() => {
       if (token !== normalCrossfade.token) return;
       resetNormalCrossfadeBuffer();
     });
@@ -2181,13 +2288,26 @@ function startNormalCrossfade() {
 
 function startCrossfade() {
   if (radio.cfActive || radio.cfPending) return;
+  const nextTrack = radio.queue[1];
+  const incoming = getInactiveAudio();
+  const outgoing = audio;
+  if (!nextTrack || incoming.dataset.trackId !== String(nextTrack.id)) {
+    preloadNext(nextTrack);
+    return;
+  }
+  const available = bufferedAhead(incoming);
+  if (available < CF_MIN_BUFFER) {
+    recordPlaybackMetric("crossfade-buffer-insufficient", {mode: "radio", trackId: nextTrack.id, bufferedSeconds: available});
+    return;
+  }
   const token = ++radio.cfToken;
   radio.cfPending = true;
-  audioB.volume = 0;
+  incoming.volume = 0;
   const beginFade = () => {
     if (!radio.cfPending || token !== radio.cfToken) return;
     radio.cfPending = false;
     radio.cfActive = true;
+    recordPlaybackMetric("handoff-start", {mode: "radio", trackId: nextTrack.id, bufferedSeconds: bufferedAhead(incoming)});
     const vol = parseFloat($("volume").value) || 0.8;
     const startTime = performance.now();
     const tick = () => {
@@ -2196,38 +2316,37 @@ function startCrossfade() {
       const t_out = Math.min(elapsed / CF_OUT, 1);
       const t_in  = Math.min(Math.max(elapsed - (CF_OUT - CF_IN), 0) / CF_IN, 1);
       // Equal-power curve: constant perceived loudness
-      audio.volume  = vol * Math.cos(t_out * Math.PI / 2);
-      audioB.volume = vol * Math.sin(t_in  * Math.PI / 2);
+      outgoing.volume  = vol * Math.cos(t_out * Math.PI / 2);
+      incoming.volume = vol * Math.sin(t_in  * Math.PI / 2);
 
       if (elapsed < CF_OUT) {
         radio.cfTimer = setTimeout(tick, 50);
       } else {
-        const nextSrc  = audioB.src;
-        const nextTime = audioB.currentTime;
-        audioB.pause(); audioB.removeAttribute("src"); audioB.load();
         radio.cfActive = false;
         radio.cfTimer = null;
         finishAdolar4UTrack("ended", true);
+        finishAudioHandoff(incoming, "radio");
         radioNext().then(() => {
           if (!radio.queue.length || token !== radio.cfToken) return;
           _scrobbled = false;
           _playCounted = false;
           updatePlayerUI(radio.queue[0]);
-          audio.src = nextSrc;
-          audio.currentTime = nextTime;
-          audio.volume = vol;
-          audio.play();
           startAdolar4UTrack(state.currentTrack);
           renderTracks();
+          preloadUpcomingTrack();
         });
       }
     };
     tick();
   };
 
-  const playResult = audioB.play();
+  const playStarted = performance.now();
+  const playResult = incoming.play();
   if (playResult && typeof playResult.then === "function") {
-    playResult.then(beginFade).catch(() => {
+    playResult.then(() => {
+      recordPlaybackMetric("preload-play-resolved", {mode: "radio", durationMs: performance.now() - playStarted});
+      beginFade();
+    }).catch(() => {
       if (token !== radio.cfToken) return;
       resetRadioCrossfadeBuffer();
     });
@@ -2283,21 +2402,25 @@ document.addEventListener("keydown", e => {
 });
 setInterval(updatePlayViewClock, 1000);
 
-audio.onplay  = () => {
+function handleAudioPlay(event) {
+  if (event.currentTarget !== audio) return;
   playBtn.innerHTML = `<i class="ti ti-player-pause"></i>`;
   $("play-view-play").innerHTML = `<i class="ti ti-player-pause"></i>`;
   $("play-view-play").title = t().pause;
   $("play-view-play").setAttribute("aria-label", t().pause);
   renderTracks();
-};
-audio.onpause = () => {
+}
+function handleAudioPause(event) {
+  if (event.currentTarget !== audio) return;
   playBtn.innerHTML = `<i class="ti ti-player-play"></i>`;
   $("play-view-play").innerHTML = `<i class="ti ti-player-play"></i>`;
   $("play-view-play").title = t().play;
   $("play-view-play").setAttribute("aria-label", t().play);
   renderTracks();
-};
-audio.onended = async () => {
+}
+async function handleAudioEnded(event) {
+  if (event.currentTarget !== audio) return;
+  if ((radio.active && radio.cfActive) || (!radio.active && normalCrossfade.active)) return;
   finishAdolar4UTrack("ended", true);
   if (radio.active) {
     if (radio.cfActive) return; // crossfade already handles the transition
@@ -2322,11 +2445,12 @@ audio.onended = async () => {
       if (next < state.tracks.length) playTrack(next);
     }
   }
-};
+}
 
 let _scrobbled = false;
 let _playCounted = false;
-audio.ontimeupdate = () => {
+function handleAudioTimeUpdate(event) {
+  if (event.currentTarget !== audio) return;
   if (!audio.duration) return;
   progress.value = (audio.currentTime / audio.duration) * 100;
   $("time-cur").textContent = fmt(audio.currentTime);
@@ -2376,17 +2500,46 @@ audio.ontimeupdate = () => {
       startNormalCrossfade();
     }
   }
-};
+}
+
+function instrumentAudioSlot(slot, name) {
+  for (const eventName of ["loadedmetadata", "canplay", "canplaythrough", "waiting", "stalled", "error"]) {
+    slot.addEventListener(eventName, () => {
+      const preloadStarted = Number(slot.dataset.preloadStarted || 0);
+      const resource = performance.getEntriesByName(slot.currentSrc).at(-1);
+      recordPlaybackMetric(`audio-${eventName}`, {
+        slot: name,
+        active: slot === audio,
+        trackId: slot.dataset.trackId || null,
+        bufferedSeconds: bufferedAhead(slot),
+        sincePreloadMs: preloadStarted ? performance.now() - preloadStarted : null,
+        streamTtfbMs: resource?.responseStart && resource?.startTime
+          ? resource.responseStart - resource.startTime
+          : null,
+      });
+    });
+  }
+}
+
+for (const [slot, name] of [[audioA, "A"], [audioB, "B"]]) {
+  slot.addEventListener("play", handleAudioPlay);
+  slot.addEventListener("pause", handleAudioPause);
+  slot.addEventListener("ended", handleAudioEnded);
+  slot.addEventListener("timeupdate", handleAudioTimeUpdate);
+  instrumentAudioSlot(slot, name);
+}
 
 progress.oninput = () => {
   if (audio.duration) audio.currentTime = (progress.value / 100) * audio.duration;
 };
 $("volume").oninput = e => {
   audio.volume = e.target.value;
-  if (!audioB.paused) audioB.volume = e.target.value;
+  const inactive = getInactiveAudio();
+  if (!inactive.paused) inactive.volume = e.target.value;
   $("play-view-volume").value = e.target.value;
 };
-audio.volume = 0.8;
+audioA.volume = 0.8;
+audioB.volume = 0.8;
 
 $("btn-prev").onclick = () => {
   if (radio.active) return;
@@ -2977,9 +3130,17 @@ function broadcastProgress() {
   miniCh.postMessage({ type: "progress", pct: (audio.currentTime / audio.duration) * 100, cur: audio.currentTime, dur: audio.duration });
 }
 
-audio.addEventListener("play",  broadcastPlayState);
-audio.addEventListener("pause", broadcastPlayState);
-audio.addEventListener("timeupdate", broadcastProgress);
+for (const slot of [audioA, audioB]) {
+  slot.addEventListener("play", event => {
+    if (event.currentTarget === audio) broadcastPlayState();
+  });
+  slot.addEventListener("pause", event => {
+    if (event.currentTarget === audio) broadcastPlayState();
+  });
+  slot.addEventListener("timeupdate", event => {
+    if (event.currentTarget === audio) broadcastProgress();
+  });
+}
 
 // Commands from popup
 miniCh.onmessage = e => {

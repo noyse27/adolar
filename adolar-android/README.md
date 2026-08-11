@@ -36,5 +36,7 @@ The phone app and Android Auto control the same MediaSession. Playback never liv
 - The installed app version is shown in both the native player header and the settings screen.
 - The Android Auto media service supports Smart Shuffle playback, play/pause, previous/restart, and next. Its shuffle session survives media-service restarts and resets when the Adolar server URL changes.
 - Playback runs as a foreground media service with a MediaStyle notification, wake lock, audio-focus handling, and automatic continuation after a completed track. This keeps playback alive when the phone UI is in the background or Android Auto disconnects from the app screen.
+- Native playback uses two Media3 ExoPlayers for an eight-second equal-power crossfade. Both share a version-safe 384 MB disk cache; only the active player owns audio focus and the single MediaSession.
+- Five upcoming tracks are fetched per request and queued locally, so preload and manual Next do not normally wait for another API round trip.
 - Android Auto playback uses the public Adolar radio endpoints, so it does not need a login cookie.
 - Cleartext HTTP is enabled because Adolar is commonly used on a local NAS URL.

@@ -906,7 +906,7 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
     if loved_only:
         dedup = f"""WITH ranked AS (
                 SELECT t.id, t.path, t.title, t.artist, t.album, t.genre,
-                       t.year, t.track_no, t.duration, t.bitrate, t.size,
+                       t.year, t.track_no, t.duration, t.bitrate, t.size, t.mtime,
                        t.cover_hash, t.bpm, {loved_select}, {pc_select},
                        ROW_NUMBER() OVER (
                            PARTITION BY LOWER(COALESCE(t.artist,'')), LOWER(COALESCE(t.title,''))
@@ -915,7 +915,7 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
                 FROM tracks t {loved_join} {pc_join} {where}
             )
             SELECT id, path, title, artist, album, genre, year, track_no, duration,
-                   bitrate, size, cover_hash, bpm, loved, loved_at, user_play_count, last_played_at
+                   bitrate, size, mtime, cover_hash, bpm, loved, loved_at, user_play_count, last_played_at
             FROM ranked WHERE rn=1
             ORDER BY {order.replace("t.", "").replace("upc.", "").replace("l.", "")}
             LIMIT ? OFFSET ?"""
@@ -928,7 +928,7 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
             ) SELECT COUNT(*) FROM ranked WHERE rn=1"""
     else:
         dedup = f"""SELECT t.id, t.path, t.title, t.artist, t.album, t.genre,
-                       t.year, t.track_no, t.duration, t.bitrate, t.size,
+                       t.year, t.track_no, t.duration, t.bitrate, t.size, t.mtime,
                        t.cover_hash, t.bpm, {loved_select}, {pc_select}
                 FROM tracks t {loved_join} {pc_join} {where}
                 ORDER BY {order}
@@ -960,6 +960,7 @@ def search_tracks(query="", artist_query="", title_query="", album_query="",
         d["format"] = file_format(d["path"])
         d["has_cover"] = bool(d["cover_hash"])
         d["loved"] = bool(d.get("loved"))
+        _add_stream_version(d)
         tracks.append(d)
 
     _annotate_lyrics_availability(tracks)
@@ -1260,7 +1261,7 @@ def get_random_tracks(count=25, exclude_ids=None, shuffle_state=None):
         )
         rows = conn.execute(
             """SELECT id, path, title, artist, album, genre, year, track_no,
-                       duration, bitrate, size, cover_hash, bpm
+                       duration, bitrate, size, mtime, cover_hash, bpm
                 FROM tracks
                 ORDER BY RANDOM() LIMIT ?""",
             (pool_size,),
@@ -1297,6 +1298,14 @@ _RADIO_AGE_UNITS = {
 }
 
 
+def _add_stream_version(track: dict) -> None:
+    """Expose a stable cache key without leaking raw filesystem timestamps."""
+    mtime = track.pop("mtime", None)
+    if mtime is None:
+        return
+    track["stream_version"] = f"{int(float(mtime) * 1_000_000)}-{int(track.get('size') or 0)}"
+
+
 def _track_rows_to_dicts(rows) -> list[dict]:
     import os
 
@@ -1315,6 +1324,7 @@ def _track_rows_to_dicts(rows) -> list[dict]:
         d["format"] = _file_format(d["path"])
         d["has_cover"] = bool(d["cover_hash"])
         d["user_play_count"] = d.get("user_play_count", 0)
+        _add_stream_version(d)
         tracks.append(d)
     _annotate_lyrics_availability(tracks)
     return tracks
@@ -1723,7 +1733,7 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
         )
         rows = conn.execute(f"""
             SELECT t.id, t.path, t.title, t.artist, t.album, t.genre, t.year, t.track_no,
-                   t.duration, t.bitrate, t.size, t.cover_hash, t.bpm,
+                   t.duration, t.bitrate, t.size, t.mtime, t.cover_hash, t.bpm,
                    COALESCE(upc.count, 0) AS user_play_count, upc.last_played_at,
                    CASE WHEN l.artist_norm IS NULL THEN 0 ELSE 1 END AS loved
             FROM tracks t
@@ -2258,7 +2268,7 @@ def get_playlist_tracks(playlist_id: int, user_id: int) -> list[dict] | None:
     with db() as conn:
         rows = conn.execute(
             """SELECT t.id, t.path, t.title, t.artist, t.album, t.genre,
-                      t.year, t.duration, t.bitrate, t.cover_hash, t.bpm,
+                      t.year, t.duration, t.bitrate, t.size, t.mtime, t.cover_hash, t.bpm,
                       CASE WHEN l.artist_norm IS NULL THEN 0 ELSE 1 END AS loved
                FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
                LEFT JOIN lastfm_loved_tracks l
@@ -2282,6 +2292,7 @@ def get_playlist_tracks(playlist_id: int, user_id: int) -> list[dict] | None:
         d["format"] = _os.path.splitext(d["path"])[1].lstrip(".").upper() if d.get("path") else "MP3"
         d["has_cover"] = bool(d["cover_hash"])
         d["loved"] = bool(d.get("loved"))
+        _add_stream_version(d)
         tracks.append(d)
     _annotate_lyrics_availability(tracks)
     return tracks
@@ -2329,7 +2340,7 @@ def get_playlist_filter_tracks(saved: dict, user_id: int, sort: str = "artist",
     with db() as conn:
         rows = conn.execute(
             f"""SELECT t.id, t.path, t.title, t.artist, t.album, t.genre,
-                       t.year, t.track_no, t.duration, t.bitrate, t.size,
+                       t.year, t.track_no, t.duration, t.bitrate, t.size, t.mtime,
                        t.cover_hash, t.bpm,
                        COALESCE(upc.count,0) AS user_play_count,
                        upc.last_played_at,

@@ -147,6 +147,43 @@ class StreamRouteTests(StreamingTestBase):
         response = self.client.get(f"/api/stream/{self.track_id}")
         self.assertEqual(response.mimetype, "audio/mpeg")
 
+    def test_stream_has_revalidation_and_range_headers(self):
+        response = self.client.get(f"/api/stream/{self.track_id}")
+        self.assertIn("ETag", response.headers)
+        self.assertIn("Last-Modified", response.headers)
+        self.assertEqual(response.headers["Accept-Ranges"], "bytes")
+        self.assertEqual(response.headers["Cache-Control"], "private, no-cache")
+
+    def test_matching_version_is_long_lived_and_immutable(self):
+        path = os.path.join(self.music_root, "song.mp3")
+        stat = os.stat(path)
+        version = f"{int(stat.st_mtime * 1_000_000)}-{stat.st_size}"
+        response = self.client.get(f"/api/stream/{self.track_id}?v={version}")
+        self.assertEqual(
+            response.headers["Cache-Control"], "private, max-age=31536000, immutable",
+        )
+
+    def test_matching_etag_returns_not_modified(self):
+        initial = self.client.get(f"/api/stream/{self.track_id}")
+        response = self.client.get(
+            f"/api/stream/{self.track_id}", headers={"If-None-Match": initial.headers["ETag"]},
+        )
+        self.assertEqual(response.status_code, 304)
+
+    def test_matching_last_modified_returns_not_modified(self):
+        initial = self.client.get(f"/api/stream/{self.track_id}")
+        response = self.client.get(
+            f"/api/stream/{self.track_id}",
+            headers={"If-Modified-Since": initial.headers["Last-Modified"]},
+        )
+        self.assertEqual(response.status_code, 304)
+
+    def test_invalid_range_reports_complete_size(self):
+        response = self.client.get(
+            f"/api/stream/{self.track_id}", headers={"Range": "bytes=1000-2000"},
+        )
+        self.assertEqual(response.headers["Content-Range"], "bytes */100")
+
 
 class DownloadRouteTests(StreamingTestBase):
     def setUp(self):

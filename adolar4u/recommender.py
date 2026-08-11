@@ -80,7 +80,7 @@ def _candidate_query(order_by: str) -> str:
             GROUP BY track_id
         )
         SELECT t.id, t.path, t.title, t.artist, t.album, t.genre, t.year,
-               t.track_no, t.duration, t.bitrate, t.size, t.cover_hash, t.bpm,
+               t.track_no, t.duration, t.bitrate, t.size, t.mtime, t.cover_hash, t.bpm,
                CASE WHEN l.artist_norm IS NULL THEN 0 ELSE 1 END AS loved,
                t.loved AS library_loved,
                COALESCE(upc.count, 0) AS user_play_count,
@@ -763,6 +763,9 @@ def _format_track(row: dict) -> dict:
     row["format"] = os.path.splitext(row.get("path") or "")[1].lstrip(".").upper() or "MP3"
     row["has_cover"] = bool(row.get("cover_hash"))
     row["user_play_count"] = int(row.get("user_play_count") or 0)
+    mtime = row.pop("mtime", None)
+    if mtime is not None:
+        row["stream_version"] = f"{int(float(mtime) * 1_000_000)}-{int(row.get('size') or 0)}"
     for private in (
         "completed_count", "skipped_count", "early_skips", "avg_completion",
         "same_hour_completed", "last_event_at", "in_personal_playlist",

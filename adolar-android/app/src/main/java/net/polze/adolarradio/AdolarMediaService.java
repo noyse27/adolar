@@ -1,5 +1,6 @@
 package net.polze.adolarradio;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -29,7 +30,12 @@ import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.database.StandaloneDatabaseProvider;
+import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.datasource.cache.CacheDataSource;
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor;
+import androidx.media3.datasource.cache.SimpleCache;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.MediaSource;
 import androidx.media3.exoplayer.source.ProgressiveMediaSource;
@@ -38,6 +44,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -45,6 +52,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -59,6 +67,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * gapless track transitions — a hand-rolled dual-MediaPlayer approach was
  * tried first and repeatedly left playback silent after a track change.
  */
+@SuppressLint("UnsafeOptInUsageError")
 public class AdolarMediaService extends MediaBrowserServiceCompat {
     private static final String TAG = "AdolarMediaService";
     private static final String ROOT_ID = "adolar_root";
@@ -71,22 +80,48 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             "net.polze.adolarradio.metadata.HAS_LYRICS";
     private static final String PLAYBACK_CHANNEL_ID = "adolar_playback";
     private static final int PLAYBACK_NOTIFICATION_ID = 1001;
+    private static final int TRACK_BATCH_SIZE = 5;
+    private static final long AUDIO_CACHE_BYTES = 384L * 1024L * 1024L;
+    private static final long CROSSFADE_MS = 8000L;
+    private static final long CROSSFADE_TICK_MS = 50L;
+    private static SimpleCache sharedAudioCache;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final String listeningSession = "android-auto-" + UUID.randomUUID();
     private final AtomicInteger eventSequence = new AtomicInteger();
     private MediaSessionCompat mediaSession;
     private ExoPlayer player;
+    private ExoPlayer preloadPlayer;
+    private SimpleCache audioCache;
+    private AudioAttributes audioAttributes;
     private Track currentTrack;
-    // At most one track is ever queued ahead of the currently playing one;
-    // this is the source of truth for what it is once ExoPlayer transitions
-    // to it, so onMediaItemTransition never needs to inspect the MediaItem.
-    private Track queuedNextTrack;
+    private Track preloadedTrack;
+    private final ArrayDeque<Track> upcomingTracks = new ArrayDeque<>();
+    private boolean queueRequestInFlight;
+    private boolean crossfadeActive;
+    private Runnable crossfadeStep;
+    private long bufferingStartedMs;
     private int currentStationId = 1;
     private String currentStationName = "Adolar Radio";
     private String currentStationEngine = "shuffle";
     private int playbackRequest;
     private boolean foregroundStarted;
+
+    private final Runnable crossfadeMonitor = new Runnable() {
+        @Override
+        public void run() {
+            if (!crossfadeActive && player != null && player.isPlaying()
+                    && preloadedTrack != null
+                    && preloadPlayer.getPlaybackState() == Player.STATE_READY) {
+                long duration = player.getDuration();
+                long remaining = duration == C.TIME_UNSET ? Long.MAX_VALUE : duration - player.getCurrentPosition();
+                if (remaining <= CROSSFADE_MS && remaining > 0) {
+                    startAndroidCrossfade();
+                }
+            }
+            mainHandler.postDelayed(this, 250);
+        }
+    };
 
     private final Runnable connectionHeartbeat = new Runnable() {
         @Override
@@ -107,10 +142,19 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         @Override
         public void onPlaybackStateChanged(int state) {
             if (state == Player.STATE_ENDED) {
-                // The queue ran dry (preload wasn't ready in time); fetch fresh.
-                loadNextTrack();
+                if (!crossfadeActive) {
+                    finishCurrentTrack(true, "ended");
+                    promotePreloadedTrack(false);
+                }
             } else if (state == Player.STATE_BUFFERING) {
+                bufferingStartedMs = android.os.SystemClock.elapsedRealtime();
+                Log.d(TAG, "active player buffering bufferedMs=" + bufferedDuration(player));
                 updatePlaybackState(PlaybackStateCompat.STATE_BUFFERING, null);
+            } else if (state == Player.STATE_READY && bufferingStartedMs != 0) {
+                Log.d(TAG, "active player ready rebufferMs="
+                        + (android.os.SystemClock.elapsedRealtime() - bufferingStartedMs)
+                        + " bufferedMs=" + bufferedDuration(player));
+                bufferingStartedMs = 0;
             }
         }
 
@@ -120,43 +164,20 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             if (isPlaying) {
                 updatePlaybackState(PlaybackStateCompat.STATE_PLAYING, null);
             } else if (state != Player.STATE_ENDED && state != Player.STATE_IDLE) {
+                if (crossfadeActive) cancelCrossfade();
                 updatePlaybackState(PlaybackStateCompat.STATE_PAUSED, null);
             }
         }
 
         @Override
-        public void onMediaItemTransition(MediaItem mediaItem, int reason) {
-            if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
-                    && reason != Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
-                return;
-            }
-            if (queuedNextTrack == null) {
-                return;
-            }
-            finishCurrentTrack(
-                    true, reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ? "ended" : "manual_next"
-            );
-            Track promoted = queuedNextTrack;
-            queuedNextTrack = null;
-            currentTrack = promoted;
-            mediaSession.setActive(true);
-            updateMetadata(promoted);
-            requestLyricsIfMissing(promoted);
-            sendListeningEvent(promoted, "started", null, 0, promoted.durationMs);
-            updatePlaybackState(PlaybackStateCompat.STATE_PLAYING, null);
-            queueNextTrack();
-        }
-
-        @Override
         public void onPlayerError(PlaybackException error) {
             Log.w(TAG, "player error", error);
+            cancelCrossfade();
             finishCurrentTrack(false, "error");
-            player.clearMediaItems();
-            queuedNextTrack = null;
             updatePlaybackState(
                     PlaybackStateCompat.STATE_ERROR, "Wiedergabe fehlgeschlagen. Nächster Titel wird geladen."
             );
-            retryCurrentRequestAfterDelay(playbackRequest);
+            promotePreloadedTrack(false);
         }
     };
 
@@ -177,9 +198,10 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
                 updatePlaybackState(PlaybackStateCompat.STATE_ERROR, "Sender nicht gefunden.");
                 return;
             }
-            player.stop();
-            player.clearMediaItems();
-            queuedNextTrack = null;
+            cancelCrossfade();
+            clearPlayers();
+            upcomingTracks.clear();
+            preloadedTrack = null;
             finishCurrentTrack(false, "track_change");
             currentStationId = station.id;
             currentStationName = station.name;
@@ -197,13 +219,9 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
 
         @Override
         public void onSkipToNext() {
-            if (queuedNextTrack != null && player.hasNextMediaItem()) {
-                player.seekToNextMediaItem();
-                return;
-            }
+            cancelCrossfade();
             finishCurrentTrack(false, "manual_next");
-            player.clearMediaItems();
-            loadNextTrack();
+            promotePreloadedTrack(false);
         }
 
         @Override
@@ -213,16 +231,18 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
 
         @Override
         public void onPause() {
+            cancelCrossfade();
             player.pause();
         }
 
         @Override
         public void onStop() {
             playbackRequest++;
+            cancelCrossfade();
             finishCurrentTrack(false, "stop");
-            player.stop();
-            player.clearMediaItems();
-            queuedNextTrack = null;
+            clearPlayers();
+            upcomingTracks.clear();
+            preloadedTrack = null;
             updatePlaybackState(PlaybackStateCompat.STATE_STOPPED, null);
             stopForeground(true);
             foregroundStarted = false;
@@ -234,18 +254,16 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     public void onCreate() {
         super.onCreate();
         currentStationId = AdolarPrefs.getStationId(this);
-        player = new ExoPlayer.Builder(this)
-                .setAudioAttributes(
-                        new AudioAttributes.Builder()
-                                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                                .setUsage(C.USAGE_MEDIA)
-                                .build(),
-                        /* handleAudioFocus= */ true
-                )
-                .setHandleAudioBecomingNoisy(true)
-                .setWakeMode(C.WAKE_MODE_NETWORK)
+        audioAttributes = new AudioAttributes.Builder()
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .setUsage(C.USAGE_MEDIA)
                 .build();
+        audioCache = getSharedAudioCache();
+        player = buildPlayer(true);
+        preloadPlayer = buildPlayer(false);
         player.addListener(playerListener);
+        addPlayerDiagnostics(player);
+        addPlayerDiagnostics(preloadPlayer);
         createNotificationChannel();
         mediaSession = new MediaSessionCompat(this, "AdolarRadio");
         mediaSession.setFlags(
@@ -259,6 +277,55 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         // idle but controllable session from the start.
         updatePlaybackState(PlaybackStateCompat.STATE_STOPPED, null);
         mainHandler.post(connectionHeartbeat);
+        mainHandler.post(crossfadeMonitor);
+    }
+
+    private void addPlayerDiagnostics(ExoPlayer observed) {
+        observed.addListener(new Player.Listener() {
+            @Override
+            public void onPlaybackStateChanged(int state) {
+                if (observed != preloadPlayer) return;
+                if (state == Player.STATE_READY) {
+                    Log.d(TAG, "preload ready track="
+                            + (preloadedTrack == null ? "none" : preloadedTrack.id)
+                            + " bufferedMs=" + bufferedDuration(observed));
+                } else if (state == Player.STATE_BUFFERING) {
+                    Log.d(TAG, "preload buffering track="
+                            + (preloadedTrack == null ? "none" : preloadedTrack.id));
+                }
+            }
+
+            @Override
+            public void onPlayerError(PlaybackException error) {
+                if (observed != preloadPlayer) return;
+                Log.w(TAG, "preload failed", error);
+                observed.stop();
+                observed.clearMediaItems();
+                preloadedTrack = null;
+                prepareNextTrack();
+            }
+        });
+    }
+
+    private ExoPlayer buildPlayer(boolean handleAudioFocus) {
+        return new ExoPlayer.Builder(this)
+                .setAudioAttributes(audioAttributes, handleAudioFocus)
+                .setHandleAudioBecomingNoisy(true)
+                .setWakeMode(C.WAKE_MODE_NETWORK)
+                .build();
+    }
+
+    private SimpleCache getSharedAudioCache() {
+        synchronized (AdolarMediaService.class) {
+            if (sharedAudioCache == null) {
+                sharedAudioCache = new SimpleCache(
+                        new File(getCacheDir(), "media"),
+                        new LeastRecentlyUsedCacheEvictor(AUDIO_CACHE_BYTES),
+                        new StandaloneDatabaseProvider(getApplicationContext())
+                );
+            }
+            return sharedAudioCache;
+        }
     }
 
     @Override
@@ -366,64 +433,77 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             updatePlaybackState(PlaybackStateCompat.STATE_ERROR, getString(R.string.car_no_server));
             return;
         }
+        if (!upcomingTracks.isEmpty()) {
+            startTrack(upcomingTracks.removeFirst());
+            return;
+        }
         final int request = ++playbackRequest;
+        queueRequestInFlight = true;
         updatePlaybackState(PlaybackStateCompat.STATE_BUFFERING, null);
         new Thread(() -> {
-            Track track = fetchStationTrack(currentStationId);
+            long started = android.os.SystemClock.elapsedRealtime();
+            List<Track> tracks = fetchStationTracks(currentStationId, TRACK_BATCH_SIZE);
+            Log.d(TAG, "track batch loaded count=" + tracks.size() + " durationMs="
+                    + (android.os.SystemClock.elapsedRealtime() - started));
             mainHandler.post(() -> {
+                queueRequestInFlight = false;
                 if (request != playbackRequest) {
                     return;
                 }
-                if (track == null) {
+                if (tracks.isEmpty()) {
                     updatePlaybackState(
                             PlaybackStateCompat.STATE_ERROR,
                             "Sender nicht verfügbar. Für Adolar4U bitte in der Handy-App anmelden."
                     );
                 } else {
-                    startTrack(track);
+                    upcomingTracks.addAll(tracks);
+                    startTrack(upcomingTracks.removeFirst());
                 }
             });
         }, "AdolarTrackLoader").start();
     }
 
-    private Track fetchStationTrack(int stationId) {
+    private List<Track> fetchStationTracks(int stationId, int count) {
+        List<Track> result = new ArrayList<>();
         HttpURLConnection connection = null;
         try {
             Uri.Builder urlBuilder = Uri.parse(
                     AdolarPrefs.apiUrl(this) + "/api/radio-stations/" + stationId + "/tracks"
-            ).buildUpon().appendQueryParameter("count", "1");
+            ).buildUpon().appendQueryParameter("count", String.valueOf(count));
             String shuffleSession = AdolarPrefs.getShuffleSession(this, stationId);
             if (!shuffleSession.isEmpty()) {
                 urlBuilder.appendQueryParameter("shuffle_session", shuffleSession);
             }
             connection = openConnection(urlBuilder.build().toString(), "GET");
             if (!isSuccessful(connection)) {
-                return null;
+                return result;
             }
             String nextSession = connection.getHeaderField("X-Shuffle-Session");
             if (nextSession != null && !nextSession.isEmpty()) {
                 AdolarPrefs.setShuffleSession(this, stationId, nextSession);
             }
             JSONArray tracks = new JSONArray(readAll(connection.getInputStream()));
-            if (tracks.length() == 0) {
-                return null;
+            for (int index = 0; index < tracks.length(); index++) {
+                JSONObject item = tracks.getJSONObject(index);
+                Track track = new Track();
+                track.id = item.getInt("id");
+                track.title = item.optString("title", "Unbekannter Titel");
+                track.artist = item.optString("artist", "Unbekannter Artist");
+                track.album = item.optString("album", "");
+                track.year = item.optInt("year", 0);
+                track.reason = item.optString("adolar4u_reason", "");
+                track.loved = item.optBoolean("loved", false);
+                track.durationMs = item.optLong("duration", 0) * 1000L;
+                track.coverHash = item.optString("cover_hash", "");
+                track.hasCover = item.optBoolean("has_cover", false);
+                track.hasLyrics = item.optBoolean("has_lyrics", false);
+                track.streamVersion = item.optString("stream_version", "");
+                result.add(track);
             }
-            JSONObject item = tracks.getJSONObject(0);
-            Track track = new Track();
-            track.id = item.getInt("id");
-            track.title = item.optString("title", "Unbekannter Titel");
-            track.artist = item.optString("artist", "Unbekannter Artist");
-            track.album = item.optString("album", "");
-            track.year = item.optInt("year", 0);
-            track.reason = item.optString("adolar4u_reason", "");
-            track.loved = item.optBoolean("loved", false);
-            track.durationMs = item.optLong("duration", 0) * 1000L;
-            track.coverHash = item.optString("cover_hash", "");
-            track.hasCover = item.optBoolean("has_cover", false);
-            track.hasLyrics = item.optBoolean("has_lyrics", false);
-            return track;
-        } catch (Exception ignored) {
-            return null;
+            return result;
+        } catch (Exception exception) {
+            Log.w(TAG, "track batch request failed", exception);
+            return result;
         } finally {
             if (connection != null) {
                 connection.disconnect();
@@ -433,7 +513,6 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
 
     private void startTrack(Track track) {
         currentTrack = track;
-        queuedNextTrack = null;
         mediaSession.setActive(true);
         updateMetadata(track);
         requestLyricsIfMissing(track);
@@ -448,7 +527,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         player.prepare();
         player.setPlayWhenReady(true);
         sendListeningEvent(track, "started", null, 0, track.durationMs);
-        queueNextTrack();
+        prepareNextTrack();
     }
 
     private MediaSource buildMediaSource(Track track) {
@@ -457,39 +536,150 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         if (!cookie.isEmpty()) {
             headers.put("Cookie", cookie);
         }
-        DefaultHttpDataSource.Factory dataSourceFactory = new DefaultHttpDataSource.Factory()
+        DefaultHttpDataSource.Factory upstreamFactory = new DefaultHttpDataSource.Factory()
                 .setDefaultRequestProperties(headers);
+        CacheDataSource.Factory dataSourceFactory = new CacheDataSource.Factory()
+                .setCache(audioCache)
+                .setUpstreamDataSourceFactory(upstreamFactory)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR);
+        String versionQuery = track.streamVersion.isEmpty()
+                ? "" : "?v=" + Uri.encode(track.streamVersion);
         MediaItem mediaItem = new MediaItem.Builder()
-                .setUri(Uri.parse(AdolarPrefs.apiUrl(this) + "/api/stream/" + track.id))
+                .setUri(Uri.parse(AdolarPrefs.apiUrl(this) + "/api/stream/" + track.id + versionQuery))
                 .setMediaId(String.valueOf(track.id))
+                .setCustomCacheKey("track-" + track.id + "-" + track.streamVersion)
                 .build();
         return new ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(mediaItem);
     }
 
-    /**
-     * Fetches and queues the next track ahead of time so ExoPlayer's own
-     * playlist mechanism can buffer and transition to it seamlessly, instead
-     * of only starting the fetch once the current track ends.
-     */
-    private void queueNextTrack() {
-        if (!AdolarPrefs.hasServerUrl(this)) {
-            return;
-        }
+    private void requestMoreTracks() {
+        if (queueRequestInFlight || !AdolarPrefs.hasServerUrl(this)) return;
+        queueRequestInFlight = true;
         final int owningRequest = playbackRequest;
         new Thread(() -> {
-            Track track = fetchStationTrack(currentStationId);
+            long started = android.os.SystemClock.elapsedRealtime();
+            List<Track> tracks = fetchStationTracks(currentStationId, TRACK_BATCH_SIZE);
             mainHandler.post(() -> {
-                if (owningRequest != playbackRequest || track == null || queuedNextTrack != null) {
+                queueRequestInFlight = false;
+                if (owningRequest != playbackRequest) return;
+                upcomingTracks.addAll(tracks);
+                Log.d(TAG, "queue refill count=" + tracks.size() + " durationMs="
+                        + (android.os.SystemClock.elapsedRealtime() - started));
+                prepareNextTrack();
+            });
+        }, "AdolarTrackQueueLoader").start();
+    }
+
+    private void prepareNextTrack() {
+        if (preloadedTrack != null) return;
+        if (upcomingTracks.isEmpty()) {
+            requestMoreTracks();
+            return;
+        }
+        preloadedTrack = upcomingTracks.removeFirst();
+        preloadPlayer.setVolume(0f);
+        preloadPlayer.setMediaSource(buildMediaSource(preloadedTrack));
+        preloadPlayer.prepare();
+        preloadPlayer.setPlayWhenReady(false);
+        Log.d(TAG, "preload source added track=" + preloadedTrack.id);
+        if (upcomingTracks.size() <= 1) requestMoreTracks();
+    }
+
+    private void startAndroidCrossfade() {
+        if (crossfadeActive || preloadedTrack == null
+                || preloadPlayer.getPlaybackState() != Player.STATE_READY) return;
+        crossfadeActive = true;
+        final ExoPlayer outgoing = player;
+        final ExoPlayer incoming = preloadPlayer;
+        final long started = android.os.SystemClock.elapsedRealtime();
+        incoming.setVolume(0f);
+        incoming.play();
+        Log.d(TAG, "crossfade start track=" + preloadedTrack.id
+                + " bufferedMs=" + bufferedDuration(incoming));
+        crossfadeStep = new Runnable() {
+            @Override
+            public void run() {
+                if (!crossfadeActive || outgoing != player || incoming != preloadPlayer) return;
+                float progress = Math.min(1f,
+                        (android.os.SystemClock.elapsedRealtime() - started) / (float) CROSSFADE_MS);
+                outgoing.setVolume((float) Math.cos(progress * Math.PI / 2));
+                incoming.setVolume((float) Math.sin(progress * Math.PI / 2));
+                if (progress < 1f) {
+                    mainHandler.postDelayed(this, CROSSFADE_TICK_MS);
                     return;
                 }
-                try {
-                    player.addMediaSource(buildMediaSource(track));
-                    queuedNextTrack = track;
-                } catch (Exception exception) {
-                    Log.w(TAG, "queueNextTrack failed", exception);
-                }
-            });
-        }, "AdolarNextTrackLoader").start();
+                finishCurrentTrack(true, "ended");
+                completePlayerPromotion();
+                Log.d(TAG, "crossfade end durationMs="
+                        + (android.os.SystemClock.elapsedRealtime() - started));
+            }
+        };
+        mainHandler.post(crossfadeStep);
+    }
+
+    private void promotePreloadedTrack(boolean alreadyPlaying) {
+        if (preloadedTrack == null) {
+            clearPlayers();
+            loadNextTrack();
+            return;
+        }
+        if (!alreadyPlaying) {
+            preloadPlayer.setVolume(1f);
+            preloadPlayer.play();
+        }
+        completePlayerPromotion();
+    }
+
+    private void completePlayerPromotion() {
+        Track promoted = preloadedTrack;
+        ExoPlayer outgoing = player;
+        ExoPlayer incoming = preloadPlayer;
+        outgoing.removeListener(playerListener);
+        outgoing.stop();
+        outgoing.clearMediaItems();
+        outgoing.setVolume(0f);
+        outgoing.setAudioAttributes(audioAttributes, false);
+        incoming.setAudioAttributes(audioAttributes, true);
+        player = incoming;
+        preloadPlayer = outgoing;
+        player.addListener(playerListener);
+        player.setVolume(1f);
+        preloadedTrack = null;
+        crossfadeActive = false;
+        currentTrack = promoted;
+        mediaSession.setActive(true);
+        updateMetadata(promoted);
+        requestLyricsIfMissing(promoted);
+        sendListeningEvent(promoted, "started", null, 0, promoted.durationMs);
+        updatePlaybackState(PlaybackStateCompat.STATE_PLAYING, null);
+        prepareNextTrack();
+    }
+
+    private void cancelCrossfade() {
+        if (crossfadeStep != null) mainHandler.removeCallbacks(crossfadeStep);
+        crossfadeStep = null;
+        crossfadeActive = false;
+        if (player != null) player.setVolume(1f);
+        if (preloadPlayer != null) {
+            preloadPlayer.pause();
+            preloadPlayer.seekTo(0);
+            preloadPlayer.setVolume(0f);
+        }
+    }
+
+    private void clearPlayers() {
+        if (player != null) {
+            player.stop();
+            player.clearMediaItems();
+        }
+        if (preloadPlayer != null) {
+            preloadPlayer.stop();
+            preloadPlayer.clearMediaItems();
+        }
+    }
+
+    private long bufferedDuration(ExoPlayer target) {
+        return Math.max(0L, target.getBufferedPosition() - target.getCurrentPosition());
     }
 
     private void retryCurrentRequestAfterDelay(int failedRequest) {
@@ -736,9 +926,14 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     @Override
     public void onDestroy() {
         mainHandler.removeCallbacks(connectionHeartbeat);
+        mainHandler.removeCallbacks(crossfadeMonitor);
+        cancelCrossfade();
         playbackRequest++;
         finishCurrentTrack(false, "stop");
         player.release();
+        preloadPlayer.release();
+        // The process-wide SimpleCache intentionally survives service reconnects.
+        // Android releases its files when the app process terminates.
         stopForeground(true);
         foregroundStarted = false;
         if (mediaSession != null) {
@@ -767,5 +962,6 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         boolean hasCover;
         boolean hasLyrics;
         boolean loved;
+        String streamVersion;
     }
 }
