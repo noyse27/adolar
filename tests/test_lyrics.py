@@ -16,6 +16,7 @@ os.environ.setdefault(
 
 from adolar import application as app_module
 from adolar import auth, db, lyrics
+from adolar.routes import lyrics as lyrics_routes
 
 
 def make_mp3(path: str, title="Song", artist="Artist") -> None:
@@ -431,7 +432,7 @@ class LyricsApiTests(unittest.TestCase):
     def test_admin_settings_never_return_api_key(self):
         self.client.set_cookie("adolar_session", "token")
         with self.login_as(self.admin_id), mock.patch.object(
-            app_module, "_start_lyrics_scan", return_value=True,
+            lyrics_routes, "start_scan", return_value=True,
         ):
             response = self.client.put(
                 "/api/admin/lyrics/settings",
