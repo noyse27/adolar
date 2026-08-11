@@ -55,6 +55,20 @@ class SmartRuleParserTests(unittest.TestCase):
             "field": "added", "op": "within_last", "value": 2, "unit": "months",
         })
 
+    def test_added_period_rejects_long_invalid_numeric_input(self):
+        with self.assertRaises(smart_rules.SmartRuleParseError):
+            smart_rules.parse_smart_rule(
+                "Hinzugefügt vor " + ("9" * 1900) + "x Tagen"
+            )
+
+    def test_connector_handles_long_whitespace_without_backtracking(self):
+        parsed = smart_rules.parse_smart_rule(
+            "Album ist Bravo" + (" " * 1900) + "und Genre ist Rock"
+        )
+        tree = parsed["filter"]
+        self.assertEqual(tree["mode"], "all")
+        self.assertEqual([rule["field"] for rule in tree["rules"]], ["album", "genre"])
+
     def test_unknown_field_is_rejected(self):
         with self.assertRaises(smart_rules.SmartRuleParseError):
             smart_rules.parse_smart_rule("Stimmung ist fröhlich")

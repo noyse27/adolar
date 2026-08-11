@@ -55,9 +55,8 @@ _FIELD_RE = re.compile(
     r"\b(" + "|".join(sorted(map(re.escape, _FIELD_ALIASES), key=len, reverse=True)) + r")\b",
     re.IGNORECASE,
 )
-_TRAILING_JOIN_RE = re.compile(
-    r"\s+(und|oder)(?:\s+(?:das|der|die|den|dem))?\s*$", re.IGNORECASE
-)
+_JOIN_WORDS = {"und", "oder"}
+_JOIN_ARTICLES = {"das", "der", "die", "den", "dem"}
 
 
 def _unquote(value: str) -> str:
@@ -122,6 +121,29 @@ def _split_alternatives(value_text: str) -> list[str]:
     return values
 
 
+def _pop_trailing_word(text: str) -> tuple[str, str]:
+    """Return the text before its last whitespace-delimited word and that word."""
+    end = len(text)
+    while end > 0 and text[end - 1].isspace():
+        end -= 1
+    start = end
+    while start > 0 and not text[start - 1].isspace():
+        start -= 1
+    return text[:start].rstrip(), text[start:end].casefold()
+
+
+def _strip_trailing_connector(segment: str) -> tuple[str, str | None]:
+    """Remove a trailing clause connector without regex backtracking."""
+    prefix, last_word = _pop_trailing_word(segment)
+    if last_word in _JOIN_ARTICLES:
+        before_connector, connector = _pop_trailing_word(prefix)
+        if before_connector and connector in _JOIN_WORDS:
+            return before_connector, connector
+    if prefix and last_word in _JOIN_WORDS:
+        return prefix, last_word
+    return segment, None
+
+
 def _parse_age(segment: str) -> tuple[str, int, str]:
     patterns = (
         ("within_last", r"^(?:ist\s+)?innerhalb\s+der\s+letzten\s+"),
@@ -132,12 +154,11 @@ def _parse_age(segment: str) -> tuple[str, int, str]:
         if not match:
             continue
         value_text = segment[match.end():].strip()
-        value_match = re.fullmatch(
-            r"(\d+)\s*(tag|tage|tagen|woche|wochen|monat|monate|monaten|jahr|jahre|jahren)",
-            value_text,
-            re.IGNORECASE,
-        )
-        if not value_match:
+        digit_end = 0
+        while digit_end < len(value_text) and value_text[digit_end].isdecimal():
+            digit_end += 1
+        unit_text = value_text[digit_end:].strip().casefold()
+        if digit_end == 0:
             break
         units = {
             "tag": "days", "tage": "days", "tagen": "days",
@@ -145,7 +166,9 @@ def _parse_age(segment: str) -> tuple[str, int, str]:
             "monat": "months", "monate": "months", "monaten": "months",
             "jahr": "years", "jahre": "years", "jahren": "years",
         }
-        return op, int(value_match.group(1)), units[value_match.group(2).casefold()]
+        if unit_text not in units:
+            break
+        return op, int(value_text[:digit_end]), units[unit_text]
     raise SmartRuleParseError(
         "Für ‚Hinzugefügt‘ werden zum Beispiel „vor 3 Wochen“ oder "
         "„innerhalb der letzten 2 Monate“ unterstützt."
@@ -279,12 +302,8 @@ def parse_smart_rule(text: str) -> dict:
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
         segment = text[match.end():end].strip()
-        connector = None
-        trailing = _TRAILING_JOIN_RE.search(segment)
-        if trailing:
-            connector = trailing.group(1).casefold()
-            segment = segment[:trailing.start()].strip()
-        elif index + 1 < len(matches):
+        segment, connector = _strip_trailing_connector(segment)
+        if not connector and index + 1 < len(matches):
             raise SmartRuleParseError(
                 f"Vor ‚{matches[index + 1].group(1)}‘ fehlt „und“ oder „oder“."
             )
