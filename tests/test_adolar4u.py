@@ -16,6 +16,8 @@ os.environ.setdefault("CONTROL_DB_PATH", os.path.join(_temp_dir.name, "adolar4u-
 from adolar import adolar4u
 from adolar import application as app_module
 from adolar.adolar4u import recommender
+from adolar.routes import lastfm as lastfm_routes
+from adolar.routes import playlists as playlist_routes
 
 
 class Adolar4UTests(unittest.TestCase):
@@ -700,7 +702,7 @@ class Adolar4UTests(unittest.TestCase):
 
     def test_favorite_auto_loves_once_but_unfavorite_keeps_lastfm_love(self):
         app_module.db.set_lastfm_account(self.USER_ID, "listener", "secret-session")
-        with self._login(), mock.patch.object(app_module.lastfm, "love") as love:
+        with self._login(), mock.patch.object(playlist_routes.lastfm, "love") as love:
             added = self.client.put(
                 f"/api/favorites/{self.TRACK_ID}", json={"favorite": True},
             )
@@ -734,7 +736,7 @@ class Adolar4UTests(unittest.TestCase):
 
         with self._login():
             mine = self.client.get("/api/lastfm/status").get_json()
-        with self._login(other_user), mock.patch.object(app_module.lastfm, "love") as love:
+        with self._login(other_user), mock.patch.object(lastfm_routes.lastfm, "love") as love:
             theirs = self.client.get("/api/lastfm/status").get_json()
             response = self.client.post("/api/lastfm/love", json={
                 "artist": "Listener", "title": "Signal", "action": "love",
@@ -754,7 +756,7 @@ class Adolar4UTests(unittest.TestCase):
     def test_lastfm_playback_telemetry_is_queued_without_blocking_request(self):
         app_module.db.set_lastfm_account(self.USER_ID, "listener", "session-key")
         with self._login(), mock.patch.object(
-            app_module, "_submit_lastfm_call", return_value=True,
+            lastfm_routes, "_submit_lastfm_call", return_value=True,
         ) as submit:
             nowplaying = self.client.post("/api/lastfm/nowplaying", json={
                 "artist": "Listener", "title": "Signal", "duration": 240,
@@ -769,17 +771,17 @@ class Adolar4UTests(unittest.TestCase):
         self.assertTrue(scrobble.get_json()["queued"])
         self.assertEqual(submit.call_count, 2)
         self.assertEqual(submit.call_args_list[0].args[:2], (
-            "now_playing", app_module.lastfm.now_playing,
+            "now_playing", lastfm_routes.lastfm.now_playing,
         ))
         self.assertEqual(submit.call_args_list[1].args[:2], (
-            "scrobble", app_module.lastfm.scrobble,
+            "scrobble", lastfm_routes.lastfm.scrobble,
         ))
         self.assertEqual(submit.call_args_list[1].kwargs["retries"], 1)
 
     def test_lastfm_telemetry_queue_saturation_is_noncritical(self):
         app_module.db.set_lastfm_account(self.USER_ID, "listener", "session-key")
         with self._login(), mock.patch.object(
-            app_module, "_submit_lastfm_call", return_value=False,
+            lastfm_routes, "_submit_lastfm_call", return_value=False,
         ):
             response = self.client.post("/api/lastfm/nowplaying", json={
                 "artist": "Listener", "title": "Signal",

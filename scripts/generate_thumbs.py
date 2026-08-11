@@ -35,8 +35,8 @@ def main():
                         help="Show failed cover hashes")
     args = parser.parse_args()
 
-    from adolar.application import _THUMB_DIR, _THUMB_SIZE, _thumb_path
     from adolar.db import get_connection
+    from adolar.routes.media import _THUMB_DIR, _THUMB_SIZE, _thumb_path
 
     os.makedirs(_THUMB_DIR, exist_ok=True)
 

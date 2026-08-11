@@ -9,6 +9,7 @@ os.environ.setdefault("DB_PATH", os.path.join(_temp_dir.name, "adolar-monitor-te
 os.environ.setdefault("CONTROL_DB_PATH", os.path.join(_temp_dir.name, "adolar-monitor-test-control.db"))
 
 from adolar import application as app_module
+from adolar.routes import admin as admin_routes
 
 
 class MonitorTestBase(unittest.TestCase):
@@ -33,7 +34,7 @@ class MonitorTestBase(unittest.TestCase):
             conn.execute("DELETE FROM sessions")
             conn.execute("DELETE FROM connection_log")
             conn.execute("DELETE FROM control.task_history")
-        app_module.tasks._running.clear()
+        admin_routes.tasks._running.clear()
 
     def _login_as_monitor_admin(self):
         token = app_module._auth.create_session(self.user_id, remember=False)
@@ -56,10 +57,10 @@ class MonitorTests(MonitorTestBase):
         self.client.set_cookie(app_module._auth.SESSION_COOKIE, token)
 
         memory = mock.Mock(percent=37.5, used=4 * 1024**3, total=8 * 1024**3)
-        with mock.patch.object(app_module.psutil, "virtual_memory", return_value=memory), \
-             mock.patch.object(app_module.psutil, "cpu_percent", return_value=12.5), \
-             mock.patch.object(app_module.psutil, "cpu_count", return_value=4), \
-             mock.patch.object(app_module.psutil, "boot_time", return_value=time.time() - 60):
+        with mock.patch.object(admin_routes.psutil, "virtual_memory", return_value=memory), \
+             mock.patch.object(admin_routes.psutil, "cpu_percent", return_value=12.5), \
+             mock.patch.object(admin_routes.psutil, "cpu_count", return_value=4), \
+             mock.patch.object(admin_routes.psutil, "boot_time", return_value=time.time() - 60):
             response = self.client.get("/api/admin/monitor")
 
         self.assertEqual(response.status_code, 200)
@@ -82,7 +83,7 @@ class MonitorTests(MonitorTestBase):
                        VALUES (?,?,?,?,?,?)""",
                     (self.user_id, f"user-{index}", "adolar_web", "10.0.0.1", now + index, now + index),
                 )
-        current, recent = app_module._monitor_connections()
+        current, recent = admin_routes._monitor_connections()
         self.assertEqual(current, [])
         self.assertEqual(len(recent), 10)
         self.assertEqual(recent[0]["username"], "user-11")
@@ -93,7 +94,7 @@ class MonitorTests(MonitorTestBase):
             "client_id": "public-companion-test",
         })
         self.assertEqual(response.status_code, 200)
-        current, _ = app_module._monitor_connections()
+        current, _ = admin_routes._monitor_connections()
         self.assertEqual(len(current), 1)
         self.assertEqual(current[0]["username"], "Gast")
         self.assertEqual(current[0]["product"], "companion")
@@ -128,20 +129,20 @@ class MonitorTasksTests(MonitorTestBase):
 
     def test_a_running_scan_appears_in_current_tasks_with_its_progress(self):
         self._login_as_monitor_admin()
-        task_id = app_module.tasks.start("scan", trigger="manual")
-        app_module.tasks.update(task_id, current=42, total=1000)
+        task_id = admin_routes.tasks.start("scan", trigger="manual")
+        admin_routes.tasks.update(task_id, current=42, total=1000)
         response = self.client.get("/api/admin/monitor")
         [task] = response.get_json()["current_tasks"]
         self.assertEqual(task["task_type"], "scan")
         self.assertEqual(task["trigger"], "manual")
         self.assertEqual(task["current"], 42)
         self.assertEqual(task["total"], 1000)
-        app_module.tasks.finish(task_id)
+        admin_routes.tasks.finish(task_id)
 
     def test_a_finished_task_appears_in_recent_tasks(self):
         self._login_as_monitor_admin()
-        task_id = app_module.tasks.start("db_optimize")
-        app_module.tasks.finish(task_id, status="completed", detail="ok")
+        task_id = admin_routes.tasks.start("db_optimize")
+        admin_routes.tasks.finish(task_id, status="completed", detail="ok")
         response = self.client.get("/api/admin/monitor")
         [entry] = response.get_json()["recent_tasks"]
         self.assertEqual(entry["task_type"], "db_optimize")
@@ -151,11 +152,11 @@ class MonitorTasksTests(MonitorTestBase):
     def test_a_running_backup_is_merged_into_current_tasks(self):
         self._login_as_monitor_admin()
         with mock.patch.object(
-            app_module.backup_service, "read_status",
+            admin_routes.backup_service, "read_status",
             return_value={"state": "running", "source": "automatic",
                           "started_at": "2026-01-01T10:00:00+00:00"},
-        ), mock.patch.object(app_module.backup_service, "is_backup_running", return_value=True), \
-           mock.patch.object(app_module.backup_service, "list_backups", return_value=[]):
+        ), mock.patch.object(admin_routes.backup_service, "is_backup_running", return_value=True), \
+           mock.patch.object(admin_routes.backup_service, "list_backups", return_value=[]):
             response = self.client.get("/api/admin/monitor")
         tasks_by_type = {t["task_type"]: t for t in response.get_json()["current_tasks"]}
         self.assertIn("backup", tasks_by_type)
@@ -164,9 +165,9 @@ class MonitorTasksTests(MonitorTestBase):
     def test_a_completed_backup_is_merged_into_recent_tasks(self):
         self._login_as_monitor_admin()
         with mock.patch.object(
-            app_module.backup_service, "read_status", return_value={"state": "idle"},
+            admin_routes.backup_service, "read_status", return_value={"state": "idle"},
         ), mock.patch.object(
-            app_module.backup_service, "list_backups",
+            admin_routes.backup_service, "list_backups",
             return_value=[{"backup_id": "adolar-20260101-100000", "source": "manual",
                            "created_at": "2026-01-01T10:00:00+00:00", "size": 1234}],
         ):
@@ -179,12 +180,12 @@ class MonitorTasksTests(MonitorTestBase):
     def test_an_interrupted_backup_is_reported_as_failed_in_recent_tasks(self):
         self._login_as_monitor_admin()
         with mock.patch.object(
-            app_module.backup_service, "read_status",
+            admin_routes.backup_service, "read_status",
             return_value={"state": "failed", "source": "manual",
                           "started_at": "2026-01-01T10:00:00+00:00",
                           "failed_at": "2026-01-01T10:00:05+00:00",
                           "error": "Datenbank nicht gefunden"},
-        ), mock.patch.object(app_module.backup_service, "list_backups", return_value=[]):
+        ), mock.patch.object(admin_routes.backup_service, "list_backups", return_value=[]):
             response = self.client.get("/api/admin/monitor")
         backups = [t for t in response.get_json()["recent_tasks"] if t["task_type"] == "backup"]
         self.assertEqual(len(backups), 1)
