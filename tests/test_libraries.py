@@ -9,9 +9,7 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-libraries-import-control.db"),
 )
 
-import db
-import errors
-import libraries
+from adolar import db, errors, libraries
 
 
 class LibraryRegistryTests(unittest.TestCase):

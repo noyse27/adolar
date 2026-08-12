@@ -20,7 +20,7 @@ GUNICORN_ARGS = [
     "--timeout", "60",
     "--graceful-timeout", "30",
     "--keep-alive", "5",
-    "app:app",
+    "wsgi:app",
 ]
 
 
@@ -60,7 +60,7 @@ def main() -> None:
             "Hinweis: Gunicorn läuft nicht unter Windows. Adolar startet mit dem "
             "Flask-Entwicklungsserver (nicht für unbeaufsichtigten Dauerbetrieb geeignet)."
         )
-        import app as adolar_app
+        from adolar import application as adolar_app
         adolar_app.app.run(host="0.0.0.0", port=5000, debug=False)  # noqa: S104
         return
 

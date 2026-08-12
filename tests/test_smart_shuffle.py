@@ -2,7 +2,7 @@ import random
 import unittest
 from itertools import groupby
 
-import smart_shuffle
+from adolar import smart_shuffle
 
 
 def track(track_id, artist, album, bpm=120, genre=""):

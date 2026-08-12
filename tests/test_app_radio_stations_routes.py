@@ -9,8 +9,8 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-radioroutes-import-control.db"),
 )
 
-import app as app_module
-import db
+from adolar import application as app_module
+from adolar import db
 
 
 class RadioStationsRouteTestBase(unittest.TestCase):

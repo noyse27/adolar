@@ -6,10 +6,8 @@ import time
 
 from mutagen import File as MutagenFile
 
-import db
-import library_context
-import tasks
-from db import save_cover, upsert_track
+from . import db, library_context, tasks
+from .db import save_cover, upsert_track
 
 log = logging.getLogger(__name__)
 
@@ -330,8 +328,8 @@ def run_thumb_generation(trigger: str = "manual"):
 
             from PIL import Image
 
-            from app import _THUMB_DIR, _THUMB_SIZE, _thumb_path
-            from db import get_connection
+            from .db import get_connection
+            from .routes.media import _THUMB_DIR, _THUMB_SIZE, _thumb_path
 
             conn = get_connection()
             rows = conn.execute("SELECT hash, data, mime FROM covers").fetchall()
@@ -383,7 +381,7 @@ def run_bpm_scan(limit: int = 0, trigger: str = "manual"):
         try:
             import librosa
 
-            from db import get_connection
+            from .db import get_connection
             conn = get_connection()
             try:
                 query = "SELECT id, path FROM tracks WHERE bpm IS NULL OR bpm = 0"
@@ -456,7 +454,7 @@ def run_scan(music_root: str, trigger: str = "manual", run_followups: bool = Tru
         failed = False
         try:
             # Load existing mtimes once — avoids per-file DB round-trips
-            from db import get_connection
+            from .db import get_connection
             conn = get_connection()
             try:
                 existing_mtimes = {

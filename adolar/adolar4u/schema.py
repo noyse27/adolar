@@ -17,7 +17,7 @@ def migrate_legacy_user_fks(conn) -> None:
     database) — SQLite needs to resolve the FK's target table to rebuild
     the table that references it.
     """
-    import db
+    from .. import db
 
     db.rebuild_table_dropping_user_fk(conn, "adolar4u_user_settings", """
         CREATE TABLE adolar4u_user_settings (

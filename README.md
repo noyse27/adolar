@@ -1,6 +1,6 @@
 # Adolar
 
-Current version: **1.8.0**
+Current version: **1.9.0**
 
 A self-hosted music archive web app for Synology NAS (or any Docker host). Browse, search, and stream your local MP3/FLAC/M4A collection from any browser — no cloud required.
 
@@ -43,6 +43,7 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Durable archive counts** — the highest value from database, Last.fm, or file tag wins; changed tags are written nightly or manually
 - **Playlists** — smart playlists, static playlists, four global system playlists, and one protected personal Favorites playlist per user
 - **Playlist editor** — visual editor with track search, rule-based smart filters including relative “date added” periods, drag-and-drop ordering, random fill, and portable `.adolarplaylist` import/export
+- **Smart rules** — a separate natural-language editor turns German rule descriptions into explicit AND/OR groups while keeping the conventional editor available for simple filters
 - **Database backups** — consistent SQLite snapshots with integrity check, SHA-256 checksum, jingle archive, daily automatic runs, and retention policy
 - **Connection monitor** — admin overview of connected clients with heartbeats and masked IP addresses
 - **Background job monitor** — admin System Monitor shows currently running and recently finished library scans, BPM analysis, thumbnail generation, database optimization, and backups, with progress and manual/automatic trigger
@@ -51,6 +52,23 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Bookmark button** — add any track to a personal playlist directly from the track list; create new playlists on the fly
 - **Radio favorites** — the Radio companion uses the same personal Favorites list as the Web player
 - **DE / EN interface** — language switch in topbar
+
+## What's new in 1.9.0
+
+- Smart rules provide a separate natural-language input for complex station and
+  playlist filters. Album, artist and title use exact matches; genre uses
+  `contains` so linked genres remain eligible. Value lists understand comma,
+  `oder` and context-sensitive `und`, including phrases such as
+  `Album enthält Bravo und Ronny und als Jahrzehnt 1980, 1990 oder 2000`.
+- Playback now keeps a bounded previous-track history in the main Web player,
+  the standalone Radio view and Android. Previous restarts the current track
+  after five seconds and otherwise returns to the preceding track without
+  discarding the newer crossfade and preload pipeline.
+- The Flask backend is organized as the `adolar` package with route blueprints,
+  reducing the former monolithic application module while preserving the
+  existing entry points.
+- A lyrics implementation roadmap and an optional Windows LRCLIB tray helper
+  are included under `docs/` and `tools/lrclib-windows-tray/`.
 
 ## What's new in 1.8.0
 
@@ -114,6 +132,15 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - [Adolar4U current status and roadmap](docs/adolar4u-roadmap.md)
 - [Adolar4U architecture and privacy model](docs/adolar4u.md)
 - [Adolar4U private validation guide](docs/adolar4u-testing.md)
+- [Lyrics roadmap and Lyricsfile grooming](docs/lyrics-roadmap.md)
+
+The Python server lives in the `adolar/` package. `adolar/application.py` owns
+configuration, request context, and schedulers; HTTP endpoints are grouped by
+feature in `adolar/routes/` Flask blueprints. `wsgi.py` is the production entry
+point, while `run.py` starts a local installation. Maintenance commands that
+are not part of the server package live in `scripts/`; the Windows companion
+and Android client remain independent projects in `companion/` and
+`adolar-android/`.
 
 ## Quick Start (Docker)
 
@@ -213,7 +240,7 @@ For large libraries, pre-generate all thumbnails before first use:
 
 ```bash
 docker exec adolar pip install Pillow   # first time only
-docker exec -it adolar python generate_thumbs.py --workers 4
+docker exec -it adolar python scripts/generate_thumbs.py --workers 4
 ```
 
 Thumbnails are stored in `/data/thumbs/` (persistent volume) and survive container restarts.

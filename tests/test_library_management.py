@@ -6,7 +6,8 @@ from unittest import mock
 _temp_dir = tempfile.TemporaryDirectory()
 os.environ.setdefault("DB_PATH", os.path.join(_temp_dir.name, "adolar-library-mgmt-import.db"))
 
-import app as app_module
+from adolar import application as app_module
+from adolar.routes import admin as admin_routes
 
 
 class LibraryManagementTests(unittest.TestCase):
@@ -204,7 +205,7 @@ class LibraryManagementTests(unittest.TestCase):
         with self._as(self.user):
             forbidden = self.client.post("/api/admin/library/covers")
         self.assertEqual(forbidden.status_code, 403)
-        with self._as(self.admin), mock.patch.object(app_module.scanner, "run_thumb_generation") as run:
+        with self._as(self.admin), mock.patch.object(admin_routes.scanner, "run_thumb_generation") as run:
             response = self.client.post("/api/admin/library/covers")
         self.assertEqual(response.status_code, 200)
         run.assert_called_once()

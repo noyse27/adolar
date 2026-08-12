@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from mutagen.id3 import ID3, SYLT, USLT, ID3NoHeaderError
 
-import db
+from . import db
 
 log = logging.getLogger(__name__)
 

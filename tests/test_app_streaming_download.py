@@ -11,7 +11,8 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-stream-import-control.db"),
 )
 
-import app as app_module
+from adolar import application as app_module
+from adolar.routes import media as media_routes
 
 
 def _make_png_bytes() -> bytes:
@@ -37,7 +38,7 @@ class StreamingTestBase(unittest.TestCase):
                 app_module, "LIBRARY_REGISTRY_PATH",
                 os.path.join(self.temp.name, "libraries.json"),
             ),
-            mock.patch.object(app_module, "_THUMB_DIR", self.thumb_dir),
+            mock.patch.object(media_routes, "_THUMB_DIR", self.thumb_dir),
         ]
         for p in self.patches:
             p.start()

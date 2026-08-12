@@ -1,6 +1,6 @@
 import unittest
 
-import smart_rules
+from adolar import smart_rules
 
 
 class SmartRuleParserTests(unittest.TestCase):
@@ -24,6 +24,31 @@ class SmartRuleParserTests(unittest.TestCase):
         self.assertTrue(all(
             rule["op"] == "contains" for rule in tree["rules"][2]["rules"]
         ))
+
+    def test_parses_and_values_with_comma_separated_decades(self):
+        parsed = smart_rules.parse_smart_rule(
+            "Album enthält Bravo und Ronny und als Jahrzehnt 1980,1990 oder 2000."
+        )
+        tree = parsed["filter"]
+        self.assertEqual(tree["mode"], "all")
+        self.assertEqual(len(tree["rules"]), 2)
+        albums, decades = tree["rules"]
+        self.assertEqual(albums["mode"], "all")
+        self.assertEqual(
+            [rule["value"] for rule in albums["rules"]],
+            ["Bravo", "Ronny"],
+        )
+        self.assertEqual(decades["mode"], "any")
+        self.assertEqual(
+            [rule["value"] for rule in decades["rules"]],
+            [1980, 1990, 2000],
+        )
+
+    def test_exact_numeric_and_list_is_any_because_values_are_exclusive(self):
+        group = smart_rules.parse_smart_rule(
+            "Jahrzehnt ist 1980 und 1990"
+        )["filter"]
+        self.assertEqual(group["mode"], "any")
 
     def test_genre_is_always_means_contains(self):
         parsed = smart_rules.parse_smart_rule("Genre ist Hip-Hop")

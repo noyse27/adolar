@@ -9,7 +9,8 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-scanroutes-import-control.db"),
 )
 
-import app as app_module
+from adolar import application as app_module
+from adolar.routes import scanner as scanner_routes
 
 
 class ScanRouteTestBase(unittest.TestCase):
@@ -61,7 +62,7 @@ class ScanStartRouteTests(ScanRouteTestBase):
 
     def test_existing_music_root_starts_the_scan(self):
         os.makedirs(self.music_root)
-        with self._login(role="admin"), mock.patch.object(app_module.scanner, "run_scan") as run_scan:
+        with self._login(role="admin"), mock.patch.object(scanner_routes.scanner, "run_scan") as run_scan:
             response = self.client.post("/api/scan/start")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["status"], "started")
@@ -76,7 +77,7 @@ class BpmTagsRouteTests(ScanRouteTestBase):
 
     def test_returns_started_immediately(self):
         with self._login(role="admin"), mock.patch.object(
-            app_module, "_start_library_thread",
+            scanner_routes, "_start_library_thread",
         ) as start_thread:
             response = self.client.post("/api/scan/bpm-tags")
         self.assertEqual(response.status_code, 200)
@@ -91,13 +92,13 @@ class BpmScanRouteTests(ScanRouteTestBase):
         self.assertEqual(response.status_code, 403)
 
     def test_default_limit_is_reported_as_unlimited(self):
-        with self._login(role="admin"), mock.patch.object(app_module.scanner, "run_bpm_scan") as run_bpm:
+        with self._login(role="admin"), mock.patch.object(scanner_routes.scanner, "run_bpm_scan") as run_bpm:
             response = self.client.post("/api/scan/bpm")
         self.assertEqual(response.get_json()["limit"], "unlimited")
         run_bpm.assert_called_once_with(0)
 
     def test_explicit_limit_is_forwarded_to_the_scanner(self):
-        with self._login(role="admin"), mock.patch.object(app_module.scanner, "run_bpm_scan") as run_bpm:
+        with self._login(role="admin"), mock.patch.object(scanner_routes.scanner, "run_bpm_scan") as run_bpm:
             response = self.client.post("/api/scan/bpm", json={"limit": 100})
         self.assertEqual(response.get_json()["limit"], 100)
         run_bpm.assert_called_once_with(100)
@@ -120,7 +121,7 @@ class ScanStatusRouteTests(ScanRouteTestBase):
     def test_persisted_scan_time_is_returned_after_process_restart(self):
         app_module.db.set_last_scan_finished_at(1_722_085_200.5)
         with self._login(), mock.patch.object(
-            app_module.scanner,
+            scanner_routes.scanner,
             "status",
             return_value={"running": False, "finished_at": None},
         ):

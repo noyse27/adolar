@@ -9,8 +9,8 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-pages-import-control.db"),
 )
 
-import app as app_module
-import auth
+from adolar import application as app_module
+from adolar import auth
 
 
 class PagesTestBase(unittest.TestCase):

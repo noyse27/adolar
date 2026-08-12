@@ -26,7 +26,7 @@ def test_bare_metal_launcher_uses_the_same_gunicorn_flags_as_docker():
 
 
 def test_db_path_is_anchored_to_data_root_not_the_docker_only_default():
-    app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+    app_source = (ROOT / "adolar" / "application.py").read_text(encoding="utf-8")
     assert 'db.DB_PATH = os.environ.get("DB_PATH") or os.path.join(DATA_ROOT, "adolar.db")' in app_source
 
 

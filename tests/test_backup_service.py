@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import backup_service
+from adolar import backup_service
 
 
 class BackupServiceTests(unittest.TestCase):

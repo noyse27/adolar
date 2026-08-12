@@ -56,7 +56,7 @@ _FIELD_RE = re.compile(
     re.IGNORECASE,
 )
 _JOIN_WORDS = {"und", "oder"}
-_JOIN_ARTICLES = {"das", "der", "die", "den", "dem"}
+_JOIN_FILLERS = {"als", "das", "der", "die", "den", "dem"}
 
 
 def _unquote(value: str) -> str:
@@ -81,11 +81,18 @@ def _field_matches(text: str) -> list[re.Match]:
     return matches
 
 
-def _split_alternatives(value_text: str) -> list[str]:
-    """Split OR-like value lists while preserving separators inside quotes."""
+def _split_values(value_text: str) -> tuple[list[str], str]:
+    """Split one field's values and return their logical group mode."""
     text = re.sub(r"^sowohl\s+", "", value_text.strip(), flags=re.IGNORECASE)
-    separators = ("beziehungsweise", "bzw.", "als auch", "oder")
+    separators = (
+        ("beziehungsweise", "any"),
+        ("bzw.", "any"),
+        ("als auch", "all"),
+        ("oder", "any"),
+        ("und", "all"),
+    )
     values: list[str] = []
+    modes: set[str] = set()
     current: list[str] = []
     quote: str | None = None
     index = 0
@@ -98,19 +105,25 @@ def _split_alternatives(value_text: str) -> list[str]:
             index += 1
             continue
         matched = None
+        matched_mode = None
         if quote is None:
-            for separator in separators:
+            if char == ",":
+                matched = ","
+                matched_mode = "comma"
+            for separator, mode in separators:
                 end = index + len(separator)
                 if (lowered[index:end] == separator and
                         (index == 0 or text[index - 1].isspace()) and
                         (end == len(text) or text[end].isspace())):
                     matched = separator
+                    matched_mode = mode
                     break
         if matched:
             value = _unquote("".join(current))
             if value:
                 values.append(value)
             current = []
+            modes.add(matched_mode)
             index += len(matched)
         else:
             current.append(char)
@@ -118,7 +131,15 @@ def _split_alternatives(value_text: str) -> list[str]:
     value = _unquote("".join(current))
     if value:
         values.append(value)
-    return values
+    explicit_modes = modes - {"comma"}
+    if len(explicit_modes) > 1:
+        raise SmartRuleParseError(
+            "Eine Werteliste darf nicht gleichzeitig mit „und“ und „oder“ verknüpft werden."
+        )
+    # Comma-separated lists are selections (ANY), unless an explicit
+    # conjunction states that every value must match.
+    mode = next(iter(explicit_modes), "any" if "comma" in modes else "any")
+    return values, mode
 
 
 def _pop_trailing_word(text: str) -> tuple[str, str]:
@@ -135,7 +156,7 @@ def _pop_trailing_word(text: str) -> tuple[str, str]:
 def _strip_trailing_connector(segment: str) -> tuple[str, str | None]:
     """Remove a trailing clause connector without regex backtracking."""
     prefix, last_word = _pop_trailing_word(segment)
-    if last_word in _JOIN_ARTICLES:
+    if last_word in _JOIN_FILLERS:
         before_connector, connector = _pop_trailing_word(prefix)
         if before_connector and connector in _JOIN_WORDS:
             return before_connector, connector
@@ -175,11 +196,13 @@ def _parse_age(segment: str) -> tuple[str, int, str]:
     )
 
 
-def _operator_and_values(field: str, segment: str) -> tuple[str, list[str], str | None]:
+def _operator_and_values(
+        field: str, segment: str,
+) -> tuple[str, list[str], str | None, str]:
     segment = re.sub(r"^(?:die|der|das)\s+", "", segment.strip(), flags=re.IGNORECASE)
     if field == "added":
         op, value, unit = _parse_age(segment)
-        return op, [str(value)], unit
+        return op, [str(value)], unit, "all"
 
     operator_patterns = (
         ("not_contains", r"^(?:enthält|enthalten|beinhaltet|beinhalten)\s+nicht\s+"),
@@ -197,13 +220,19 @@ def _operator_and_values(field: str, segment: str) -> tuple[str, list[str], str 
             raw_op = candidate
             value_text = segment[match.end():].strip()
             break
+    if raw_op is None and field in {"year", "decade", "playcount"}:
+        # Natural numeric shorthand: "als Jahrzehnt 1980, 1990 oder 2000".
+        first = segment.lstrip()[:1]
+        if first.isdecimal() or first == "-":
+            raw_op = "eq"
+            value_text = segment.strip()
     if raw_op is None:
         raise SmartRuleParseError(
             f"Nach ‚{_FIELD_LABELS[field]}‘ fehlt ein unterstützter Vergleich "
             "wie „ist“, „enthält“, „größer als“ oder „kleiner als“."
         )
 
-    values = _split_alternatives(value_text)
+    values, value_mode = _split_values(value_text)
     if not values:
         raise SmartRuleParseError(f"Für ‚{_FIELD_LABELS[field]}‘ fehlt ein Wert.")
 
@@ -213,6 +242,10 @@ def _operator_and_values(field: str, segment: str) -> tuple[str, list[str], str 
                 f"‚{_FIELD_LABELS[field]}‘ benötigt einen Zahlenvergleich wie „ist“."
             )
         op = raw_op
+        if op == "eq" and len(values) > 1:
+            # One track cannot equal several years, decades or playcounts at
+            # once, so enumerations of exact numbers always mean ANY.
+            value_mode = "any"
     elif field == "genre":
         # Genre tags frequently contain multiple combined values. Per product
         # semantics even "Genre ist Rap" therefore means a substring match.
@@ -224,7 +257,7 @@ def _operator_and_values(field: str, segment: str) -> tuple[str, list[str], str 
                 f"‚{_FIELD_LABELS[field]}‘ unterstützt „ist“ oder „enthält“, "
                 "aber keinen Größenvergleich."
             )
-    return op, values, None
+    return op, values, None, value_mode
 
 
 def _rule_for_value(field: str, op: str, value: str, unit: str | None) -> dict:
@@ -244,9 +277,9 @@ def _rule_for_value(field: str, op: str, value: str, unit: str | None) -> dict:
 
 
 def _clause_node(field: str, segment: str) -> dict:
-    op, values, unit = _operator_and_values(field, segment)
+    op, values, unit, mode = _operator_and_values(field, segment)
     rules = [_rule_for_value(field, op, value, unit) for value in values]
-    return rules[0] if len(rules) == 1 else {"mode": "any", "rules": rules}
+    return rules[0] if len(rules) == 1 else {"mode": mode, "rules": rules}
 
 
 def _combine_clauses(clauses: list[dict], connectors: list[str]) -> dict:

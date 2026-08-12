@@ -351,7 +351,7 @@ function streamUrl(track) {
   return `${API}/api/stream/${track.id}${version}`;
 }
 
-const radio = { queue: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false, cfPending: false, cfToken: 0, cfFinish: null, session: 0, stationId: 1, stationName: "Adolar Radio", station: null, tracksSinceJingle: 0 };
+const radio = { queue: [], history: [], playedIds: [], shuffleSession: null, cfTimer: null, cfActive: false, cfPending: false, cfToken: 0, cfFinish: null, session: 0, stationId: 1, stationName: "Adolar Radio", station: null, tracksSinceJingle: 0 };
 const LAST_RADIO_STATION_KEY = "adolar_radio_last_station_id";
 
 function savedStationId() {
@@ -416,6 +416,8 @@ function makeJingleItem() {
 
 function markCurrentPlayed() {
   if (!currentTrack || isJingle(currentTrack)) return;
+  radio.history.push(currentTrack);
+  if (radio.history.length > 100) radio.history = radio.history.slice(-100);
   radio.playedIds.push(currentTrack.id);
   radio.tracksSinceJingle++;
   if (radio.playedIds.length > 100) radio.playedIds = radio.playedIds.slice(-100);
@@ -486,6 +488,7 @@ async function loadQueue(count, exclude = []) {
 async function startRadio() {
   finishA4UTrack("stop");
   radio.queue = [];
+  radio.history = [];
   radio.playedIds = [];
   radio.shuffleSession = null;
   radio.tracksSinceJingle = 0;
@@ -583,10 +586,10 @@ async function radioNext(fromCrossfade = false) {
 }
 
 // ── Playback ──────────────────────────────────────────────
-function playTrack(track) {
+function playTrack(track, rememberCurrent = true, reason = "track_change") {
   if (!track) return;
-  finishA4UTrack("track_change");
-  markCurrentPlayed();
+  finishA4UTrack(reason);
+  if (rememberCurrent) markCurrentPlayed();
   currentTrack  = track;
   _scrobbled    = false;
   _playCounted  = false;
@@ -914,14 +917,21 @@ document.getElementById("btn-next").onclick = () => {
 window.addEventListener("pagehide", () => finishA4UTrack("stop", false, true));
 document.getElementById("btn-prev").onclick = () => {
   if (audio.currentTime > 5) { audio.currentTime = 0; return; }
-  if (radio.playedIds.length) {
-    const prevId = radio.playedIds.pop();
-    radio.queue.unshift(currentTrack);
-    fetch(`${API}/api/search?q=&per_page=1&page=1`)
-      .catch(() => {});
-    // simple: just restart current if no prev available
-    audio.currentTime = 0;
-  }
+  const previous = radio.history.pop();
+  if (!previous) { audio.currentTime = 0; return; }
+  const interrupted = currentTrack;
+  radio.cfActive = false;
+  radio.cfPending = false;
+  radio.cfFinish = null;
+  radio.cfToken++;
+  clearTimeout(radio.cfTimer);
+  const inactive = getInactive();
+  inactive.pause(); inactive.removeAttribute("src"); inactive.load();
+  audio.volume = document.getElementById("volume").valueAsNumber;
+  radio.playedIds.pop();
+  radio.tracksSinceJingle = Math.max(0, radio.tracksSinceJingle - 1);
+  if (interrupted && !isJingle(interrupted)) radio.queue.unshift(interrupted);
+  playTrack(previous, false, "manual_previous");
 };
 document.getElementById("progress").oninput = e => {
   if (audio.duration) audio.currentTime = (e.target.value / 100) * audio.duration;

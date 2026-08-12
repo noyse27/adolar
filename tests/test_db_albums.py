@@ -21,7 +21,7 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_import_temp_dir.name, "adolar-albums-import-control.db"),
 )
 
-import db  # noqa: E402
+from adolar import db  # noqa: E402
 
 
 class AlbumsTestBase(unittest.TestCase):

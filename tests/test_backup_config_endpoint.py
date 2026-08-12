@@ -9,7 +9,8 @@ os.environ.setdefault(
     "CONTROL_DB_PATH", os.path.join(_temp_dir.name, "adolar-backup-config-test-control.db"),
 )
 
-import app as app_module
+from adolar import application as app_module
+from adolar.routes import admin as admin_routes
 
 
 class BackupRootSettingTests(unittest.TestCase):
@@ -79,7 +80,7 @@ class BackupConfigEndpointTests(unittest.TestCase):
         previous = app_module._backup_root()
         unwritable = os.path.join(self.temp.name, "no-such-drive-letter-x", "backups")
         with self._as_admin(), mock.patch.object(
-            app_module.backup_service, "ensure_backup_root", side_effect=OSError("nope"),
+            admin_routes.backup_service, "ensure_backup_root", side_effect=OSError("nope"),
         ):
             response = self.client.put("/api/admin/backups/config", json={
                 "enabled": True, "hour": 4, "retention": 5, "path": unwritable,
