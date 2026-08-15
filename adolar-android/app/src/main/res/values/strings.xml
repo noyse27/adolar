@@ -70,7 +70,8 @@
     <string name="library_scan_waiting">Musik wird eingelesen …</string>
     <string name="library_scan_found">%1$d Titel gefunden …</string>
     <string name="library_scan_progress">%1$d Dateien geprüft · %2$d aktualisiert · %3$d Fehler</string>
-    <string name="library_scan_complete">%1$d lokale Titel verfügbar</string>
+    <string name="library_scan_complete">%1$,d Titel auf diesem Gerät</string>
+    <string name="track_actions">Titelaktionen</string>
     <string name="library_scan_failed">Der Ordner konnte nicht vollständig gelesen werden.</string>
     <string name="library_open_radios">Adolar-Radios</string>
     <string name="library_drawer_favorites">Favoriten</string>

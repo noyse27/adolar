@@ -232,6 +232,8 @@ public class NextActivity extends Activity {
         trackList = new RecyclerView(this);
         trackList.setLayoutManager(new LinearLayoutManager(this));
         trackList.setHasFixedSize(true);
+        trackList.setItemAnimator(null);
+        trackList.setBackgroundColor(color(R.color.bg_tertiary));
         adapter = new TrackAdapter(this::playLocalTrack);
         facetAdapter = new FacetAdapter(this::openFacet);
         playlistAdapter = new PlaylistAdapter(this::openPlaylist);
@@ -306,6 +308,10 @@ public class NextActivity extends Activity {
     }
 
     private View buildToolbar() {
+        LinearLayout appBar = new LinearLayout(this);
+        appBar.setOrientation(LinearLayout.VERTICAL);
+        appBar.setBackgroundColor(color(R.color.bg_primary));
+
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setOrientation(LinearLayout.HORIZONTAL);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
@@ -346,7 +352,16 @@ public class NextActivity extends Activity {
         overflow.setContentDescription(getString(R.string.settings_button));
         overflow.setOnClickListener(this::showOverflow);
         toolbar.addView(overflow, new LinearLayout.LayoutParams(dp(52), dp(52)));
-        return toolbar;
+        appBar.addView(toolbar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+        ));
+
+        View accentLine = new View(this);
+        accentLine.setBackgroundColor(color(R.color.accent_deep));
+        appBar.addView(accentLine, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(2)
+        ));
+        return appBar;
     }
 
     private View buildDrawer() {
@@ -1129,26 +1144,64 @@ public class NextActivity extends Activity {
         @Override
         public TrackViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
             LinearLayout row = new LinearLayout(NextActivity.this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(16), dp(8), dp(8), dp(8));
-            row.setBackgroundColor(color(R.color.bg_secondary));
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setBackgroundColor(color(R.color.bg_tertiary));
+            row.setLayoutParams(new RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(73)
+            ));
+
+            LinearLayout content = new LinearLayout(NextActivity.this);
+            content.setOrientation(LinearLayout.HORIZONTAL);
+            content.setGravity(Gravity.CENTER_VERTICAL);
+            content.setPadding(dp(12), dp(7), dp(4), dp(7));
+
+            TextView artwork = text("♫", 21, R.color.accent_light);
+            artwork.setGravity(Gravity.CENTER);
+            artwork.setBackgroundColor(color(R.color.bg_primary));
+            content.addView(artwork, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
             LinearLayout labels = new LinearLayout(NextActivity.this);
             labels.setOrientation(LinearLayout.VERTICAL);
-            TextView title = text("", 17, R.color.text_primary);
+            labels.setGravity(Gravity.CENTER_VERTICAL);
+            labels.setPadding(dp(12), 0, dp(8), 0);
+            TextView title = text("", 16, R.color.text_primary);
             title.setTypeface(Typeface.DEFAULT_BOLD);
             title.setSingleLine(true);
-            TextView artist = text("", 14, R.color.text_secondary);
+            TextView artist = text("", 13, R.color.text_secondary);
             artist.setSingleLine(true);
             labels.addView(title);
             labels.addView(artist);
-            row.addView(labels, new LinearLayout.LayoutParams(0, dp(64), 1f));
+            content.addView(labels, new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
-            TextView duration = text("", 14, R.color.text_secondary);
+            TextView duration = text("", 13, R.color.text_secondary);
             duration.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-            row.addView(duration, new LinearLayout.LayoutParams(dp(58), dp(64)));
-            return new TrackViewHolder(row, title, artist, duration);
+            content.addView(duration, new LinearLayout.LayoutParams(dp(48),
+                    ViewGroup.LayoutParams.MATCH_PARENT));
+
+            Button actions = new Button(NextActivity.this);
+            actions.setText("⋮");
+            actions.setTextSize(22);
+            actions.setTextColor(color(R.color.text_secondary));
+            actions.setBackgroundColor(Color.TRANSPARENT);
+            actions.setMinWidth(0);
+            actions.setMinHeight(0);
+            actions.setPadding(0, 0, 0, 0);
+            actions.setContentDescription(getString(R.string.track_actions));
+            content.addView(actions, new LinearLayout.LayoutParams(dp(44),
+                    ViewGroup.LayoutParams.MATCH_PARENT));
+
+            row.addView(content, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            ));
+            View divider = new View(NextActivity.this);
+            divider.setBackgroundColor(color(R.color.border_subtle));
+            LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(1)
+            );
+            dividerParams.setMargins(dp(72), 0, 0, 0);
+            row.addView(divider, dividerParams);
+            return new TrackViewHolder(row, title, artist, duration, actions);
         }
 
         @Override
@@ -1163,6 +1216,7 @@ public class NextActivity extends Activity {
                 showTrackActions(track);
                 return true;
             });
+            holder.actions.setOnClickListener(view -> showTrackActions(track));
         }
 
         @Override
@@ -1251,8 +1305,11 @@ public class NextActivity extends Activity {
             LinearLayout row = new LinearLayout(NextActivity.this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(16), dp(8), dp(12), dp(8));
+            row.setPadding(dp(16), dp(4), dp(12), dp(4));
             row.setBackgroundColor(color(R.color.bg_secondary));
+            row.setLayoutParams(new RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(73)
+            ));
 
             TextView icon = text("▤", 30, R.color.accent);
             icon.setGravity(Gravity.CENTER);
@@ -1318,12 +1375,20 @@ public class NextActivity extends Activity {
         final TextView title;
         final TextView artist;
         final TextView duration;
+        final Button actions;
 
-        TrackViewHolder(View itemView, TextView title, TextView artist, TextView duration) {
+        TrackViewHolder(
+                View itemView,
+                TextView title,
+                TextView artist,
+                TextView duration,
+                Button actions
+        ) {
             super(itemView);
             this.title = title;
             this.artist = artist;
             this.duration = duration;
+            this.actions = actions;
         }
     }
 

@@ -72,6 +72,15 @@ def test_scan_hides_folder_action_and_loads_live_track_previews():
     assert "queryExecutor" in repository
 
 
+def test_track_rows_are_full_width_compact_and_offer_visible_actions():
+    activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
+    assert "row.setLayoutParams(new RecyclerView.LayoutParams(" in activity
+    assert "ViewGroup.LayoutParams.MATCH_PARENT, dp(73)" in activity
+    assert "holder.actions.setOnClickListener" in activity
+    assert "R.string.track_actions" in activity
+    assert "accentLine.setBackgroundColor" in activity
+
+
 def test_next_respects_system_bars_and_software_keyboard():
     manifest = read("app/src/main/AndroidManifest.xml")
     activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
