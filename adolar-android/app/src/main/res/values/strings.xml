@@ -1,19 +1,19 @@
 <resources>
-    <string name="app_name">Adolar Radio</string>
+    <string name="app_name">Adolar Next</string>
     <string name="settings_title">Adolar</string>
-    <string name="settings_subtitle">Radio</string>
+    <string name="settings_subtitle">Next</string>
     <string name="server_url_label">Adolar Server URL</string>
     <string name="server_url_hint">http://192.168.1.100:15002</string>
     <string name="save_and_start">Speichern und starten</string>
     <string name="invalid_url">Bitte eine URL mit http:// oder https:// eingeben.</string>
     <string name="settings_hint">Beispiel: http://192.168.1.100:15002</string>
     <string name="car_no_server">Server-URL zuerst in der Handy-App einstellen.</string>
-    <string name="car_start_radio">Adolar Radio starten</string>
+    <string name="car_start_radio">Adolar Next starten</string>
     <string name="playback_channel_name">Musikwiedergabe</string>
     <string name="playback_channel_description">Steuerung der laufenden Adolar-Wiedergabe</string>
-    <string name="notification_unknown_track">Adolar Radio</string>
+    <string name="notification_unknown_track">Adolar Next</string>
     <string name="version_format">Version %1$s</string>
-    <string name="settings_version_format">Radio · Version %1$s</string>
+    <string name="settings_version_format">Next · Version %1$s</string>
     <string name="settings_button">Einstellungen</string>
     <string name="back_to_player">Zurück zum Player</string>
     <string name="station_label">Sender</string>
