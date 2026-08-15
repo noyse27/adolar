@@ -86,4 +86,11 @@
     <string name="library_feature_pending">Dieser Bereich folgt in der nächsten Ausbaustufe.</string>
     <string name="library_now_playing_empty">Keine Wiedergabe</string>
     <string name="library_unknown_artist">Unbekannter Interpret</string>
+    <string name="library_search_hint">Titel, Interpret, Album oder Genre</string>
+    <string name="library_search_empty">Suchbegriff eingeben</string>
+    <string name="library_search_results">%1$d Titel gefunden</string>
+    <string name="library_facet_count">%1$d Einträge</string>
+    <string name="library_facet_tracks">%1$d Titel</string>
+    <string name="library_no_facets">Keine passenden Einträge vorhanden.</string>
+    <string name="library_loading">Wird geladen …</string>
 </resources>

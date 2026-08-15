@@ -10,6 +10,8 @@ import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.support.v4.media.MediaBrowserCompat;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaControllerCompat;
@@ -17,7 +19,9 @@ import android.support.v4.media.session.PlaybackStateCompat;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
@@ -26,6 +30,8 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.text.Editable;
+import android.text.TextWatcher;
 
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
@@ -34,9 +40,12 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import net.polze.adolarradio.local.LibraryFacet;
 import net.polze.adolarradio.local.LocalLibraryRepository;
+import net.polze.adolarradio.local.LocalLibraryRepository.FacetType;
 import net.polze.adolarradio.local.LocalLibraryScanner;
 import net.polze.adolarradio.local.LocalTrack;
 
@@ -52,6 +61,11 @@ public class NextActivity extends Activity {
     private DrawerLayout drawerLayout;
     private RecyclerView trackList;
     private TrackAdapter adapter;
+    private FacetAdapter facetAdapter;
+    private TextView toolbarIcon;
+    private TextView toolbarTitle;
+    private Button toolbarSearch;
+    private EditText searchInput;
     private TextView statusView;
     private Button emptyAction;
     private LinearLayout scanPanel;
@@ -68,6 +82,16 @@ public class NextActivity extends Activity {
     private boolean scanning;
     private boolean liveRefreshPending;
     private long lastLiveRefreshAt;
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private Runnable pendingSearch;
+    private int searchGeneration;
+    private Screen screen = Screen.TRACKS;
+    private FacetType activeFacetType;
+    private String activeFacetName;
+
+    private enum Screen {
+        TRACKS, SEARCH, FACETS, FACET_TRACKS
+    }
 
     private final MediaBrowserCompat.ConnectionCallback browserCallback =
             new MediaBrowserCompat.ConnectionCallback() {
@@ -159,6 +183,32 @@ public class NextActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(64)
         ));
 
+        searchInput = new EditText(this);
+        searchInput.setSingleLine(true);
+        searchInput.setHint(R.string.library_search_hint);
+        searchInput.setTextColor(color(R.color.text_primary));
+        searchInput.setHintTextColor(color(R.color.text_secondary));
+        searchInput.setBackgroundColor(color(R.color.bg_secondary));
+        searchInput.setPadding(dp(16), 0, dp(16), 0);
+        searchInput.setVisibility(View.GONE);
+        searchInput.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence value, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence value, int start, int before, int count) {
+                scheduleSearch(value.toString());
+            }
+
+            @Override
+            public void afterTextChanged(Editable value) {
+            }
+        });
+        content.addView(searchInput, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(52)
+        ));
+
         statusView = text("", 13, R.color.text_secondary);
         statusView.setPadding(dp(16), dp(8), dp(16), dp(8));
         content.addView(statusView, new LinearLayout.LayoutParams(
@@ -175,6 +225,7 @@ public class NextActivity extends Activity {
         trackList.setLayoutManager(new LinearLayoutManager(this));
         trackList.setHasFixedSize(true);
         adapter = new TrackAdapter(this::playLocalTrack);
+        facetAdapter = new FacetAdapter(this::openFacet);
         trackList.setAdapter(adapter);
         libraryFrame.addView(trackList, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
@@ -260,13 +311,23 @@ public class NextActivity extends Activity {
         rocket.setOnClickListener(view -> drawerLayout.openDrawer(Gravity.START));
         toolbar.addView(rocket, new LinearLayout.LayoutParams(dp(52), dp(52)));
 
-        TextView icon = text("♫", 30, R.color.accent);
-        icon.setGravity(Gravity.CENTER);
-        toolbar.addView(icon, new LinearLayout.LayoutParams(dp(48), dp(52)));
+        toolbarIcon = text("♫", 30, R.color.accent);
+        toolbarIcon.setGravity(Gravity.CENTER);
+        toolbar.addView(toolbarIcon, new LinearLayout.LayoutParams(dp(48), dp(52)));
 
-        TextView title = text(getString(R.string.library_tracks), 24, R.color.text_primary);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        toolbar.addView(title, new LinearLayout.LayoutParams(0, dp(52), 1f));
+        toolbarTitle = text(getString(R.string.library_tracks), 24, R.color.text_primary);
+        toolbarTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        toolbarTitle.setSingleLine(true);
+        toolbar.addView(toolbarTitle, new LinearLayout.LayoutParams(0, dp(52), 1f));
+
+        toolbarSearch = new Button(this);
+        toolbarSearch.setText("⌕");
+        toolbarSearch.setTextSize(28);
+        toolbarSearch.setTextColor(color(R.color.text_primary));
+        toolbarSearch.setBackgroundColor(Color.TRANSPARENT);
+        toolbarSearch.setContentDescription(getString(R.string.library_drawer_search));
+        toolbarSearch.setOnClickListener(view -> showSearch());
+        toolbar.addView(toolbarSearch, new LinearLayout.LayoutParams(dp(52), dp(52)));
 
         Button overflow = new Button(this);
         overflow.setText("⋮");
@@ -312,10 +373,22 @@ public class NextActivity extends Activity {
         addPendingDrawerItem(drawer, R.string.library_drawer_most_played);
 
         addDrawerHeading(drawer, "BIBLIOTHEK");
-        addPendingDrawerItem(drawer, R.string.library_drawer_search);
-        addPendingDrawerItem(drawer, R.string.library_drawer_albums);
-        addPendingDrawerItem(drawer, R.string.library_drawer_artists);
-        addPendingDrawerItem(drawer, R.string.library_drawer_genres);
+        addDrawerItem(drawer, getString(R.string.library_drawer_search), view -> {
+            drawerLayout.closeDrawer(Gravity.START);
+            showSearch();
+        });
+        addDrawerItem(drawer, getString(R.string.library_drawer_albums), view -> {
+            drawerLayout.closeDrawer(Gravity.START);
+            showFacets(FacetType.ALBUM);
+        });
+        addDrawerItem(drawer, getString(R.string.library_drawer_artists), view -> {
+            drawerLayout.closeDrawer(Gravity.START);
+            showFacets(FacetType.ARTIST);
+        });
+        addDrawerItem(drawer, getString(R.string.library_drawer_genres), view -> {
+            drawerLayout.closeDrawer(Gravity.START);
+            showFacets(FacetType.GENRE);
+        });
         addPendingDrawerItem(drawer, R.string.library_drawer_playlists);
         addDrawerItem(drawer, getString(R.string.library_drawer_folders), view -> {
             drawerLayout.closeDrawer(Gravity.START);
@@ -323,7 +396,7 @@ public class NextActivity extends Activity {
         });
         addDrawerItem(drawer, getString(R.string.library_tracks), view -> {
             drawerLayout.closeDrawer(Gravity.START);
-            refreshTracks();
+            showAllTracks();
         });
         addDrawerItem(drawer, getString(R.string.library_open_radios), view -> openRadios());
         addPendingDrawerItem(drawer, R.string.library_drawer_sync);
@@ -401,6 +474,128 @@ public class NextActivity extends Activity {
         drawer.addView(item, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
         ));
+    }
+
+    private void showAllTracks() {
+        screen = Screen.TRACKS;
+        activeFacetType = null;
+        activeFacetName = null;
+        hideSearchInput();
+        toolbarIcon.setText("♫");
+        toolbarTitle.setText(R.string.library_tracks);
+        toolbarSearch.setVisibility(View.VISIBLE);
+        useTrackList();
+        refreshTracks();
+    }
+
+    private void showSearch() {
+        screen = Screen.SEARCH;
+        activeFacetType = null;
+        activeFacetName = null;
+        toolbarIcon.setText("⌕");
+        toolbarTitle.setText(R.string.library_drawer_search);
+        toolbarSearch.setVisibility(View.GONE);
+        useTrackList();
+        adapter.setTracks(new ArrayList<>());
+        emptyAction.setVisibility(View.GONE);
+        scanPanel.setVisibility(View.GONE);
+        searchInput.setVisibility(View.VISIBLE);
+        statusView.setText(R.string.library_search_empty);
+        searchInput.requestFocus();
+        searchInput.post(() -> {
+            InputMethodManager keyboard = (InputMethodManager) getSystemService(
+                    INPUT_METHOD_SERVICE
+            );
+            if (keyboard != null) {
+                keyboard.showSoftInput(searchInput, InputMethodManager.SHOW_IMPLICIT);
+            }
+        });
+        if (searchInput.length() > 0) scheduleSearch(searchInput.getText().toString());
+    }
+
+    private void scheduleSearch(String rawQuery) {
+        if (screen != Screen.SEARCH || searchInput == null) return;
+        if (pendingSearch != null) uiHandler.removeCallbacks(pendingSearch);
+        String query = rawQuery.trim();
+        int generation = ++searchGeneration;
+        if (query.isEmpty()) {
+            adapter.setTracks(new ArrayList<>());
+            statusView.setText(R.string.library_search_empty);
+            return;
+        }
+        pendingSearch = () -> repository.searchTracks(query, tracks -> {
+            if (screen != Screen.SEARCH || generation != searchGeneration) return;
+            adapter.setTracks(tracks);
+            statusView.setText(getString(R.string.library_search_results, tracks.size()));
+        });
+        uiHandler.postDelayed(pendingSearch, 250L);
+    }
+
+    private void showFacets(FacetType type) {
+        screen = Screen.FACETS;
+        activeFacetType = type;
+        activeFacetName = null;
+        hideSearchInput();
+        toolbarIcon.setText(facetIcon(type));
+        toolbarTitle.setText(facetTitle(type));
+        toolbarSearch.setVisibility(View.VISIBLE);
+        emptyAction.setVisibility(View.GONE);
+        scanPanel.setVisibility(View.GONE);
+        trackList.setLayoutManager(new GridLayoutManager(this, 2));
+        trackList.setAdapter(facetAdapter);
+        facetAdapter.setFacets(new ArrayList<>());
+        statusView.setText(R.string.library_loading);
+        repository.loadFacets(type, facets -> {
+            if (screen != Screen.FACETS || activeFacetType != type) return;
+            facetAdapter.setFacets(facets);
+            statusView.setText(facets.isEmpty()
+                    ? getString(R.string.library_no_facets)
+                    : getString(R.string.library_facet_count, facets.size()));
+        });
+    }
+
+    private void openFacet(LibraryFacet facet) {
+        FacetType type = activeFacetType;
+        if (type == null) return;
+        screen = Screen.FACET_TRACKS;
+        activeFacetName = facet.name;
+        hideSearchInput();
+        toolbarIcon.setText(facetIcon(type));
+        toolbarTitle.setText(facet.name);
+        toolbarSearch.setVisibility(View.VISIBLE);
+        useTrackList();
+        adapter.setTracks(new ArrayList<>());
+        statusView.setText(R.string.library_loading);
+        repository.loadTracksForFacet(type, facet.name, tracks -> {
+            if (screen != Screen.FACET_TRACKS || activeFacetType != type) return;
+            adapter.setTracks(tracks);
+            statusView.setText(getString(R.string.library_facet_tracks, tracks.size()));
+        });
+    }
+
+    private void useTrackList() {
+        trackList.setLayoutManager(new LinearLayoutManager(this));
+        trackList.setAdapter(adapter);
+    }
+
+    private void hideSearchInput() {
+        if (searchInput == null) return;
+        searchInput.setVisibility(View.GONE);
+        searchInput.clearFocus();
+        InputMethodManager keyboard = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (keyboard != null) keyboard.hideSoftInputFromWindow(searchInput.getWindowToken(), 0);
+    }
+
+    private int facetTitle(FacetType type) {
+        if (type == FacetType.ALBUM) return R.string.library_drawer_albums;
+        if (type == FacetType.ARTIST) return R.string.library_drawer_artists;
+        return R.string.library_drawer_genres;
+    }
+
+    private String facetIcon(FacetType type) {
+        if (type == FacetType.ALBUM) return "◉";
+        if (type == FacetType.ARTIST) return "♬";
+        return "♪";
     }
 
     private void chooseMusicFolder() {
@@ -491,7 +686,9 @@ public class NextActivity extends Activity {
         lastLiveRefreshAt = 0L;
         emptyAction.setVisibility(View.GONE);
         scanPanelText.setText(R.string.library_scan_waiting);
-        scanPanel.setVisibility(adapter.getItemCount() == 0 ? View.VISIBLE : View.GONE);
+        RecyclerView.Adapter<?> visibleAdapter = trackList.getAdapter();
+        boolean visibleListEmpty = visibleAdapter == null || visibleAdapter.getItemCount() == 0;
+        scanPanel.setVisibility(visibleListEmpty ? View.VISIBLE : View.GONE);
         statusView.setText(R.string.library_scanning);
     }
 
@@ -513,7 +710,7 @@ public class NextActivity extends Activity {
             public void onComplete(LocalLibraryScanner.ScanProgress progress) {
                 scanning = false;
                 scanPanel.setVisibility(View.GONE);
-                refreshTracks();
+                refreshCurrentScreen();
                 if (progress.errors > 0) {
                     Toast.makeText(
                             NextActivity.this,
@@ -526,6 +723,7 @@ public class NextActivity extends Activity {
     }
 
     private void refreshTrackPreviewDuringScan() {
+        if (screen != Screen.TRACKS) return;
         long now = System.currentTimeMillis();
         if (liveRefreshPending || now - lastLiveRefreshAt < 750L) return;
         liveRefreshPending = true;
@@ -540,7 +738,26 @@ public class NextActivity extends Activity {
         repository.loadTracks(this::showTracks);
     }
 
+    private void refreshCurrentScreen() {
+        if (screen == Screen.FACETS && activeFacetType != null) {
+            showFacets(activeFacetType);
+        } else if (screen == Screen.FACET_TRACKS
+                && activeFacetType != null && activeFacetName != null) {
+            repository.loadTracksForFacet(activeFacetType, activeFacetName, tracks -> {
+                if (screen != Screen.FACET_TRACKS) return;
+                adapter.setTracks(tracks);
+                statusView.setText(getString(R.string.library_facet_tracks, tracks.size()));
+            });
+        } else if (screen == Screen.SEARCH) {
+            scheduleSearch(searchInput.getText().toString());
+        } else {
+            refreshTracks();
+        }
+    }
+
     private void showTracks(List<LocalTrack> tracks) {
+        if (screen != Screen.TRACKS) return;
+        useTrackList();
         adapter.setTracks(tracks);
         boolean empty = tracks.isEmpty();
         emptyAction.setVisibility(empty && !scanning ? View.VISIBLE : View.GONE);
@@ -633,6 +850,14 @@ public class NextActivity extends Activity {
             drawerLayout.closeDrawer(Gravity.START);
             return;
         }
+        if (screen == Screen.FACET_TRACKS && activeFacetType != null) {
+            showFacets(activeFacetType);
+            return;
+        }
+        if (screen != Screen.TRACKS) {
+            showAllTracks();
+            return;
+        }
         super.onBackPressed();
     }
 
@@ -713,6 +938,80 @@ public class NextActivity extends Activity {
         }
     }
 
+    private final class FacetAdapter extends RecyclerView.Adapter<FacetViewHolder> {
+        private final List<LibraryFacet> facets = new ArrayList<>();
+        private final FacetClickListener clickListener;
+
+        FacetAdapter(FacetClickListener clickListener) {
+            this.clickListener = clickListener;
+        }
+
+        void setFacets(List<LibraryFacet> values) {
+            facets.clear();
+            facets.addAll(values);
+            notifyDataSetChanged();
+        }
+
+        @Override
+        public FacetViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            LinearLayout card = new LinearLayout(NextActivity.this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(dp(12), dp(12), dp(12), dp(10));
+            card.setBackgroundColor(color(R.color.bg_secondary));
+            RecyclerView.LayoutParams cardParams = new RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(184)
+            );
+            cardParams.setMargins(dp(4), dp(4), dp(4), dp(4));
+            card.setLayoutParams(cardParams);
+
+            TextView artwork = text("♫", 58, R.color.accent_deep);
+            artwork.setGravity(Gravity.CENTER);
+            artwork.setBackgroundColor(color(R.color.bg_primary));
+            card.addView(artwork, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            ));
+
+            TextView name = text("", 16, R.color.text_primary);
+            name.setTypeface(Typeface.DEFAULT_BOLD);
+            name.setSingleLine(true);
+            card.addView(name, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(32)
+            ));
+            TextView count = text("", 13, R.color.text_secondary);
+            card.addView(count, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(24)
+            ));
+            return new FacetViewHolder(card, artwork, name, count);
+        }
+
+        @Override
+        public void onBindViewHolder(FacetViewHolder holder, int position) {
+            LibraryFacet facet = facets.get(position);
+            holder.artwork.setText(activeFacetType == null ? "♫" : facetIcon(activeFacetType));
+            holder.name.setText(facet.name);
+            holder.count.setText(getString(R.string.library_facet_tracks, facet.trackCount));
+            holder.itemView.setOnClickListener(view -> clickListener.onClick(facet));
+        }
+
+        @Override
+        public int getItemCount() {
+            return facets.size();
+        }
+    }
+
+    private static final class FacetViewHolder extends RecyclerView.ViewHolder {
+        final TextView artwork;
+        final TextView name;
+        final TextView count;
+
+        FacetViewHolder(View itemView, TextView artwork, TextView name, TextView count) {
+            super(itemView);
+            this.artwork = artwork;
+            this.name = name;
+            this.count = count;
+        }
+    }
+
     private static final class TrackViewHolder extends RecyclerView.ViewHolder {
         final TextView title;
         final TextView artist;
@@ -728,5 +1027,9 @@ public class NextActivity extends Activity {
 
     private interface TrackClickListener {
         void onClick(long trackId);
+    }
+
+    private interface FacetClickListener {
+        void onClick(LibraryFacet facet);
     }
 }

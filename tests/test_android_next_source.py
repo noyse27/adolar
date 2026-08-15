@@ -82,6 +82,21 @@ def test_next_respects_system_bars_and_software_keyboard():
     assert "Math.max(bars.bottom, keyboard.bottom)" in activity
 
 
+def test_local_search_and_facets_are_backed_by_room_queries():
+    dao = read("app/src/main/java/net/polze/adolarradio/local/LibraryDao.java")
+    repository = read(
+        "app/src/main/java/net/polze/adolarradio/local/LocalLibraryRepository.java"
+    )
+    activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
+    assert "List<LibraryFacet> getAlbums()" in dao
+    assert "List<LibraryFacet> getArtists()" in dao
+    assert "List<LibraryFacet> getGenres()" in dao
+    assert "INSTR(LOWER(title), LOWER(:query))" in dao
+    assert "loadTracksForFacet" in repository
+    assert "new GridLayoutManager(this, 2)" in activity
+    assert "showSearch()" in activity
+
+
 def test_local_playback_reuses_the_media_service_without_http_cache():
     service = read(
         "app/src/main/java/net/polze/adolarradio/AdolarMediaService.java"

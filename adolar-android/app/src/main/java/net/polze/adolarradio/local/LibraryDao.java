@@ -29,6 +29,44 @@ public interface LibraryDao {
             + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE LIMIT :limit")
     List<LocalTrack> getActiveTrackPreview(int limit);
 
+    @Query("SELECT album AS name, COUNT(*) AS trackCount FROM local_tracks "
+            + "WHERE missing=0 AND album IS NOT NULL AND TRIM(album)!='' "
+            + "GROUP BY album COLLATE NOCASE ORDER BY album COLLATE NOCASE")
+    List<LibraryFacet> getAlbums();
+
+    @Query("SELECT artist AS name, COUNT(*) AS trackCount FROM local_tracks "
+            + "WHERE missing=0 AND artist IS NOT NULL AND TRIM(artist)!='' "
+            + "GROUP BY artist COLLATE NOCASE ORDER BY artist COLLATE NOCASE")
+    List<LibraryFacet> getArtists();
+
+    @Query("SELECT genre AS name, COUNT(*) AS trackCount FROM local_tracks "
+            + "WHERE missing=0 AND genre IS NOT NULL AND TRIM(genre)!='' "
+            + "GROUP BY genre COLLATE NOCASE ORDER BY genre COLLATE NOCASE")
+    List<LibraryFacet> getGenres();
+
+    @Query("SELECT * FROM local_tracks WHERE missing=0 AND ("
+            + "INSTR(LOWER(title), LOWER(:query))>0 OR "
+            + "INSTR(LOWER(artist), LOWER(:query))>0 OR "
+            + "INSTR(LOWER(album), LOWER(:query))>0 OR "
+            + "INSTR(LOWER(genre), LOWER(:query))>0) "
+            + "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, "
+            + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE")
+    List<LocalTrack> searchTracks(String query);
+
+    @Query("SELECT * FROM local_tracks WHERE missing=0 AND album=:name COLLATE NOCASE "
+            + "ORDER BY COALESCE(trackNo, 2147483647), title COLLATE NOCASE")
+    List<LocalTrack> getTracksByAlbum(String name);
+
+    @Query("SELECT * FROM local_tracks WHERE missing=0 AND artist=:name COLLATE NOCASE "
+            + "ORDER BY album COLLATE NOCASE, COALESCE(trackNo, 2147483647), "
+            + "title COLLATE NOCASE")
+    List<LocalTrack> getTracksByArtist(String name);
+
+    @Query("SELECT * FROM local_tracks WHERE missing=0 AND genre=:name COLLATE NOCASE "
+            + "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, "
+            + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE")
+    List<LocalTrack> getTracksByGenre(String name);
+
     @Query("SELECT * FROM local_tracks WHERE rootUri=:rootUri")
     List<LocalTrack> getTracksForRoot(String rootUri);
 

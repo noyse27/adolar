@@ -16,6 +16,14 @@ public final class LocalLibraryRepository {
         void onTracks(List<LocalTrack> tracks);
     }
 
+    public interface FacetsCallback {
+        void onFacets(List<LibraryFacet> facets);
+    }
+
+    public enum FacetType {
+        ALBUM, ARTIST, GENRE
+    }
+
     public interface ScanCallback {
         void onProgress(LocalLibraryScanner.ScanProgress progress);
         void onComplete(LocalLibraryScanner.ScanProgress progress);
@@ -53,6 +61,40 @@ public final class LocalLibraryRepository {
         queryExecutor.execute(() -> loadTracks(true, callback));
     }
 
+    public void searchTracks(String query, TracksCallback callback) {
+        queryExecutor.execute(() -> postTracks(dao.searchTracks(query), callback));
+    }
+
+    public void loadFacets(FacetType type, FacetsCallback callback) {
+        queryExecutor.execute(() -> {
+            List<LibraryFacet> facets;
+            if (type == FacetType.ALBUM) {
+                facets = dao.getAlbums();
+            } else if (type == FacetType.ARTIST) {
+                facets = dao.getArtists();
+            } else {
+                facets = dao.getGenres();
+            }
+            mainHandler.post(() -> callback.onFacets(facets));
+        });
+    }
+
+    public void loadTracksForFacet(
+            FacetType type, String name, TracksCallback callback
+    ) {
+        queryExecutor.execute(() -> {
+            List<LocalTrack> tracks;
+            if (type == FacetType.ALBUM) {
+                tracks = dao.getTracksByAlbum(name);
+            } else if (type == FacetType.ARTIST) {
+                tracks = dao.getTracksByArtist(name);
+            } else {
+                tracks = dao.getTracksByGenre(name);
+            }
+            postTracks(tracks, callback);
+        });
+    }
+
     private void loadTracks(boolean preview, TracksCallback callback) {
         List<LocalTrack> tracks;
         try {
@@ -61,6 +103,11 @@ public final class LocalLibraryRepository {
             tracks = Collections.emptyList();
         }
         List<LocalTrack> result = tracks;
+        mainHandler.post(() -> callback.onTracks(result));
+    }
+
+    private void postTracks(List<LocalTrack> tracks, TracksCallback callback) {
+        List<LocalTrack> result = tracks == null ? Collections.emptyList() : tracks;
         mainHandler.post(() -> callback.onTracks(result));
     }
 
