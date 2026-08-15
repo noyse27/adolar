@@ -118,6 +118,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     private final Runnable crossfadeMonitor = new Runnable() {
         @Override
         public void run() {
+            maybeRecordLocalPlay();
             if (!crossfadeActive && player != null && player.isPlaying()
                     && preloadedTrack != null
                     && preloadPlayer.getPlaybackState() == Player.STATE_READY) {
@@ -855,10 +856,27 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         if (track == null) {
             return;
         }
+        maybeRecordLocalPlay();
         sendListeningEvent(
                 track, completed ? "completed" : "skipped", reason, player.getCurrentPosition(), track.durationMs
         );
         currentTrack = null;
+    }
+
+    private void maybeRecordLocalPlay() {
+        Track track = currentTrack;
+        if (track == null || !track.local || track.localPlayCountRecorded || player == null) {
+            return;
+        }
+        long duration = track.durationMs > 0 ? track.durationMs : player.getDuration();
+        if (duration <= 0 || duration == C.TIME_UNSET) return;
+        long position = Math.max(0L, player.getCurrentPosition());
+        if (position < Math.round(duration * 0.9d)) return;
+        track.localPlayCountRecorded = true;
+        long localTrackId = track.localId;
+        new Thread(() -> LocalLibraryDatabase.get(this).libraryDao()
+                .recordCompletedPlay(localTrackId, System.currentTimeMillis()),
+                "AdolarLocalPlayCount").start();
     }
 
     private void rememberCurrentTrack() {
@@ -1066,6 +1084,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         int id;
         long localId;
         boolean local;
+        boolean localPlayCountRecorded;
         String localDocumentUri;
         String title;
         String artist;

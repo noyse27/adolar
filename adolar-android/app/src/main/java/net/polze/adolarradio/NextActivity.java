@@ -2,6 +2,7 @@ package net.polze.adolarradio;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -44,13 +45,16 @@ import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import net.polze.adolarradio.local.LibraryFacet;
+import net.polze.adolarradio.local.LocalPlaylist;
 import net.polze.adolarradio.local.LocalLibraryRepository;
 import net.polze.adolarradio.local.LocalLibraryRepository.FacetType;
 import net.polze.adolarradio.local.LocalLibraryScanner;
 import net.polze.adolarradio.local.LocalTrack;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Offline-first launcher and local-library shell for Adolar Next. */
 public class NextActivity extends Activity {
@@ -62,6 +66,7 @@ public class NextActivity extends Activity {
     private RecyclerView trackList;
     private TrackAdapter adapter;
     private FacetAdapter facetAdapter;
+    private PlaylistAdapter playlistAdapter;
     private TextView toolbarIcon;
     private TextView toolbarTitle;
     private Button toolbarSearch;
@@ -88,9 +93,11 @@ public class NextActivity extends Activity {
     private Screen screen = Screen.TRACKS;
     private FacetType activeFacetType;
     private String activeFacetName;
+    private LocalPlaylist activePlaylist;
+    private final Set<Long> favoriteTrackIds = new HashSet<>();
 
     private enum Screen {
-        TRACKS, SEARCH, FACETS, FACET_TRACKS
+        TRACKS, SEARCH, FACETS, FACET_TRACKS, PLAYLISTS, PLAYLIST_TRACKS
     }
 
     private final MediaBrowserCompat.ConnectionCallback browserCallback =
@@ -152,6 +159,7 @@ public class NextActivity extends Activity {
         repository = LocalLibraryRepository.get(this);
         requestNotificationPermissionIfNeeded();
         buildUi();
+        refreshFavoriteIds();
         refreshTracks();
     }
 
@@ -226,6 +234,7 @@ public class NextActivity extends Activity {
         trackList.setHasFixedSize(true);
         adapter = new TrackAdapter(this::playLocalTrack);
         facetAdapter = new FacetAdapter(this::openFacet);
+        playlistAdapter = new PlaylistAdapter(this::openPlaylist);
         trackList.setAdapter(adapter);
         libraryFrame.addView(trackList, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
@@ -368,9 +377,14 @@ public class NextActivity extends Activity {
         ));
 
         addDrawerHeading(drawer, "SCHNELLZUGRIFF");
-        addPendingDrawerItem(drawer, R.string.library_drawer_favorites);
-        addPendingDrawerItem(drawer, R.string.library_drawer_recently_added);
-        addPendingDrawerItem(drawer, R.string.library_drawer_most_played);
+        addSystemDrawerItem(drawer, R.string.library_drawer_favorites, "favorites");
+        addSystemDrawerItem(drawer, R.string.library_drawer_recently_added, "recently_added");
+        addSystemDrawerItem(drawer, R.string.library_drawer_most_played, "most_played");
+        addSystemDrawerItem(
+                drawer, R.string.library_drawer_recently_played, "recently_played"
+        );
+        addSystemDrawerItem(drawer, R.string.library_drawer_least_played, "least_played");
+        addSystemDrawerItem(drawer, R.string.library_drawer_never_played, "never_played");
 
         addDrawerHeading(drawer, "BIBLIOTHEK");
         addDrawerItem(drawer, getString(R.string.library_drawer_search), view -> {
@@ -389,7 +403,10 @@ public class NextActivity extends Activity {
             drawerLayout.closeDrawer(Gravity.START);
             showFacets(FacetType.GENRE);
         });
-        addPendingDrawerItem(drawer, R.string.library_drawer_playlists);
+        addDrawerItem(drawer, getString(R.string.library_drawer_playlists), view -> {
+            drawerLayout.closeDrawer(Gravity.START);
+            showPlaylists();
+        });
         addDrawerItem(drawer, getString(R.string.library_drawer_folders), view -> {
             drawerLayout.closeDrawer(Gravity.START);
             chooseMusicFolder();
@@ -430,6 +447,15 @@ public class NextActivity extends Activity {
 
     private void showOverflow(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
+        if (screen == Screen.PLAYLISTS) {
+            menu.getMenu().add(getString(R.string.playlist_new));
+            menu.setOnMenuItemClickListener(item -> {
+                showCreatePlaylistChoice();
+                return true;
+            });
+            menu.show();
+            return;
+        }
         menu.getMenu().add(getString(R.string.library_choose_folder));
         menu.getMenu().add(getString(R.string.library_rescan));
         menu.getMenu().add(getString(R.string.library_open_radios));
@@ -462,6 +488,13 @@ public class NextActivity extends Activity {
         });
     }
 
+    private void addSystemDrawerItem(LinearLayout drawer, int label, String systemKey) {
+        addDrawerItem(drawer, getString(label), view -> {
+            drawerLayout.closeDrawer(Gravity.START);
+            openSystemPlaylist(systemKey);
+        });
+    }
+
     private void addDrawerItem(LinearLayout drawer, String label, View.OnClickListener listener) {
         Button item = new Button(this);
         item.setText(label);
@@ -480,10 +513,11 @@ public class NextActivity extends Activity {
         screen = Screen.TRACKS;
         activeFacetType = null;
         activeFacetName = null;
+        activePlaylist = null;
         hideSearchInput();
         toolbarIcon.setText("♫");
         toolbarTitle.setText(R.string.library_tracks);
-        toolbarSearch.setVisibility(View.VISIBLE);
+        setToolbarSearchAction();
         useTrackList();
         refreshTracks();
     }
@@ -492,6 +526,7 @@ public class NextActivity extends Activity {
         screen = Screen.SEARCH;
         activeFacetType = null;
         activeFacetName = null;
+        activePlaylist = null;
         toolbarIcon.setText("⌕");
         toolbarTitle.setText(R.string.library_drawer_search);
         toolbarSearch.setVisibility(View.GONE);
@@ -535,10 +570,11 @@ public class NextActivity extends Activity {
         screen = Screen.FACETS;
         activeFacetType = type;
         activeFacetName = null;
+        activePlaylist = null;
         hideSearchInput();
         toolbarIcon.setText(facetIcon(type));
         toolbarTitle.setText(facetTitle(type));
-        toolbarSearch.setVisibility(View.VISIBLE);
+        setToolbarSearchAction();
         emptyAction.setVisibility(View.GONE);
         scanPanel.setVisibility(View.GONE);
         trackList.setLayoutManager(new GridLayoutManager(this, 2));
@@ -562,7 +598,7 @@ public class NextActivity extends Activity {
         hideSearchInput();
         toolbarIcon.setText(facetIcon(type));
         toolbarTitle.setText(facet.name);
-        toolbarSearch.setVisibility(View.VISIBLE);
+        setToolbarSearchAction();
         useTrackList();
         adapter.setTracks(new ArrayList<>());
         statusView.setText(R.string.library_loading);
@@ -573,9 +609,193 @@ public class NextActivity extends Activity {
         });
     }
 
+    private void showPlaylists() {
+        screen = Screen.PLAYLISTS;
+        activeFacetType = null;
+        activeFacetName = null;
+        activePlaylist = null;
+        hideSearchInput();
+        toolbarIcon.setText("▤");
+        toolbarTitle.setText(R.string.library_drawer_playlists);
+        toolbarSearch.setVisibility(View.VISIBLE);
+        toolbarSearch.setText("+");
+        toolbarSearch.setOnClickListener(view -> showCreatePlaylistChoice());
+        emptyAction.setVisibility(View.GONE);
+        scanPanel.setVisibility(View.GONE);
+        trackList.setLayoutManager(new LinearLayoutManager(this));
+        trackList.setAdapter(playlistAdapter);
+        playlistAdapter.setPlaylists(new ArrayList<>());
+        statusView.setText(R.string.library_loading);
+        repository.loadPlaylists(playlists -> {
+            if (screen != Screen.PLAYLISTS) return;
+            playlistAdapter.setPlaylists(playlists);
+            statusView.setText(getString(R.string.library_facet_count, playlists.size()));
+        });
+    }
+
+    private void openSystemPlaylist(String systemKey) {
+        repository.loadPlaylists(playlists -> {
+            for (LocalPlaylist playlist : playlists) {
+                if (systemKey.equals(playlist.systemKey)) {
+                    openPlaylist(playlist);
+                    return;
+                }
+            }
+            Toast.makeText(this, R.string.library_no_facets, Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    private void openPlaylist(LocalPlaylist playlist) {
+        screen = Screen.PLAYLIST_TRACKS;
+        activePlaylist = playlist;
+        activeFacetType = null;
+        activeFacetName = null;
+        hideSearchInput();
+        toolbarIcon.setText(playlist.isSystem ? "★" : "▤");
+        toolbarTitle.setText(playlist.name);
+        setToolbarSearchAction();
+        useTrackList();
+        adapter.setTracks(new ArrayList<>());
+        emptyAction.setVisibility(View.GONE);
+        scanPanel.setVisibility(View.GONE);
+        statusView.setText(R.string.library_loading);
+        repository.loadPlaylistTracks(playlist, tracks -> {
+            if (screen != Screen.PLAYLIST_TRACKS || activePlaylist != playlist) return;
+            adapter.setTracks(tracks);
+            statusView.setText(tracks.isEmpty()
+                    ? getString(R.string.playlist_empty)
+                    : getString(R.string.library_facet_tracks, tracks.size()));
+        });
+    }
+
+    private void showCreatePlaylistChoice() {
+        String[] types = {
+                getString(R.string.playlist_standard),
+                getString(R.string.playlist_smart)
+        };
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.playlist_new)
+                .setItems(types, (dialog, which) -> showCreatePlaylistDialog(which == 1))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void showCreatePlaylistDialog(boolean smart) {
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(24), dp(8), dp(24), 0);
+        EditText name = new EditText(this);
+        name.setHint(R.string.playlist_name_hint);
+        form.addView(name, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        EditText rule = null;
+        if (smart) {
+            rule = new EditText(this);
+            rule.setHint(R.string.playlist_rule_hint);
+            rule.setMinLines(2);
+            form.addView(rule, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ));
+        }
+        EditText finalRule = rule;
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(smart ? R.string.playlist_smart : R.string.playlist_standard)
+                .setView(form)
+                .setPositiveButton(R.string.playlist_create, null)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(view -> repository.createPlaylist(
+                        name.getText().toString(),
+                        smart ? finalRule.getText().toString() : null,
+                        (success, message) -> {
+                            if (!success) {
+                                final EditText errorTarget = smart ? finalRule : name;
+                                errorTarget.setError(message);
+                                return;
+                            }
+                            dialog.dismiss();
+                            Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+                            showPlaylists();
+                        }
+                )));
+        dialog.show();
+    }
+
+    private void showAddToPlaylist(LocalTrack track) {
+        repository.loadPlaylists(playlists -> {
+            List<LocalPlaylist> writable = new ArrayList<>();
+            for (LocalPlaylist playlist : playlists) {
+                if (!playlist.isSystem && "static".equals(playlist.type)) writable.add(playlist);
+            }
+            if (writable.isEmpty()) {
+                Toast.makeText(this, R.string.playlist_no_static, Toast.LENGTH_LONG).show();
+                return;
+            }
+            String[] names = new String[writable.size()];
+            for (int index = 0; index < writable.size(); index++) {
+                names[index] = writable.get(index).name;
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.playlist_add_track)
+                    .setItems(names, (dialog, which) -> repository.addTrackToPlaylist(
+                            writable.get(which).id,
+                            track.id,
+                            (success, message) -> Toast.makeText(
+                                    this, message, Toast.LENGTH_SHORT
+                            ).show()
+                    ))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        });
+    }
+
+    private void showTrackActions(LocalTrack track) {
+        boolean favorite = favoriteTrackIds.contains(track.id);
+        String[] actions = {
+                favorite ? "Nicht mehr lieben" : "Lieben",
+                getString(R.string.playlist_add_track)
+        };
+        new AlertDialog.Builder(this)
+                .setTitle(track.title)
+                .setItems(actions, (dialog, which) -> {
+                    if (which == 0) {
+                        repository.setFavorite(track.id, !favorite, (success, message) -> {
+                            if (!success) return;
+                            if (favorite) favoriteTrackIds.remove(track.id);
+                            else favoriteTrackIds.add(track.id);
+                            adapter.notifyDataSetChanged();
+                            Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+                            if (screen == Screen.PLAYLIST_TRACKS && activePlaylist != null
+                                    && "favorites".equals(activePlaylist.systemKey)) {
+                                openPlaylist(activePlaylist);
+                            }
+                        });
+                    } else {
+                        showAddToPlaylist(track);
+                    }
+                })
+                .show();
+    }
+
+    private void refreshFavoriteIds() {
+        repository.loadFavoriteIds(ids -> {
+            favoriteTrackIds.clear();
+            favoriteTrackIds.addAll(ids);
+            adapter.notifyDataSetChanged();
+        });
+    }
+
     private void useTrackList() {
         trackList.setLayoutManager(new LinearLayoutManager(this));
         trackList.setAdapter(adapter);
+    }
+
+    private void setToolbarSearchAction() {
+        toolbarSearch.setVisibility(View.VISIBLE);
+        toolbarSearch.setText("⌕");
+        toolbarSearch.setOnClickListener(view -> showSearch());
     }
 
     private void hideSearchInput() {
@@ -750,6 +970,10 @@ public class NextActivity extends Activity {
             });
         } else if (screen == Screen.SEARCH) {
             scheduleSearch(searchInput.getText().toString());
+        } else if (screen == Screen.PLAYLISTS) {
+            showPlaylists();
+        } else if (screen == Screen.PLAYLIST_TRACKS && activePlaylist != null) {
+            openPlaylist(activePlaylist);
         } else {
             refreshTracks();
         }
@@ -854,6 +1078,10 @@ public class NextActivity extends Activity {
             showFacets(activeFacetType);
             return;
         }
+        if (screen == Screen.PLAYLIST_TRACKS) {
+            showPlaylists();
+            return;
+        }
         if (screen != Screen.TRACKS) {
             showAllTracks();
             return;
@@ -926,10 +1154,15 @@ public class NextActivity extends Activity {
         @Override
         public void onBindViewHolder(TrackViewHolder holder, int position) {
             LocalTrack track = tracks.get(position);
-            holder.title.setText(track.title);
+            holder.title.setText(favoriteTrackIds.contains(track.id)
+                    ? "★ " + track.title : track.title);
             holder.artist.setText(track.artist);
             holder.duration.setText(formatDuration(track.durationSeconds));
             holder.itemView.setOnClickListener(view -> clickListener.onClick(track.id));
+            holder.itemView.setOnLongClickListener(view -> {
+                showTrackActions(track);
+                return true;
+            });
         }
 
         @Override
@@ -999,6 +1232,75 @@ public class NextActivity extends Activity {
         }
     }
 
+    private final class PlaylistAdapter extends RecyclerView.Adapter<PlaylistViewHolder> {
+        private final List<LocalPlaylist> playlists = new ArrayList<>();
+        private final PlaylistClickListener clickListener;
+
+        PlaylistAdapter(PlaylistClickListener clickListener) {
+            this.clickListener = clickListener;
+        }
+
+        void setPlaylists(List<LocalPlaylist> values) {
+            playlists.clear();
+            playlists.addAll(values);
+            notifyDataSetChanged();
+        }
+
+        @Override
+        public PlaylistViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            LinearLayout row = new LinearLayout(NextActivity.this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(16), dp(8), dp(12), dp(8));
+            row.setBackgroundColor(color(R.color.bg_secondary));
+
+            TextView icon = text("▤", 30, R.color.accent);
+            icon.setGravity(Gravity.CENTER);
+            row.addView(icon, new LinearLayout.LayoutParams(dp(52), dp(64)));
+            LinearLayout labels = new LinearLayout(NextActivity.this);
+            labels.setOrientation(LinearLayout.VERTICAL);
+            TextView name = text("", 17, R.color.text_primary);
+            name.setTypeface(Typeface.DEFAULT_BOLD);
+            TextView type = text("", 13, R.color.text_secondary);
+            labels.addView(name);
+            labels.addView(type);
+            row.addView(labels, new LinearLayout.LayoutParams(0, dp(64), 1f));
+            TextView arrow = text("›", 30, R.color.text_secondary);
+            arrow.setGravity(Gravity.CENTER);
+            row.addView(arrow, new LinearLayout.LayoutParams(dp(40), dp(64)));
+            return new PlaylistViewHolder(row, icon, name, type);
+        }
+
+        @Override
+        public void onBindViewHolder(PlaylistViewHolder holder, int position) {
+            LocalPlaylist playlist = playlists.get(position);
+            holder.icon.setText(playlist.isSystem ? "★" : "▤");
+            holder.name.setText(playlist.name);
+            holder.type.setText(playlist.isSystem
+                    ? "Systemliste"
+                    : "smart".equals(playlist.type) ? "Intelligent" : "Standard");
+            holder.itemView.setOnClickListener(view -> clickListener.onClick(playlist));
+        }
+
+        @Override
+        public int getItemCount() {
+            return playlists.size();
+        }
+    }
+
+    private static final class PlaylistViewHolder extends RecyclerView.ViewHolder {
+        final TextView icon;
+        final TextView name;
+        final TextView type;
+
+        PlaylistViewHolder(View itemView, TextView icon, TextView name, TextView type) {
+            super(itemView);
+            this.icon = icon;
+            this.name = name;
+            this.type = type;
+        }
+    }
+
     private static final class FacetViewHolder extends RecyclerView.ViewHolder {
         final TextView artwork;
         final TextView name;
@@ -1031,5 +1333,9 @@ public class NextActivity extends Activity {
 
     private interface FacetClickListener {
         void onClick(LibraryFacet facet);
+    }
+
+    private interface PlaylistClickListener {
+        void onClick(LocalPlaylist playlist);
     }
 }

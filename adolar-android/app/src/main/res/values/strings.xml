@@ -76,6 +76,9 @@
     <string name="library_drawer_favorites">Favoriten</string>
     <string name="library_drawer_recently_added">Kürzlich hinzugefügt</string>
     <string name="library_drawer_most_played">Häufig gespielt</string>
+    <string name="library_drawer_recently_played">Kürzlich gespielt</string>
+    <string name="library_drawer_least_played">Selten gespielt</string>
+    <string name="library_drawer_never_played">Nie gespielt</string>
     <string name="library_drawer_search">Suche</string>
     <string name="library_drawer_albums">Alben</string>
     <string name="library_drawer_artists">Interpreten</string>
@@ -93,4 +96,13 @@
     <string name="library_facet_tracks">%1$d Titel</string>
     <string name="library_no_facets">Keine passenden Einträge vorhanden.</string>
     <string name="library_loading">Wird geladen …</string>
+    <string name="playlist_new">Neue Playlist</string>
+    <string name="playlist_standard">Standard-Playlist</string>
+    <string name="playlist_smart">Intelligente Playlist</string>
+    <string name="playlist_name_hint">Name der Playlist</string>
+    <string name="playlist_rule_hint">z. B. Genre ist Rock und Jahr größer als 1990</string>
+    <string name="playlist_create">Erstellen</string>
+    <string name="playlist_add_track">Zu Playlist hinzufügen</string>
+    <string name="playlist_no_static">Noch keine Standard-Playlist vorhanden.</string>
+    <string name="playlist_empty">Diese Playlist enthält noch keine Titel.</string>
 </resources>

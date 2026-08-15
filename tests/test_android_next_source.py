@@ -97,6 +97,52 @@ def test_local_search_and_facets_are_backed_by_room_queries():
     assert "showSearch()" in activity
 
 
+def test_playlists_use_schema_two_and_a_non_destructive_migration():
+    database = read(
+        "app/src/main/java/net/polze/adolarradio/local/LocalLibraryDatabase.java"
+    )
+    dao = read("app/src/main/java/net/polze/adolarradio/local/LibraryDao.java")
+    assert "version = 2" in database
+    assert "MIGRATION_1_2" in database
+    assert ".addMigrations(MIGRATION_1_2)" in database
+    assert "fallbackToDestructiveMigration" not in database
+    assert "getStaticPlaylistTracks" in dao
+    assert "getNeverPlayedTracks" in dao
+
+
+def test_smart_playlists_store_a_versioned_filter_tree():
+    smart_filter = read(
+        "app/src/main/java/net/polze/adolarradio/local/SmartFilter.java"
+    )
+    repository = read(
+        "app/src/main/java/net/polze/adolarradio/local/LocalLibraryRepository.java"
+    )
+    activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
+    assert 'saved.put("editor_version", 1)' in smart_filter
+    assert 'saved.put("rules", tree)' in smart_filter
+    for field in ("title", "album", "artist", "genre", "year", "decade", "playcount"):
+        assert f'"{field}"' in smart_filter
+    assert "SmartFilter.filter" in repository
+    assert "showCreatePlaylistChoice" in activity
+    assert "showAddToPlaylist" in activity
+
+
+def test_local_favorites_and_playcounts_feed_system_lists():
+    dao = read("app/src/main/java/net/polze/adolarradio/local/LibraryDao.java")
+    activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
+    service = read(
+        "app/src/main/java/net/polze/adolarradio/AdolarMediaService.java"
+    )
+    assert "void setFavorite(long trackId, boolean favorite)" in dao
+    assert "void recordCompletedPlay(long trackId, long playedAt)" in dao
+    assert "getMostPlayedTracks" in dao
+    assert "getRecentlyPlayedTracks" in dao
+    assert "getLeastPlayedTracks" in dao
+    assert "showTrackActions" in activity
+    assert "maybeRecordLocalPlay" in service
+    assert "duration * 0.9d" in service
+
+
 def test_local_playback_reuses_the_media_service_without_http_cache():
     service = read(
         "app/src/main/java/net/polze/adolarradio/AdolarMediaService.java"
