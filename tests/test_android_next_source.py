@@ -46,6 +46,20 @@ def test_local_library_uses_room_and_persisted_tree_access():
     assert "markUnseenMissing" in scanner
 
 
+def test_local_scan_uses_android_media_index_with_saf_fallback():
+    manifest = read("app/src/main/AndroidManifest.xml")
+    activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
+    scanner = read(
+        "app/src/main/java/net/polze/adolarradio/local/LocalLibraryScanner.java"
+    )
+    assert "android.permission.READ_MEDIA_AUDIO" in manifest
+    assert "REQUEST_MEDIA_PERMISSION" in activity
+    assert "MediaStore.Audio.Media.getContentUri" in scanner
+    assert "MediaStore.Audio.Media.RELATIVE_PATH" in scanner
+    assert "buildChildDocumentsUriUsingTree" in scanner
+    assert "Already handled by the MediaStore cursor" in scanner
+
+
 def test_local_playback_reuses_the_media_service_without_http_cache():
     service = read(
         "app/src/main/java/net/polze/adolarradio/AdolarMediaService.java"

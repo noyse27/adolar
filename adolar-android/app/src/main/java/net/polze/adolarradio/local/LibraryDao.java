@@ -24,6 +24,9 @@ public interface LibraryDao {
             + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE")
     List<LocalTrack> getActiveTracks();
 
+    @Query("SELECT * FROM local_tracks WHERE rootUri=:rootUri")
+    List<LocalTrack> getTracksForRoot(String rootUri);
+
     @Query("SELECT * FROM local_tracks WHERE id=:id LIMIT 1")
     LocalTrack getTrack(long id);
 

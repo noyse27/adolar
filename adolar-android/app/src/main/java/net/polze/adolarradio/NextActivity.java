@@ -41,6 +41,7 @@ import java.util.List;
 /** Offline-first launcher and local-library shell for Adolar Next. */
 public class NextActivity extends Activity {
     private static final int REQUEST_MUSIC_TREE = 2001;
+    private static final int REQUEST_MEDIA_PERMISSION = 2002;
     private static final String LOCAL_TRACK_PREFIX = "local:";
 
     private DrawerLayout drawerLayout;
@@ -55,6 +56,8 @@ public class NextActivity extends Activity {
     private MediaBrowserCompat mediaBrowser;
     private MediaControllerCompat mediaController;
     private Long pendingTrackId;
+    private Uri pendingScanUri;
+    private boolean pendingScanAll;
     private boolean scanning;
 
     private final MediaBrowserCompat.ConnectionCallback browserCallback =
@@ -374,7 +377,47 @@ public class NextActivity extends Activity {
             Toast.makeText(this, R.string.library_scan_failed, Toast.LENGTH_LONG).show();
             return;
         }
-        scanRoot(treeUri);
+        requestFastScanPermissionThenScan(treeUri, false);
+    }
+
+    private void requestFastScanPermissionThenScan(Uri treeUri, boolean allRoots) {
+        String permission = null;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permission = Manifest.permission.READ_MEDIA_AUDIO;
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            permission = Manifest.permission.READ_EXTERNAL_STORAGE;
+        }
+        if (permission != null && ContextCompat.checkSelfPermission(this, permission)
+                != PackageManager.PERMISSION_GRANTED) {
+            pendingScanUri = treeUri;
+            pendingScanAll = allRoots;
+            requestPermissions(new String[]{permission}, REQUEST_MEDIA_PERMISSION);
+            return;
+        }
+        if (allRoots) {
+            scanAllNow();
+        } else {
+            scanRoot(treeUri);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode, String[] permissions, int[] grantResults
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_MEDIA_PERMISSION) return;
+        Uri scanUri = pendingScanUri;
+        boolean allRoots = pendingScanAll;
+        pendingScanUri = null;
+        pendingScanAll = false;
+        // A refusal only disables the MediaStore acceleration. The persisted
+        // folder grant still permits the complete, slower SAF scan.
+        if (allRoots) {
+            scanAllNow();
+        } else if (scanUri != null) {
+            scanRoot(scanUri);
+        }
     }
 
     private void scanRoot(Uri treeUri) {
@@ -386,6 +429,10 @@ public class NextActivity extends Activity {
     }
 
     private void scanAll() {
+        requestFastScanPermissionThenScan(null, true);
+    }
+
+    private void scanAllNow() {
         if (scanning) return;
         scanning = true;
         emptyAction.setEnabled(false);
