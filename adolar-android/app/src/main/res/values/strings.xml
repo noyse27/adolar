@@ -24,6 +24,11 @@
     <string name="play">▶</string>
     <string name="pause">Ⅱ</string>
     <string name="next">⏭</string>
+    <string name="navigation_open">Navigation öffnen</string>
+    <string name="navigate_back">Zurück</string>
+    <string name="previous_track">Vorheriger Titel</string>
+    <string name="next_track">Nächster Titel</string>
+    <string name="now_playing_toggle">Wiedergabe umschalten</string>
     <string name="stop">■</string>
     <string name="status_connecting">Verbindung zum Player wird hergestellt …</string>
     <string name="status_connection_error">Player konnte nicht verbunden werden.</string>

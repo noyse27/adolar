@@ -89,6 +89,18 @@ def test_next_respects_system_bars_and_software_keyboard():
     assert "WindowInsetsCompat.Type.displayCutout()" in activity
     assert "WindowInsetsCompat.Type.ime()" in activity
     assert "Math.max(bars.bottom, keyboard.bottom)" in activity
+    assert "contentContainer.setPadding(" in activity
+    assert "view.setPadding(" not in activity
+
+
+def test_library_exposes_navigation_and_complete_mini_player_controls():
+    activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
+    assert "drawerLayout.openDrawer(Gravity.START)" in activity
+    assert "toolbarBack.setVisibility(View.VISIBLE)" in activity
+    assert "skipPlayback(-1)" in activity
+    assert "skipPlayback(1)" in activity
+    assert "adjacentTrackId" in activity
+    assert "miniPlayPause" in activity
 
 
 def test_local_search_and_facets_are_backed_by_room_queries():

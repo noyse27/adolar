@@ -63,12 +63,15 @@ public class NextActivity extends Activity {
     private static final String LOCAL_TRACK_PREFIX = "local:";
 
     private DrawerLayout drawerLayout;
+    private LinearLayout contentContainer;
+    private View drawerView;
     private RecyclerView trackList;
     private TrackAdapter adapter;
     private FacetAdapter facetAdapter;
     private PlaylistAdapter playlistAdapter;
     private TextView toolbarIcon;
     private TextView toolbarTitle;
+    private TextView toolbarBack;
     private Button toolbarSearch;
     private EditText searchInput;
     private TextView statusView;
@@ -77,7 +80,7 @@ public class NextActivity extends Activity {
     private TextView scanPanelText;
     private TextView miniTitle;
     private TextView miniArtist;
-    private Button miniPlayPause;
+    private TextView miniPlayPause;
     private LocalLibraryRepository repository;
     private MediaBrowserCompat mediaBrowser;
     private MediaControllerCompat mediaController;
@@ -180,6 +183,7 @@ public class NextActivity extends Activity {
         drawerLayout.setBackgroundColor(color(R.color.bg_tertiary));
 
         LinearLayout content = new LinearLayout(this);
+        contentContainer = content;
         content.setOrientation(LinearLayout.VERTICAL);
         content.setBackgroundColor(color(R.color.bg_tertiary));
         DrawerLayout.LayoutParams contentParams = new DrawerLayout.LayoutParams(
@@ -278,6 +282,7 @@ public class NextActivity extends Activity {
         ));
 
         View drawer = buildDrawer();
+        drawerView = drawer;
         DrawerLayout.LayoutParams drawerParams = new DrawerLayout.LayoutParams(
                 Math.min(dp(320), getResources().getDisplayMetrics().widthPixels - dp(48)),
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -296,12 +301,16 @@ public class NextActivity extends Activity {
                             | WindowInsetsCompat.Type.displayCutout()
             );
             Insets keyboard = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
-            view.setPadding(
+            // DrawerLayout measures its children independently of its own padding.
+            // Insets therefore belong on the content child; padding the drawer root
+            // pushed the toolbar behind the status bar and the player behind nav/IME.
+            contentContainer.setPadding(
                     bars.left,
                     bars.top,
                     bars.right,
                     Math.max(bars.bottom, keyboard.bottom)
             );
+            drawerView.setPadding(bars.left, bars.top, bars.right, bars.bottom);
             return windowInsets;
         });
         ViewCompat.requestApplyInsets(drawerLayout);
@@ -322,13 +331,20 @@ public class NextActivity extends Activity {
         rocket.setImageResource(R.drawable.ic_launcher_foreground);
         rocket.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
         rocket.setBackgroundColor(Color.TRANSPARENT);
-        rocket.setContentDescription(getString(R.string.app_name));
+        rocket.setContentDescription(getString(R.string.navigation_open));
         rocket.setOnClickListener(view -> drawerLayout.openDrawer(Gravity.START));
         toolbar.addView(rocket, new LinearLayout.LayoutParams(dp(52), dp(52)));
 
-        toolbarIcon = text("♫", 30, R.color.accent);
+        toolbarBack = text("‹", 36, R.color.text_primary);
+        toolbarBack.setGravity(Gravity.CENTER);
+        toolbarBack.setVisibility(View.GONE);
+        toolbarBack.setContentDescription(getString(R.string.navigate_back));
+        toolbarBack.setOnClickListener(view -> onBackPressed());
+        toolbar.addView(toolbarBack, new LinearLayout.LayoutParams(dp(42), dp(52)));
+
+        toolbarIcon = text("♫", 26, R.color.accent);
         toolbarIcon.setGravity(Gravity.CENTER);
-        toolbar.addView(toolbarIcon, new LinearLayout.LayoutParams(dp(48), dp(52)));
+        toolbar.addView(toolbarIcon, new LinearLayout.LayoutParams(dp(42), dp(52)));
 
         toolbarTitle = text(getString(R.string.library_tracks), 24, R.color.text_primary);
         toolbarTitle.setTypeface(Typeface.DEFAULT_BOLD);
@@ -437,27 +453,66 @@ public class NextActivity extends Activity {
 
     private View buildMiniPlayer() {
         LinearLayout mini = new LinearLayout(this);
-        mini.setOrientation(LinearLayout.HORIZONTAL);
-        mini.setGravity(Gravity.CENTER_VERTICAL);
-        mini.setPadding(dp(16), dp(6), dp(8), dp(6));
+        mini.setOrientation(LinearLayout.VERTICAL);
         mini.setBackgroundColor(color(R.color.bg_primary));
+
+        View divider = new View(this);
+        divider.setBackgroundColor(color(R.color.accent_deep));
+        mini.addView(divider, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(2)
+        ));
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setGravity(Gravity.CENTER_VERTICAL);
+        controls.setPadding(dp(12), dp(4), dp(6), dp(4));
         LinearLayout labels = new LinearLayout(this);
         labels.setOrientation(LinearLayout.VERTICAL);
+        labels.setGravity(Gravity.CENTER_VERTICAL);
         miniTitle = text(getString(R.string.library_now_playing_empty), 16, R.color.text_primary);
         miniTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        miniTitle.setSingleLine(true);
         miniArtist = text("Adolar Next", 13, R.color.text_secondary);
+        miniArtist.setSingleLine(true);
         labels.addView(miniTitle);
         labels.addView(miniArtist);
-        mini.addView(labels, new LinearLayout.LayoutParams(0, dp(60), 1f));
+        labels.setContentDescription(getString(R.string.now_playing_toggle));
+        labels.setOnClickListener(view -> togglePlayback());
+        controls.addView(labels, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
-        miniPlayPause = new Button(this);
-        miniPlayPause.setText(R.string.play);
-        miniPlayPause.setTextSize(20);
-        miniPlayPause.setTextColor(Color.WHITE);
-        miniPlayPause.setBackgroundColor(color(R.color.accent_deep));
-        miniPlayPause.setOnClickListener(view -> togglePlayback());
-        mini.addView(miniPlayPause, new LinearLayout.LayoutParams(dp(56), dp(56)));
+        controls.addView(playerButton(
+                getString(R.string.previous), R.string.previous_track,
+                false, view -> skipPlayback(-1)
+        ), new LinearLayout.LayoutParams(dp(44), dp(52)));
+        miniPlayPause = playerButton(
+                getString(R.string.play), R.string.play, true, view -> togglePlayback()
+        );
+        controls.addView(miniPlayPause, new LinearLayout.LayoutParams(dp(52), dp(52)));
+        controls.addView(playerButton(
+                getString(R.string.next), R.string.next_track,
+                false, view -> skipPlayback(1)
+        ), new LinearLayout.LayoutParams(dp(44), dp(52)));
+        mini.addView(controls, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+        ));
         return mini;
+    }
+
+    private TextView playerButton(
+            String label,
+            int description,
+            boolean primary,
+            View.OnClickListener listener
+    ) {
+        TextView button = text(label, 20, R.color.text_primary);
+        button.setGravity(Gravity.CENTER);
+        button.setBackgroundColor(primary ? color(R.color.accent_deep) : Color.TRANSPARENT);
+        button.setContentDescription(getString(description));
+        button.setClickable(true);
+        button.setFocusable(true);
+        button.setOnClickListener(listener);
+        return button;
     }
 
     private void showOverflow(View anchor) {
@@ -530,6 +585,7 @@ public class NextActivity extends Activity {
         activeFacetName = null;
         activePlaylist = null;
         hideSearchInput();
+        toolbarBack.setVisibility(View.GONE);
         toolbarIcon.setText("♫");
         toolbarTitle.setText(R.string.library_tracks);
         setToolbarSearchAction();
@@ -542,6 +598,7 @@ public class NextActivity extends Activity {
         activeFacetType = null;
         activeFacetName = null;
         activePlaylist = null;
+        toolbarBack.setVisibility(View.VISIBLE);
         toolbarIcon.setText("⌕");
         toolbarTitle.setText(R.string.library_drawer_search);
         toolbarSearch.setVisibility(View.GONE);
@@ -587,6 +644,7 @@ public class NextActivity extends Activity {
         activeFacetName = null;
         activePlaylist = null;
         hideSearchInput();
+        toolbarBack.setVisibility(View.VISIBLE);
         toolbarIcon.setText(facetIcon(type));
         toolbarTitle.setText(facetTitle(type));
         setToolbarSearchAction();
@@ -611,6 +669,7 @@ public class NextActivity extends Activity {
         screen = Screen.FACET_TRACKS;
         activeFacetName = facet.name;
         hideSearchInput();
+        toolbarBack.setVisibility(View.VISIBLE);
         toolbarIcon.setText(facetIcon(type));
         toolbarTitle.setText(facet.name);
         setToolbarSearchAction();
@@ -630,6 +689,7 @@ public class NextActivity extends Activity {
         activeFacetName = null;
         activePlaylist = null;
         hideSearchInput();
+        toolbarBack.setVisibility(View.VISIBLE);
         toolbarIcon.setText("▤");
         toolbarTitle.setText(R.string.library_drawer_playlists);
         toolbarSearch.setVisibility(View.VISIBLE);
@@ -666,6 +726,7 @@ public class NextActivity extends Activity {
         activeFacetType = null;
         activeFacetName = null;
         hideSearchInput();
+        toolbarBack.setVisibility(View.VISIBLE);
         toolbarIcon.setText(playlist.isSystem ? "★" : "▤");
         toolbarTitle.setText(playlist.name);
         setToolbarSearchAction();
@@ -1052,6 +1113,28 @@ public class NextActivity extends Activity {
         }
     }
 
+    private void skipPlayback(int direction) {
+        if (mediaController == null) return;
+        MediaMetadataCompat metadata = mediaController.getMetadata();
+        String mediaId = metadata == null ? null
+                : metadata.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        if (mediaId != null && mediaId.startsWith(LOCAL_TRACK_PREFIX)) {
+            try {
+                long currentId = Long.parseLong(mediaId.substring(LOCAL_TRACK_PREFIX.length()));
+                Long adjacentId = adapter.adjacentTrackId(currentId, direction);
+                if (adjacentId != null) playLocalTrack(adjacentId);
+                return;
+            } catch (NumberFormatException ignored) {
+                // Fall through to the service transport control below.
+            }
+        }
+        if (direction < 0) {
+            mediaController.getTransportControls().skipToPrevious();
+        } else {
+            mediaController.getTransportControls().skipToNext();
+        }
+    }
+
     private void updateMiniPlayer(
             MediaMetadataCompat metadata, PlaybackStateCompat playbackState
     ) {
@@ -1068,6 +1151,7 @@ public class NextActivity extends Activity {
         boolean playing = playbackState != null
                 && playbackState.getState() == PlaybackStateCompat.STATE_PLAYING;
         miniPlayPause.setText(playing ? R.string.pause : R.string.play);
+        miniPlayPause.setContentDescription(getString(playing ? R.string.pause : R.string.play));
     }
 
     private void openRadios() {
@@ -1139,6 +1223,22 @@ public class NextActivity extends Activity {
             tracks.clear();
             tracks.addAll(values);
             notifyDataSetChanged();
+        }
+
+        Long adjacentTrackId(long currentId, int direction) {
+            if (tracks.isEmpty()) return null;
+            int currentIndex = -1;
+            for (int index = 0; index < tracks.size(); index++) {
+                if (tracks.get(index).id == currentId) {
+                    currentIndex = index;
+                    break;
+                }
+            }
+            if (currentIndex < 0) return tracks.get(direction < 0
+                    ? tracks.size() - 1 : 0).id;
+            int nextIndex = (currentIndex + (direction < 0 ? -1 : 1) + tracks.size())
+                    % tracks.size();
+            return tracks.get(nextIndex).id;
         }
 
         @Override
