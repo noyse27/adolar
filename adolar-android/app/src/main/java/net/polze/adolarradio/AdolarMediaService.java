@@ -32,6 +32,7 @@ import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.database.StandaloneDatabaseProvider;
 import androidx.media3.datasource.DataSource;
+import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.cache.CacheDataSource;
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor;
@@ -39,6 +40,9 @@ import androidx.media3.datasource.cache.SimpleCache;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.MediaSource;
 import androidx.media3.exoplayer.source.ProgressiveMediaSource;
+
+import net.polze.adolarradio.local.LocalLibraryDatabase;
+import net.polze.adolarradio.local.LocalTrack;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -72,6 +76,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     private static final String TAG = "AdolarMediaService";
     private static final String ROOT_ID = "adolar_root";
     private static final String STATION_PREFIX = "station:";
+    private static final String LOCAL_TRACK_PREFIX = "local:";
     static final String METADATA_KEY_ADOLAR4U_REASON =
             "net.polze.adolarradio.metadata.ADOLAR4U_REASON";
     static final String METADATA_KEY_LASTFM_LOVED =
@@ -106,6 +111,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     private int currentStationId = 1;
     private String currentStationName = "Adolar Radio";
     private String currentStationEngine = "shuffle";
+    private boolean localMode;
     private int playbackRequest;
     private boolean foregroundStarted;
 
@@ -147,7 +153,12 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
                 if (!crossfadeActive) {
                     rememberCurrentTrack();
                     finishCurrentTrack(true, "ended");
-                    promotePreloadedTrack(false);
+                    if (localMode) {
+                        clearPlayers();
+                        updatePlaybackState(PlaybackStateCompat.STATE_STOPPED, null);
+                    } else {
+                        promotePreloadedTrack(false);
+                    }
                 }
             } else if (state == Player.STATE_BUFFERING) {
                 bufferingStartedMs = android.os.SystemClock.elapsedRealtime();
@@ -180,7 +191,9 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             updatePlaybackState(
                     PlaybackStateCompat.STATE_ERROR, "Wiedergabe fehlgeschlagen. Nächster Titel wird geladen."
             );
-            promotePreloadedTrack(false);
+            if (!localMode) {
+                promotePreloadedTrack(false);
+            }
         }
     };
 
@@ -191,11 +204,18 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
                 player.play();
                 return;
             }
+            if (localMode) {
+                return;
+            }
             loadNextTrack();
         }
 
         @Override
         public void onPlayFromMediaId(String mediaId, Bundle extras) {
+            if (mediaId != null && mediaId.startsWith(LOCAL_TRACK_PREFIX)) {
+                loadLocalTrack(mediaId);
+                return;
+            }
             Station station = parseStation(mediaId, extras);
             if (station == null) {
                 updatePlaybackState(PlaybackStateCompat.STATE_ERROR, "Sender nicht gefunden.");
@@ -210,6 +230,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             currentStationId = station.id;
             currentStationName = station.name;
             currentStationEngine = station.engine;
+            localMode = false;
             AdolarPrefs.setStationId(AdolarMediaService.this, station.id);
             loadNextTrack();
         }
@@ -226,7 +247,12 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
             cancelCrossfade();
             rememberCurrentTrack();
             finishCurrentTrack(false, "manual_next");
-            promotePreloadedTrack(false);
+            if (localMode) {
+                clearPlayers();
+                updatePlaybackState(PlaybackStateCompat.STATE_STOPPED, null);
+            } else {
+                promotePreloadedTrack(false);
+            }
         }
 
         @Override
@@ -283,7 +309,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         addPlayerDiagnostics(player);
         addPlayerDiagnostics(preloadPlayer);
         createNotificationChannel();
-        mediaSession = new MediaSessionCompat(this, "AdolarRadio");
+        mediaSession = new MediaSessionCompat(this, "AdolarNext");
         mediaSession.setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS
                         | MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
@@ -418,6 +444,52 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         }
     }
 
+    private void loadLocalTrack(String mediaId) {
+        final long localTrackId;
+        try {
+            localTrackId = Long.parseLong(mediaId.substring(LOCAL_TRACK_PREFIX.length()));
+        } catch (RuntimeException error) {
+            updatePlaybackState(PlaybackStateCompat.STATE_ERROR, "Lokaler Titel nicht gefunden.");
+            return;
+        }
+        final int request = ++playbackRequest;
+        new Thread(() -> {
+            LocalTrack local = LocalLibraryDatabase.get(this)
+                    .libraryDao().getTrack(localTrackId);
+            mainHandler.post(() -> {
+                if (request != playbackRequest) return;
+                if (local == null || local.missing) {
+                    updatePlaybackState(
+                            PlaybackStateCompat.STATE_ERROR, "Lokaler Titel nicht gefunden."
+                    );
+                    return;
+                }
+                cancelCrossfade();
+                finishCurrentTrack(false, "track_change");
+                clearPlayers();
+                upcomingTracks.clear();
+                previousTracks.clear();
+                preloadedTrack = null;
+                localMode = true;
+                currentStationName = "Lokale Musik";
+                currentStationEngine = "local";
+
+                Track track = new Track();
+                track.local = true;
+                track.localId = local.id;
+                track.localDocumentUri = local.documentUri;
+                track.title = local.title == null || local.title.isEmpty()
+                        ? "Unbekannter Titel" : local.title;
+                track.artist = local.artist == null || local.artist.isEmpty()
+                        ? "Unbekannter Interpret" : local.artist;
+                track.album = local.album == null ? "" : local.album;
+                track.year = local.year == null ? 0 : local.year;
+                track.durationMs = local.durationSeconds * 1000L;
+                startTrack(track);
+            });
+        }, "AdolarLocalTrackLoader").start();
+    }
+
     private List<Station> fetchStations() {
         List<Station> stations = new ArrayList<>();
         HttpURLConnection connection = null;
@@ -533,7 +605,9 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         currentTrack = track;
         mediaSession.setActive(true);
         updateMetadata(track);
-        requestLyricsIfMissing(track);
+        if (!track.local) {
+            requestLyricsIfMissing(track);
+        }
         // Marks the service as "started" so it survives the phone UI unbinding
         // (e.g. screen off triggers MainActivity.onStop -> mediaBrowser.disconnect()).
         // Without this the service is bound-only and Android destroys it, and the
@@ -544,11 +618,21 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         player.setMediaSource(buildMediaSource(track));
         player.prepare();
         player.setPlayWhenReady(true);
-        sendListeningEvent(track, "started", null, 0, track.durationMs);
-        prepareNextTrack();
+        if (!track.local) {
+            sendListeningEvent(track, "started", null, 0, track.durationMs);
+            prepareNextTrack();
+        }
     }
 
     private MediaSource buildMediaSource(Track track) {
+        if (track.local) {
+            MediaItem mediaItem = new MediaItem.Builder()
+                    .setUri(Uri.parse(track.localDocumentUri))
+                    .setMediaId(LOCAL_TRACK_PREFIX + track.localId)
+                    .build();
+            return new ProgressiveMediaSource.Factory(new DefaultDataSource.Factory(this))
+                    .createMediaSource(mediaItem);
+        }
         Map<String, String> headers = new HashMap<>();
         String cookie = sessionCookie();
         if (!cookie.isEmpty()) {
@@ -571,7 +655,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     }
 
     private void requestMoreTracks() {
-        if (queueRequestInFlight || !AdolarPrefs.hasServerUrl(this)) return;
+        if (localMode || queueRequestInFlight || !AdolarPrefs.hasServerUrl(this)) return;
         queueRequestInFlight = true;
         final int owningRequest = playbackRequest;
         new Thread(() -> {
@@ -589,7 +673,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     }
 
     private void prepareNextTrack() {
-        if (preloadedTrack != null) return;
+        if (localMode || preloadedTrack != null) return;
         if (upcomingTracks.isEmpty()) {
             requestMoreTracks();
             return;
@@ -727,7 +811,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     }
 
     private Notification buildNotification() {
-        Intent contentIntent = new Intent(this, MainActivity.class);
+        Intent contentIntent = new Intent(this, NextActivity.class);
         int pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
         PendingIntent contentPendingIntent = PendingIntent.getActivity(this, 0, contentIntent, pendingFlags);
         MediaStyle mediaStyle = new MediaStyle()
@@ -786,7 +870,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     private void sendListeningEvent(
             Track track, String eventType, String reason, long positionMs, long durationMs
     ) {
-        if (sessionCookie().isEmpty()) {
+        if (track.local || sessionCookie().isEmpty()) {
             return;
         }
         final int sequence = eventSequence.incrementAndGet();
@@ -873,8 +957,11 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     }
 
     private void updateMetadata(Track track) {
+        String mediaId = track.local
+                ? LOCAL_TRACK_PREFIX + track.localId
+                : String.valueOf(track.id);
         MediaMetadataCompat.Builder builder = new MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, String.valueOf(track.id))
+                .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, mediaId)
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, track.title)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, track.artist)
                 .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, track.album)
@@ -977,6 +1064,9 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
 
     private static final class Track {
         int id;
+        long localId;
+        boolean local;
+        String localDocumentUri;
         String title;
         String artist;
         String album;

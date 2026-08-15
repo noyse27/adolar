@@ -29,7 +29,7 @@
             android:resource="@drawable/ic_car_attribution" />
 
         <activity
-            android:name=".MainActivity"
+            android:name=".NextActivity"
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:exported="true">
             <intent-filter>
@@ -37,6 +37,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:exported="false" />
 
         <service
             android:name=".AdolarMediaService"

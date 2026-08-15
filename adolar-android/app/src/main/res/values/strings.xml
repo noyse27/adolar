@@ -62,4 +62,26 @@
     <string name="favorite_login_required">Für Favoriten bitte anmelden.</string>
     <string name="lastfm_required">Last.fm ist für dieses Konto nicht verbunden.</string>
     <string name="track_action_error">Der Titel konnte nicht aktualisiert werden.</string>
+    <string name="library_tracks">Titel</string>
+    <string name="library_empty">Noch keine lokale Musik eingelesen.</string>
+    <string name="library_choose_folder">Musikordner auswählen</string>
+    <string name="library_rescan">Bibliothek neu einlesen</string>
+    <string name="library_scanning">Bibliothek wird eingelesen …</string>
+    <string name="library_scan_progress">%1$d Dateien geprüft · %2$d aktualisiert · %3$d Fehler</string>
+    <string name="library_scan_complete">%1$d lokale Titel verfügbar</string>
+    <string name="library_scan_failed">Der Ordner konnte nicht vollständig gelesen werden.</string>
+    <string name="library_open_radios">Adolar-Radios</string>
+    <string name="library_drawer_favorites">Favoriten</string>
+    <string name="library_drawer_recently_added">Kürzlich hinzugefügt</string>
+    <string name="library_drawer_most_played">Häufig gespielt</string>
+    <string name="library_drawer_search">Suche</string>
+    <string name="library_drawer_albums">Alben</string>
+    <string name="library_drawer_artists">Interpreten</string>
+    <string name="library_drawer_genres">Genres</string>
+    <string name="library_drawer_playlists">Playlists</string>
+    <string name="library_drawer_folders">Ordner</string>
+    <string name="library_drawer_sync">Sync-Status</string>
+    <string name="library_feature_pending">Dieser Bereich folgt in der nächsten Ausbaustufe.</string>
+    <string name="library_now_playing_empty">Keine Wiedergabe</string>
+    <string name="library_unknown_artist">Unbekannter Interpret</string>
 </resources>
