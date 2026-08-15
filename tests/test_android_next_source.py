@@ -60,6 +60,28 @@ def test_local_scan_uses_android_media_index_with_saf_fallback():
     assert "Already handled by the MediaStore cursor" in scanner
 
 
+def test_scan_hides_folder_action_and_loads_live_track_previews():
+    activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
+    repository = read(
+        "app/src/main/java/net/polze/adolarradio/local/LocalLibraryRepository.java"
+    )
+    assert "emptyAction.setVisibility(View.GONE)" in activity
+    assert "refreshTrackPreviewDuringScan" in activity
+    assert "ProgressBar scanProgress" in activity
+    assert "scanExecutor" in repository
+    assert "queryExecutor" in repository
+
+
+def test_next_respects_system_bars_and_software_keyboard():
+    manifest = read("app/src/main/AndroidManifest.xml")
+    activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
+    assert 'android:windowSoftInputMode="adjustResize"' in manifest
+    assert "WindowInsetsCompat.Type.systemBars()" in activity
+    assert "WindowInsetsCompat.Type.displayCutout()" in activity
+    assert "WindowInsetsCompat.Type.ime()" in activity
+    assert "Math.max(bars.bottom, keyboard.bottom)" in activity
+
+
 def test_local_playback_reuses_the_media_service_without_http_cache():
     service = read(
         "app/src/main/java/net/polze/adolarradio/AdolarMediaService.java"

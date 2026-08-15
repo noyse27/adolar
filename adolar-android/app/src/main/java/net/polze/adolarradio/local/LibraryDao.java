@@ -24,6 +24,11 @@ public interface LibraryDao {
             + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE")
     List<LocalTrack> getActiveTracks();
 
+    @Query("SELECT * FROM local_tracks WHERE missing=0 "
+            + "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, "
+            + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE LIMIT :limit")
+    List<LocalTrack> getActiveTrackPreview(int limit);
+
     @Query("SELECT * FROM local_tracks WHERE rootUri=:rootUri")
     List<LocalTrack> getTracksForRoot(String rootUri);
 

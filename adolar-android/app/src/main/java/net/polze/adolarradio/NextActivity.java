@@ -22,11 +22,16 @@ import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -49,6 +54,8 @@ public class NextActivity extends Activity {
     private TrackAdapter adapter;
     private TextView statusView;
     private Button emptyAction;
+    private LinearLayout scanPanel;
+    private TextView scanPanelText;
     private TextView miniTitle;
     private TextView miniArtist;
     private Button miniPlayPause;
@@ -59,6 +66,8 @@ public class NextActivity extends Activity {
     private Uri pendingScanUri;
     private boolean pendingScanAll;
     private boolean scanning;
+    private boolean liveRefreshPending;
+    private long lastLiveRefreshAt;
 
     private final MediaBrowserCompat.ConnectionCallback browserCallback =
             new MediaBrowserCompat.ConnectionCallback() {
@@ -171,6 +180,26 @@ public class NextActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ));
 
+        scanPanel = new LinearLayout(this);
+        scanPanel.setOrientation(LinearLayout.VERTICAL);
+        scanPanel.setGravity(Gravity.CENTER);
+        ProgressBar scanProgress = new ProgressBar(this);
+        scanProgress.setIndeterminate(true);
+        scanPanel.addView(scanProgress, new LinearLayout.LayoutParams(dp(56), dp(56)));
+        scanPanelText = text(getString(R.string.library_scan_waiting), 16, R.color.text_primary);
+        scanPanelText.setGravity(Gravity.CENTER);
+        scanPanelText.setPadding(dp(16), dp(12), dp(16), 0);
+        scanPanel.addView(scanPanelText, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        scanPanel.setVisibility(View.GONE);
+        FrameLayout.LayoutParams scanParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER
+        );
+        libraryFrame.addView(scanPanel, scanParams);
+
         emptyAction = new Button(this);
         emptyAction.setText(R.string.library_choose_folder);
         emptyAction.setAllCaps(false);
@@ -194,6 +223,26 @@ public class NextActivity extends Activity {
         drawerParams.gravity = Gravity.START;
         drawerLayout.addView(drawer, drawerParams);
         setContentView(drawerLayout);
+        applyWindowInsets();
+    }
+
+    private void applyWindowInsets() {
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        ViewCompat.setOnApplyWindowInsetsListener(drawerLayout, (view, windowInsets) -> {
+            Insets bars = windowInsets.getInsets(
+                    WindowInsetsCompat.Type.systemBars()
+                            | WindowInsetsCompat.Type.displayCutout()
+            );
+            Insets keyboard = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
+            view.setPadding(
+                    bars.left,
+                    bars.top,
+                    bars.right,
+                    Math.max(bars.bottom, keyboard.bottom)
+            );
+            return windowInsets;
+        });
+        ViewCompat.requestApplyInsets(drawerLayout);
     }
 
     private View buildToolbar() {
@@ -422,9 +471,7 @@ public class NextActivity extends Activity {
 
     private void scanRoot(Uri treeUri) {
         if (scanning) return;
-        scanning = true;
-        emptyAction.setEnabled(false);
-        statusView.setText(R.string.library_scanning);
+        beginScan();
         repository.scanRoot(treeUri, scanCallback());
     }
 
@@ -434,10 +481,18 @@ public class NextActivity extends Activity {
 
     private void scanAllNow() {
         if (scanning) return;
-        scanning = true;
-        emptyAction.setEnabled(false);
-        statusView.setText(R.string.library_scanning);
+        beginScan();
         repository.scanAll(scanCallback());
+    }
+
+    private void beginScan() {
+        scanning = true;
+        liveRefreshPending = false;
+        lastLiveRefreshAt = 0L;
+        emptyAction.setVisibility(View.GONE);
+        scanPanelText.setText(R.string.library_scan_waiting);
+        scanPanel.setVisibility(adapter.getItemCount() == 0 ? View.VISIBLE : View.GONE);
+        statusView.setText(R.string.library_scanning);
     }
 
     private LocalLibraryRepository.ScanCallback scanCallback() {
@@ -448,12 +503,16 @@ public class NextActivity extends Activity {
                         R.string.library_scan_progress,
                         progress.visited, progress.indexed, progress.errors
                 ));
+                scanPanelText.setText(getString(
+                        R.string.library_scan_found, progress.visited
+                ));
+                refreshTrackPreviewDuringScan();
             }
 
             @Override
             public void onComplete(LocalLibraryScanner.ScanProgress progress) {
                 scanning = false;
-                emptyAction.setEnabled(true);
+                scanPanel.setVisibility(View.GONE);
                 refreshTracks();
                 if (progress.errors > 0) {
                     Toast.makeText(
@@ -466,17 +525,31 @@ public class NextActivity extends Activity {
         };
     }
 
-    private void refreshTracks() {
-        repository.loadTracks(tracks -> {
-            adapter.setTracks(tracks);
-            boolean empty = tracks.isEmpty();
-            emptyAction.setVisibility(empty ? View.VISIBLE : View.GONE);
-            if (!scanning) {
-                statusView.setText(empty
-                        ? getString(R.string.library_empty)
-                        : getString(R.string.library_scan_complete, tracks.size()));
-            }
+    private void refreshTrackPreviewDuringScan() {
+        long now = System.currentTimeMillis();
+        if (liveRefreshPending || now - lastLiveRefreshAt < 750L) return;
+        liveRefreshPending = true;
+        lastLiveRefreshAt = now;
+        repository.loadTrackPreview(tracks -> {
+            liveRefreshPending = false;
+            showTracks(tracks);
         });
+    }
+
+    private void refreshTracks() {
+        repository.loadTracks(this::showTracks);
+    }
+
+    private void showTracks(List<LocalTrack> tracks) {
+        adapter.setTracks(tracks);
+        boolean empty = tracks.isEmpty();
+        emptyAction.setVisibility(empty && !scanning ? View.VISIBLE : View.GONE);
+        scanPanel.setVisibility(scanning && empty ? View.VISIBLE : View.GONE);
+        if (!scanning) {
+            statusView.setText(empty
+                    ? getString(R.string.library_empty)
+                    : getString(R.string.library_scan_complete, tracks.size()));
+        }
     }
 
     private void connectBrowser() {

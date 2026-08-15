@@ -25,7 +25,8 @@ public final class LocalLibraryRepository {
 
     private final LibraryDao dao;
     private final LocalLibraryScanner scanner;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService scanExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService queryExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private LocalLibraryRepository(Context context) {
@@ -45,20 +46,26 @@ public final class LocalLibraryRepository {
     }
 
     public void loadTracks(TracksCallback callback) {
-        executor.execute(() -> {
-            List<LocalTrack> tracks;
-            try {
-                tracks = dao.getActiveTracks();
-            } catch (RuntimeException error) {
-                tracks = Collections.emptyList();
-            }
-            List<LocalTrack> result = tracks;
-            mainHandler.post(() -> callback.onTracks(result));
-        });
+        queryExecutor.execute(() -> loadTracks(false, callback));
+    }
+
+    public void loadTrackPreview(TracksCallback callback) {
+        queryExecutor.execute(() -> loadTracks(true, callback));
+    }
+
+    private void loadTracks(boolean preview, TracksCallback callback) {
+        List<LocalTrack> tracks;
+        try {
+            tracks = preview ? dao.getActiveTrackPreview(200) : dao.getActiveTracks();
+        } catch (RuntimeException error) {
+            tracks = Collections.emptyList();
+        }
+        List<LocalTrack> result = tracks;
+        mainHandler.post(() -> callback.onTracks(result));
     }
 
     public void scanRoot(Uri treeUri, ScanCallback callback) {
-        executor.execute(() -> {
+        scanExecutor.execute(() -> {
             LocalLibraryScanner.ScanProgress result = scanner.scan(
                     treeUri,
                     progress -> mainHandler.post(() -> callback.onProgress(progress))
@@ -68,7 +75,7 @@ public final class LocalLibraryRepository {
     }
 
     public void scanAll(ScanCallback callback) {
-        executor.execute(() -> {
+        scanExecutor.execute(() -> {
             List<LibraryRoot> roots = dao.getRoots();
             if (roots.isEmpty()) {
                 LocalLibraryScanner.ScanProgress empty = new LocalLibraryScanner.ScanProgress();
