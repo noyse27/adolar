@@ -142,10 +142,148 @@ Adolar-Playcount und kein direktes Adolar4U-Tracksignal erzeugen.
 
 ### 4. Bibliothek, Filter und Playlists
 
-Die lokale UI benötigt mindestens die Bereiche `Lokale Musik`, `Playlists`,
-`Radio` und `Einstellungen/Sync`. Die bestehende Activity sollte dabei in
-kleinere Screens plus Repository-Schicht zerlegt werden; ein vollständiger
-Wechsel zu Compose ist dafür nicht nötig.
+Die lokale UI folgt den Entwürfen aus `I:\Downloads\adoloar android menüs` und
+übernimmt deren an PlayerPro angelehntes Navigationsprinzip. Die bestehende
+Activity sollte dabei in kleinere Screens plus Repository-Schicht zerlegt
+werden; ein vollständiger Wechsel zu Compose ist dafür nicht nötig.
+
+#### Verbindliche Navigation aus den Entwürfen
+
+Die Rakete links oben ist auf allen Hauptscreens der Menüknopf. Sie ersetzt
+bewusst ein generisches Hamburger-Symbol und öffnet einen seitlichen
+Bibliotheks-Drawer. Das Logo ist damit gleichzeitig Marke und konsistenter
+Startpunkt der Navigation. Der Android-Zurück-Button schließt zuerst Drawer,
+Dialog oder Kontextmenü und navigiert erst danach im Screen-Verlauf zurück.
+
+Der Drawer aus `adolar_track_menü.png` wird fachlich so übernommen:
+
+- **Schnellzugriff:** Favoriten, kürzlich hinzugefügt, häufig gespielt,
+  kürzlich gespielt, selten gespielt und nie gespielt;
+- **Bibliothek:** Suche, Alben, Interpreten, Genres, Playlists, Ordner und Titel;
+- **Online:** `Radios` zeigt ausschließlich die Radiostationen des verbundenen
+  Adolar-Servers. Adolar4U erscheint dort als Adolar-Station beziehungsweise
+  Stations-Engine, wenn es für den angemeldeten Benutzer verfügbar ist;
+- **System:** Bibliothek/Ordner verwalten, Sync-Status, Konto und Einstellungen.
+
+Die Zähler rechts werden aus Room gelesen und bleiben daher offline verfügbar.
+Für `Radios` darf die zuletzt erfolgreich geladene Senderliste lokal gecacht
+und offline angezeigt werden. Da die Audiodateien vom Adolar-Server gestreamt
+werden, sind Start und Fortsetzung einer Radiowiedergabe ohne Serververbindung
+deaktiviert und eindeutig mit `Adolar nicht erreichbar` gekennzeichnet. Nach
+dem Verbinden wird die Liste entsprechend öffentlichem oder angemeldetem
+Serverzugriff aktualisiert.
+
+`Am besten bewertet` aus der PlayerPro-Vorlage wird nicht ungeprüft übernommen:
+Adolar kennt derzeit Favorit/Lieben, aber keine Mehrstufenbewertung. Der Eintrag
+wird entweder durch `Favoriten` ersetzt oder erfordert später ein eigenes
+Rating-Feld.
+
+#### Gemeinsames Screen-Gerüst
+
+Die Screens `adolar_android_genre.png`, `interpreten_dialog.png`,
+`adolar_playlist_titel.png` und `playlist_dialog2.png` definieren ein
+gemeinsames Gerüst:
+
+- Toolbar mit Rakete, kontextabhängigem Icon und Titel;
+- rechts Suche und Überlaufmenü; Cast wird nur gezeigt, wenn eine tatsächliche
+  Cast-Integration umgesetzt wird und ist kein Bestandteil der ersten lokalen
+  Version;
+- Raster für Alben, Interpreten und Genres, Liste für Titel, Ordner und
+  Playlists;
+- Drei-Punkte-Menü pro Element mit genau auf diesen Elementtyp zugeschnittenen
+  Aktionen;
+- dauerhaft sichtbarer Mini-Player am unteren Rand, der Cover, Titel,
+  Interpret und Play/Pause zeigt und per Tap den großen Player öffnet;
+- laufender Titel und aktive Quelle werden in Listen eindeutig hervorgehoben.
+
+Leere Zustände dürfen nicht nur eine leere Liste zeigen. Sie bieten je nach
+Ursache `Musikordner auswählen`, `Erneut scannen`, `Filter zurücksetzen` oder
+`Mit Adolar verbinden` an. Während des ersten Scans bleiben Fortschritt,
+gefundene Titel und übersprungene Dateien sichtbar.
+
+Die Entwürfe sind Strukturreferenzen, keine Quelle für fremde Icons oder
+Grafikassets. Die Umsetzung benutzt das Adolar-Farbsystem (Violett statt des
+PlayerPro-Grüns), Material-/eigene Vektoricons und ausreichend große
+Touchflächen. Graue Sekundärtexte müssen den Android-Kontrastanforderungen
+entsprechen.
+
+#### Raster und Kontextaktionen
+
+Der Interpreten-Screen übernimmt das zweispaltige Bildraster aus
+`interpreten_dialog.png`; der Genre-Screen das entsprechende Coverraster aus
+`adolar_android_genre.png`. Fehlt ein Bild, erscheint ein typisierter
+Adolar-Platzhalter statt einer leeren Fläche. Interpret-/Genre-Bilder werden
+lokal gecacht, damit die Raster auch offline stabil bleiben.
+
+Das Genre-Menü aus dem Entwurf wird auf folgende konsistente Aktionen
+normalisiert:
+
+- wiedergeben;
+- an die aktuelle Queue anhängen;
+- als Nächstes wiedergeben;
+- zufällig wiedergeben;
+- alle Titel anzeigen;
+- zu einer vorhandenen Playlist hinzufügen;
+- zu Favoriten hinzufügen beziehungsweise lieben;
+- Genre-Information anzeigen;
+- Genrebild verwalten.
+
+Genre-Informationen von Last.fm werden nach dem ersten Abruf gecacht und zeigen
+offline den letzten Stand. `Löschen` darf in diesem Menü niemals kommentarlos
+die Audiodateien löschen. Für Version 1 wird die Aktion weggelassen; ein
+späteres `Aus Bibliothek ausblenden` oder `Genre-Tag entfernen` braucht eine
+explizite Benennung und Bestätigung.
+
+Für Titel, Alben, Interpreten und Playlists wird derselbe Aktionswortlaut
+verwendet. `Zu akt. Playlist hinzufügen` aus der Vorlage wird in der UI als
+`Zur aktuellen Queue hinzufügen` bezeichnet, damit Wiedergabequeue und
+gespeicherte Playlist nicht verwechselt werden.
+
+#### Playlists
+
+Der Plus-Button aus `playlist_dialog.png` öffnet die Auswahl:
+
+- **Standard-Playlist:** explizit ausgewählte, lokal geordnete Titel;
+- **Intelligente Playlist:** gespeicherter Adolar-Filterbaum, der bei jedem
+  Öffnen gegen die aktuelle lokale Bibliothek neu ausgewertet wird.
+
+Das Playlist-Menü aus `playlist_dialog2.png` enthält Wiedergabe, Queue-Aktionen,
+Zufallswiedergabe, Lieben/Favorisieren aller enthaltenen Titel, Bearbeiten,
+Umbenennen und Löschen. Systemplaylists wie `Kürzlich hinzugefügt`, `Häufig
+gespielt`, `Selten gespielt` und `Nie gespielt` können weder umbenannt noch
+gelöscht werden. Destruktive Aktionen benötigen Bestätigung; sie löschen nie
+die zugrunde liegenden Musikdateien.
+
+#### Großer Player
+
+`adolar_play_screen.png` ergänzt den bestehenden Player um den Raketen-Menüknopf
+und die Anzeige der aktiven Quelle beziehungsweise des Radio-/Playlistnamens.
+Der Quellwähler unterscheidet mindestens lokale Queue, lokale Playlist und die
+Radios des verbundenen Adolar-Servers. Adolar4U ist dabei eine Adolar-Radioquelle
+und kein separater lokaler Radiotyp. Im Offlinezustand bleiben lokale Quellen
+auswählbar; Adolar-Radios zeigen ihren Verbindungszustand, ohne die lokale
+Bedienung zu blockieren.
+
+Der Entwurf zeigt noch getrennte Buttons für `Favorit` und `Lieben`. Für die in
+diesem Dokument festgelegte Produktsprache werden sie zu einer einzigen Aktion
+`Lieben` zusammengeführt. Ihr lokaler Zustand ist sofort sichtbar; ein kleines
+Sync-Symbol unterscheidet bei Bedarf `nur lokal`, `ausstehend`, `synchronisiert`
+und `Fehler`, ohne einen zweiten Love-Knopf einzuführen.
+
+#### Offline- und Sync-Rückmeldung
+
+Offline ist ein normaler Betriebszustand und kein modaler Fehler. Ein kleines
+Statussymbol in Toolbar beziehungsweise Drawer zeigt:
+
+- offline, lokale Funktionen verfügbar;
+- Anzahl ausstehender Sync-Aktionen;
+- laufende Synchronisation;
+- Anmeldung erforderlich;
+- dauerhafter Konflikt oder nicht zuordenbarer Titel.
+
+Der Sync-Screen listet ausstehende und fehlgeschlagene Aktionen verständlich,
+bietet `Jetzt synchronisieren` und erlaubt bei Validierungsfehlern Verwerfen
+oder erneutes Zuordnen. Normale Netzwerkfehler verlangen keine Interaktion.
 
 Für Web-Parität wird das Filterformat versioniert gemeinsam verwendet:
 
