@@ -71,6 +71,16 @@
     <string name="library_empty">Noch keine lokale Musik eingelesen.</string>
     <string name="library_choose_folder">Musikordner auswählen</string>
     <string name="library_rescan">Bibliothek neu einlesen</string>
+    <string name="local_settings">Lokale Einstellungen</string>
+    <string name="artwork_settings_title">Lokale Albumcover</string>
+    <string name="artwork_settings_description">Eingebettete Cover werden beim Anzeigen automatisch geladen. Optional kann Adolar Next alle Alben im Hintergrund vorbereiten. Der schnelle Musikscan bleibt davon getrennt.</string>
+    <string name="artwork_prepare">Cover im Hintergrund einlesen</string>
+    <string name="artwork_retry">Fehlende erneut prüfen</string>
+    <string name="artwork_started">Cover-Auftrag wurde gestartet und läuft auch außerhalb dieses Bildschirms weiter.</string>
+    <string name="artwork_status_idle">Noch kein vollständiger Cover-Auftrag gestartet · %1$d Cover im Cache</string>
+    <string name="artwork_status_running">Cover werden vorbereitet: %1$d von %2$d Alben · %3$d neu gefunden · %4$d Fehler</string>
+    <string name="artwork_status_complete">Vorbereitung abgeschlossen: %1$d Alben geprüft · %2$d neu gefunden · %3$d Fehler · %4$d Cover im Cache</string>
+    <string name="artwork_status_paused">Cover-Auftrag wartet: %1$d von %2$d Alben geprüft.</string>
     <string name="library_scanning">Bibliothek wird eingelesen …</string>
     <string name="library_scan_waiting">Musik wird eingelesen …</string>
     <string name="library_scan_found">%1$d Titel gefunden …</string>

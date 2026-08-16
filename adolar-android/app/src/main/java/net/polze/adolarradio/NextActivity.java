@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -25,6 +26,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.ProgressBar;
@@ -45,6 +47,8 @@ import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import net.polze.adolarradio.local.LibraryFacet;
+import net.polze.adolarradio.local.ArtworkCache;
+import net.polze.adolarradio.local.ArtworkPrefetchWorker;
 import net.polze.adolarradio.local.LocalPlaylist;
 import net.polze.adolarradio.local.LocalLibraryRepository;
 import net.polze.adolarradio.local.LocalLibraryRepository.FacetType;
@@ -81,7 +85,9 @@ public class NextActivity extends Activity {
     private TextView miniTitle;
     private TextView miniArtist;
     private TextView miniPlayPause;
+    private ImageView miniArtwork;
     private LocalLibraryRepository repository;
+    private ArtworkCache artworkCache;
     private MediaBrowserCompat mediaBrowser;
     private MediaControllerCompat mediaController;
     private Long pendingTrackId;
@@ -160,6 +166,7 @@ public class NextActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         repository = LocalLibraryRepository.get(this);
+        artworkCache = ArtworkCache.get(this);
         requestNotificationPermissionIfNeeded();
         buildUi();
         refreshFavoriteIds();
@@ -448,6 +455,11 @@ public class NextActivity extends Activity {
         });
         addDrawerItem(drawer, getString(R.string.library_open_radios), view -> openRadios());
         addPendingDrawerItem(drawer, R.string.library_drawer_sync);
+        addDrawerHeading(drawer, "APP");
+        addDrawerItem(drawer, getString(R.string.local_settings), view -> {
+            drawerLayout.closeDrawer(Gravity.START);
+            showLocalSettings();
+        });
         return scroll;
     }
 
@@ -465,7 +477,10 @@ public class NextActivity extends Activity {
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.HORIZONTAL);
         controls.setGravity(Gravity.CENTER_VERTICAL);
-        controls.setPadding(dp(12), dp(4), dp(6), dp(4));
+        controls.setPadding(dp(8), dp(4), dp(6), dp(4));
+        miniArtwork = new ImageView(this);
+        showArtworkPlaceholder(miniArtwork);
+        controls.addView(miniArtwork, new LinearLayout.LayoutParams(dp(52), dp(52)));
         LinearLayout labels = new LinearLayout(this);
         labels.setOrientation(LinearLayout.VERTICAL);
         labels.setGravity(Gravity.CENTER_VERTICAL);
@@ -528,6 +543,7 @@ public class NextActivity extends Activity {
         }
         menu.getMenu().add(getString(R.string.library_choose_folder));
         menu.getMenu().add(getString(R.string.library_rescan));
+        menu.getMenu().add(getString(R.string.local_settings));
         menu.getMenu().add(getString(R.string.library_open_radios));
         menu.setOnMenuItemClickListener(item -> {
             String title = item.getTitle().toString();
@@ -535,12 +551,88 @@ public class NextActivity extends Activity {
                 chooseMusicFolder();
             } else if (title.equals(getString(R.string.library_rescan))) {
                 scanAll();
+            } else if (title.equals(getString(R.string.local_settings))) {
+                showLocalSettings();
             } else {
                 openRadios();
             }
             return true;
         });
         menu.show();
+    }
+
+    private void showLocalSettings() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(24), dp(8), dp(24), 0);
+        TextView description = text(
+                getString(R.string.artwork_settings_description), 15, R.color.text_primary
+        );
+        description.setPadding(0, 0, 0, dp(18));
+        panel.addView(description, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        TextView status = text(artworkStatusText(), 14, R.color.text_secondary);
+        panel.addView(status, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        Button prepare = new Button(this);
+        prepare.setText(R.string.artwork_prepare);
+        prepare.setAllCaps(false);
+        prepare.setOnClickListener(view -> {
+            ArtworkPrefetchWorker.enqueue(this, false);
+            status.setText(getString(R.string.artwork_started));
+        });
+        LinearLayout.LayoutParams prepareParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(52)
+        );
+        prepareParams.setMargins(0, dp(18), 0, dp(8));
+        panel.addView(prepare, prepareParams);
+
+        Button retry = new Button(this);
+        retry.setText(R.string.artwork_retry);
+        retry.setAllCaps(false);
+        retry.setOnClickListener(view -> {
+            ArtworkPrefetchWorker.enqueue(this, true);
+            status.setText(getString(R.string.artwork_started));
+        });
+        panel.addView(retry, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(52)
+        ));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.artwork_settings_title)
+                .setView(panel)
+                .setPositiveButton(android.R.string.ok, null)
+                .create();
+        dialog.show();
+    }
+
+    private String artworkStatusText() {
+        SharedPreferences preferences = getSharedPreferences(
+                ArtworkPrefetchWorker.PREFS, MODE_PRIVATE
+        );
+        String state = preferences.getString(ArtworkPrefetchWorker.STATUS, "idle");
+        int processed = preferences.getInt(ArtworkPrefetchWorker.PROCESSED, 0);
+        int total = preferences.getInt(ArtworkPrefetchWorker.TOTAL, 0);
+        int found = preferences.getInt(ArtworkPrefetchWorker.FOUND, 0);
+        int errors = preferences.getInt(ArtworkPrefetchWorker.ERRORS, 0);
+        if ("running".equals(state)) {
+            return getString(
+                    R.string.artwork_status_running, processed, total, found, errors
+            );
+        }
+        if ("complete".equals(state)) {
+            return getString(
+                    R.string.artwork_status_complete,
+                    processed, found, errors, artworkCache.cachedImageCount()
+            );
+        }
+        if ("paused".equals(state)) {
+            return getString(R.string.artwork_status_paused, processed, total);
+        }
+        return getString(R.string.artwork_status_idle, artworkCache.cachedImageCount());
     }
 
     private void addDrawerHeading(LinearLayout drawer, String label) {
@@ -1142,11 +1234,32 @@ public class NextActivity extends Activity {
         if (metadata == null || metadata.getDescription().getTitle() == null) {
             miniTitle.setText(R.string.library_now_playing_empty);
             miniArtist.setText(R.string.app_name);
+            miniArtwork.setTag(null);
+            showArtworkPlaceholder(miniArtwork);
         } else {
             miniTitle.setText(metadata.getDescription().getTitle());
             CharSequence artist = metadata.getDescription().getSubtitle();
             miniArtist.setText(artist == null || artist.length() == 0
                     ? getString(R.string.library_unknown_artist) : artist);
+            String mediaId = metadata.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+            if (mediaId != null && mediaId.startsWith(LOCAL_TRACK_PREFIX)) {
+                try {
+                    LocalTrack local = adapter.findTrack(Long.parseLong(
+                            mediaId.substring(LOCAL_TRACK_PREFIX.length())
+                    ));
+                    if (local != null) {
+                        loadArtwork(miniArtwork, local);
+                    } else {
+                        miniArtwork.setTag(null);
+                        showArtworkPlaceholder(miniArtwork);
+                    }
+                } catch (NumberFormatException ignored) {
+                    showArtworkPlaceholder(miniArtwork);
+                }
+            } else {
+                miniArtwork.setTag(null);
+                showArtworkPlaceholder(miniArtwork);
+            }
         }
         boolean playing = playbackState != null
                 && playbackState.getState() == PlaybackStateCompat.STATE_PLAYING;
@@ -1195,6 +1308,24 @@ public class NextActivity extends Activity {
         view.setTextColor(color(colorResource));
         view.setGravity(Gravity.CENTER_VERTICAL);
         return view;
+    }
+
+    private void showArtworkPlaceholder(ImageView view) {
+        view.setScaleType(ImageView.ScaleType.CENTER);
+        view.setBackgroundColor(color(R.color.bg_primary));
+        view.setImageResource(R.drawable.ic_music_note);
+    }
+
+    private void loadArtwork(ImageView view, LocalTrack track) {
+        String key = artworkCache.keyFor(track);
+        view.setTag(key);
+        showArtworkPlaceholder(view);
+        if (track.documentUri == null || track.documentUri.isEmpty()) return;
+        artworkCache.load(track, (loadedKey, bitmap) -> {
+            if (!loadedKey.equals(view.getTag()) || bitmap == null) return;
+            view.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            view.setImageBitmap(bitmap);
+        });
     }
 
     private int color(int resource) {
@@ -1255,9 +1386,8 @@ public class NextActivity extends Activity {
             content.setGravity(Gravity.CENTER_VERTICAL);
             content.setPadding(dp(12), dp(7), dp(4), dp(7));
 
-            TextView artwork = text("♫", 21, R.color.accent_light);
-            artwork.setGravity(Gravity.CENTER);
-            artwork.setBackgroundColor(color(R.color.bg_primary));
+            ImageView artwork = new ImageView(NextActivity.this);
+            showArtworkPlaceholder(artwork);
             content.addView(artwork, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
             LinearLayout labels = new LinearLayout(NextActivity.this);
@@ -1301,7 +1431,7 @@ public class NextActivity extends Activity {
             );
             dividerParams.setMargins(dp(72), 0, 0, 0);
             row.addView(divider, dividerParams);
-            return new TrackViewHolder(row, title, artist, duration, actions);
+            return new TrackViewHolder(row, artwork, title, artist, duration, actions);
         }
 
         @Override
@@ -1311,6 +1441,7 @@ public class NextActivity extends Activity {
                     ? "★ " + track.title : track.title);
             holder.artist.setText(track.artist);
             holder.duration.setText(formatDuration(track.durationSeconds));
+            loadArtwork(holder.artwork, track);
             holder.itemView.setOnClickListener(view -> clickListener.onClick(track.id));
             holder.itemView.setOnLongClickListener(view -> {
                 showTrackActions(track);
@@ -1322,6 +1453,17 @@ public class NextActivity extends Activity {
         @Override
         public int getItemCount() {
             return tracks.size();
+        }
+
+        LocalTrack findTrack(long trackId) {
+            for (LocalTrack track : tracks) if (track.id == trackId) return track;
+            return null;
+        }
+
+        @Override
+        public void onViewRecycled(TrackViewHolder holder) {
+            holder.artwork.setTag(null);
+            showArtworkPlaceholder(holder.artwork);
         }
     }
 
@@ -1351,9 +1493,8 @@ public class NextActivity extends Activity {
             cardParams.setMargins(dp(4), dp(4), dp(4), dp(4));
             card.setLayoutParams(cardParams);
 
-            TextView artwork = text("♫", 58, R.color.accent_deep);
-            artwork.setGravity(Gravity.CENTER);
-            artwork.setBackgroundColor(color(R.color.bg_primary));
+            ImageView artwork = new ImageView(NextActivity.this);
+            showArtworkPlaceholder(artwork);
             card.addView(artwork, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             ));
@@ -1374,7 +1515,7 @@ public class NextActivity extends Activity {
         @Override
         public void onBindViewHolder(FacetViewHolder holder, int position) {
             LibraryFacet facet = facets.get(position);
-            holder.artwork.setText(activeFacetType == null ? "♫" : facetIcon(activeFacetType));
+            loadArtwork(holder.artwork, facet.artworkTrack());
             holder.name.setText(facet.name);
             holder.count.setText(getString(R.string.library_facet_tracks, facet.trackCount));
             holder.itemView.setOnClickListener(view -> clickListener.onClick(facet));
@@ -1383,6 +1524,12 @@ public class NextActivity extends Activity {
         @Override
         public int getItemCount() {
             return facets.size();
+        }
+
+        @Override
+        public void onViewRecycled(FacetViewHolder holder) {
+            holder.artwork.setTag(null);
+            showArtworkPlaceholder(holder.artwork);
         }
     }
 
@@ -1459,11 +1606,11 @@ public class NextActivity extends Activity {
     }
 
     private static final class FacetViewHolder extends RecyclerView.ViewHolder {
-        final TextView artwork;
+        final ImageView artwork;
         final TextView name;
         final TextView count;
 
-        FacetViewHolder(View itemView, TextView artwork, TextView name, TextView count) {
+        FacetViewHolder(View itemView, ImageView artwork, TextView name, TextView count) {
             super(itemView);
             this.artwork = artwork;
             this.name = name;
@@ -1472,6 +1619,7 @@ public class NextActivity extends Activity {
     }
 
     private static final class TrackViewHolder extends RecyclerView.ViewHolder {
+        final ImageView artwork;
         final TextView title;
         final TextView artist;
         final TextView duration;
@@ -1479,12 +1627,14 @@ public class NextActivity extends Activity {
 
         TrackViewHolder(
                 View itemView,
+                ImageView artwork,
                 TextView title,
                 TextView artist,
                 TextView duration,
                 Button actions
         ) {
             super(itemView);
+            this.artwork = artwork;
             this.title = title;
             this.artist = artist;
             this.duration = duration;

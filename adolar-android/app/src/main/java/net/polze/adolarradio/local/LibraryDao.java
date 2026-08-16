@@ -30,17 +30,26 @@ public interface LibraryDao {
             + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE LIMIT :limit")
     List<LocalTrack> getActiveTrackPreview(int limit);
 
-    @Query("SELECT album AS name, COUNT(*) AS trackCount FROM local_tracks "
+    @Query("SELECT album AS name, COUNT(*) AS trackCount, MIN(id) AS artworkTrackId, "
+            + "MIN(documentUri) AS artworkDocumentUri, MIN(artist) AS artworkArtist, "
+            + "album AS artworkAlbum, MIN(albumArtist) AS artworkAlbumArtist, "
+            + "MAX(modifiedAt) AS artworkModifiedAt FROM local_tracks "
             + "WHERE missing=0 AND album IS NOT NULL AND TRIM(album)!='' "
             + "GROUP BY album COLLATE NOCASE ORDER BY album COLLATE NOCASE")
     List<LibraryFacet> getAlbums();
 
-    @Query("SELECT artist AS name, COUNT(*) AS trackCount FROM local_tracks "
+    @Query("SELECT artist AS name, COUNT(*) AS trackCount, MIN(id) AS artworkTrackId, "
+            + "MIN(documentUri) AS artworkDocumentUri, artist AS artworkArtist, "
+            + "'' AS artworkAlbum, '' AS artworkAlbumArtist, "
+            + "MAX(modifiedAt) AS artworkModifiedAt FROM local_tracks "
             + "WHERE missing=0 AND artist IS NOT NULL AND TRIM(artist)!='' "
             + "GROUP BY artist COLLATE NOCASE ORDER BY artist COLLATE NOCASE")
     List<LibraryFacet> getArtists();
 
-    @Query("SELECT genre AS name, COUNT(*) AS trackCount FROM local_tracks "
+    @Query("SELECT genre AS name, COUNT(*) AS trackCount, MIN(id) AS artworkTrackId, "
+            + "MIN(documentUri) AS artworkDocumentUri, MIN(artist) AS artworkArtist, "
+            + "'' AS artworkAlbum, '' AS artworkAlbumArtist, "
+            + "MAX(modifiedAt) AS artworkModifiedAt FROM local_tracks "
             + "WHERE missing=0 AND genre IS NOT NULL AND TRIM(genre)!='' "
             + "GROUP BY genre COLLATE NOCASE ORDER BY genre COLLATE NOCASE")
     List<LibraryFacet> getGenres();

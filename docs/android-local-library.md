@@ -1,7 +1,22 @@
 # Adolar Android: lokale Bibliothek und Offline-Sync
 
-Stand: 15. August 2026
+Stand: 16. August 2026
 Feature-Branch: `codex/android-local-library-sync`
+
+## Aktueller Implementierungsstand
+
+Das Offline-Fundament ist inzwischen in Adolar Next umgesetzt: Room-Bibliothek,
+hybrider MediaStore-/SAF-Scan, Suche und Facetten, lokale/smarte Playlists,
+Favoriten, lokaler Playcount, lokale Wiedergabe und die Raketen-Navigation.
+
+Eingebettete Albumcover bleiben bewusst aus dem schnellen Musikscan heraus.
+Sichtbare Titel und Bibliothekskacheln extrahieren ihr Cover asynchron per
+`MediaMetadataRetriever`, verkleinern es auf maximal 720 Pixel und speichern es
+im privaten App-Verzeichnis. Gleiche Alben teilen sich eine Cache-Datei. Unter
+`Lokale Einstellungen` kann zusätzlich ein eindeutiger WorkManager-Auftrag alle
+Alben vorbereiten; er übersteht das Verlassen der Activity und App-Neustarts.
+Fehlende Bilder werden durch kleine Marker gespeichert, damit Dateien ohne
+Cover nicht bei jedem Scrollen erneut geöffnet werden.
 
 ## Zielbild
 
@@ -33,8 +48,9 @@ und einem `AdolarMediaService`:
   `/api/stream/<track-id>`;
 - die lokale 384-MB-Cache-Schicht ist ein Stream-Cache, keine offline
   durchsuchbare Musikbibliothek;
-- es gibt weder Room/SQLite noch einen Dateiscanner, WorkManager oder eine
-  dauerhafte Sync-Warteschlange;
+- der Ausgangsstand besaß weder Room/SQLite noch einen Dateiscanner,
+  WorkManager oder eine dauerhafte Sync-Warteschlange; Room, Scanner und der
+  Cover-Worker sind umgesetzt, die Sync-Outbox steht noch aus;
 - es gibt keine Ordnerfreigabe über das Storage Access Framework;
 - Anmeldung erfolgt über ein Session-Cookie, das für einen langlebigen
   Hintergrund-Sync ungeeignet ist;

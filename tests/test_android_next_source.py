@@ -172,3 +172,21 @@ def test_local_playback_reuses_the_media_service_without_http_cache():
     assert "LocalLibraryDatabase.get(this)" in service
     assert "new DefaultDataSource.Factory(this)" in service
     assert "new Intent(this, NextActivity.class)" in service
+
+
+def test_embedded_artwork_is_loaded_lazily_and_can_be_prefetched_reliably():
+    gradle = read("app/build.gradle")
+    activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
+    cache = read(
+        "app/src/main/java/net/polze/adolarradio/local/ArtworkCache.java"
+    )
+    worker = read(
+        "app/src/main/java/net/polze/adolarradio/local/ArtworkPrefetchWorker.java"
+    )
+    assert "androidx.work:work-runtime" in gradle
+    assert "getEmbeddedPicture()" in cache
+    assert 'new File(this.context.getFilesDir(), "album-artwork")' in cache
+    assert "MAX_ARTWORK_EDGE" in cache
+    assert "ArtworkPrefetchWorker.enqueue" in activity
+    assert "ExistingWorkPolicy.KEEP" in worker
+    assert "loadArtwork(holder.artwork, track)" in activity

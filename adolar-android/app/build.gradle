@@ -35,6 +35,7 @@ dependencies {
     implementation "androidx.recyclerview:recyclerview:1.4.0"
     implementation "androidx.room:room-runtime:2.8.4"
     annotationProcessor "androidx.room:room-compiler:2.8.4"
+    implementation "androidx.work:work-runtime:2.11.2"
     // 1.9.4 is the newest stable Media3 line compatible with this app's API 35 toolchain.
     implementation "androidx.media3:media3-exoplayer:1.9.4"
     implementation "androidx.media3:media3-common:1.9.4"
