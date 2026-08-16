@@ -30,6 +30,12 @@ public interface LibraryDao {
             + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE LIMIT :limit")
     List<LocalTrack> getActiveTrackPreview(int limit);
 
+    @Query("SELECT * FROM local_tracks WHERE missing=0 "
+            + "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, "
+            + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE "
+            + "LIMIT :limit OFFSET :offset")
+    List<LocalTrack> getActiveTracksPage(int limit, int offset);
+
     @Query("SELECT album AS name, COUNT(*) AS trackCount, MIN(id) AS artworkTrackId, "
             + "MIN(documentUri) AS artworkDocumentUri, MIN(artist) AS artworkArtist, "
             + "album AS artworkAlbum, MIN(albumArtist) AS artworkAlbumArtist, "
@@ -63,19 +69,45 @@ public interface LibraryDao {
             + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE")
     List<LocalTrack> searchTracks(String query);
 
+    @Query("SELECT * FROM local_tracks WHERE missing=0 AND ("
+            + "INSTR(LOWER(title), LOWER(:query))>0 OR "
+            + "INSTR(LOWER(artist), LOWER(:query))>0 OR "
+            + "INSTR(LOWER(album), LOWER(:query))>0 OR "
+            + "INSTR(LOWER(genre), LOWER(:query))>0) "
+            + "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, "
+            + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE "
+            + "LIMIT :limit OFFSET :offset")
+    List<LocalTrack> searchTracksPage(String query, int limit, int offset);
+
     @Query("SELECT * FROM local_tracks WHERE missing=0 AND album=:name COLLATE NOCASE "
             + "ORDER BY COALESCE(trackNo, 2147483647), title COLLATE NOCASE")
     List<LocalTrack> getTracksByAlbum(String name);
+
+    @Query("SELECT * FROM local_tracks WHERE missing=0 AND album=:name COLLATE NOCASE "
+            + "ORDER BY COALESCE(trackNo, 2147483647), title COLLATE NOCASE "
+            + "LIMIT :limit OFFSET :offset")
+    List<LocalTrack> getTracksByAlbumPage(String name, int limit, int offset);
 
     @Query("SELECT * FROM local_tracks WHERE missing=0 AND artist=:name COLLATE NOCASE "
             + "ORDER BY album COLLATE NOCASE, COALESCE(trackNo, 2147483647), "
             + "title COLLATE NOCASE")
     List<LocalTrack> getTracksByArtist(String name);
 
+    @Query("SELECT * FROM local_tracks WHERE missing=0 AND artist=:name COLLATE NOCASE "
+            + "ORDER BY album COLLATE NOCASE, COALESCE(trackNo, 2147483647), "
+            + "title COLLATE NOCASE LIMIT :limit OFFSET :offset")
+    List<LocalTrack> getTracksByArtistPage(String name, int limit, int offset);
+
     @Query("SELECT * FROM local_tracks WHERE missing=0 AND genre=:name COLLATE NOCASE "
             + "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, "
             + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE")
     List<LocalTrack> getTracksByGenre(String name);
+
+    @Query("SELECT * FROM local_tracks WHERE missing=0 AND genre=:name COLLATE NOCASE "
+            + "ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, "
+            + "COALESCE(trackNo, 2147483647), title COLLATE NOCASE "
+            + "LIMIT :limit OFFSET :offset")
+    List<LocalTrack> getTracksByGenrePage(String name, int limit, int offset);
 
     @Query("SELECT * FROM local_tracks WHERE rootUri=:rootUri")
     List<LocalTrack> getTracksForRoot(String rootUri);
@@ -123,6 +155,13 @@ public interface LibraryDao {
             + "ORDER BY pt.position")
     List<LocalTrack> getStaticPlaylistTracks(long playlistId);
 
+    @Query("SELECT t.* FROM playlist_tracks pt JOIN local_tracks t "
+            + "ON t.id=pt.localTrackId WHERE pt.playlistId=:playlistId AND t.missing=0 "
+            + "ORDER BY pt.position LIMIT :limit OFFSET :offset")
+    List<LocalTrack> getStaticPlaylistTracksPage(
+            long playlistId, int limit, int offset
+    );
+
     @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks "
             + "WHERE playlistId=:playlistId")
     int nextPlaylistPosition(long playlistId);
@@ -150,6 +189,12 @@ public interface LibraryDao {
             + "WHERE t.missing=0 AND s.favorite=1 "
             + "ORDER BY t.artist COLLATE NOCASE, t.title COLLATE NOCASE")
     List<LocalTrack> getFavoriteTracks();
+
+    @Query("SELECT t.* FROM local_tracks t JOIN track_state s ON s.localTrackId=t.id "
+            + "WHERE t.missing=0 AND s.favorite=1 "
+            + "ORDER BY t.artist COLLATE NOCASE, t.title COLLATE NOCASE "
+            + "LIMIT :limit OFFSET :offset")
+    List<LocalTrack> getFavoriteTracksPage(int limit, int offset);
 
     @Query("SELECT * FROM local_tracks WHERE missing=0 ORDER BY addedAt DESC LIMIT 500")
     List<LocalTrack> getRecentlyAddedTracks();

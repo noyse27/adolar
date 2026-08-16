@@ -18,6 +18,26 @@ Alben vorbereiten; er übersteht das Verlassen der Activity und App-Neustarts.
 Fehlende Bilder werden durch kleine Marker gespeichert, damit Dateien ohne
 Cover nicht bei jedem Scrollen erneut geöffnet werden.
 
+Die lokale Wiedergabe verwendet nun die Reihenfolge des jeweils sichtbaren
+Titel-, Such-, Facetten- oder Playlist-Screens als Queue. Titelende sowie
+MediaSession-/Notification-Aktionen wechseln innerhalb dieser Queue; einzelne
+Titel können als Nächstes oder ans Queue-Ende gesetzt werden. Queue, aktueller
+Index, Quellenname und Position werden in der privaten Playback-Sitzung
+gespeichert und nach einem Prozessneustart pausiert wiederhergestellt. Der
+große lokale Player zeigt Cover, Quelle, Metadaten, Seekbar und den lokalen
+Lieben-Status auf derselben MediaSession. Shuffle mischt nur die noch nicht
+gehörten Queue-Einträge, behält den bisherigen Verlauf für „Zurück“ und wird
+zusammen mit ursprünglicher Reihenfolge und Queue über Neustarts persistiert.
+
+Der MediaBrowser stellt Android Auto nun eine echte Hauptnavigation mit
+`Lokale Musik`, `Playlists` und – nur bei konfiguriertem Adolar –
+`Adolar-Radios` bereit. Lokale Musik lässt sich nach allen Titeln, Favoriten,
+Alben, Interpreten und Genres öffnen; statische, intelligente und
+System-Playlists verwenden dieselbe lokale Queue wie die Handy-App. Große
+Listen werden in Seiten von standardmäßig 100 und höchstens 200 Einträgen
+geliefert. Aus dem Fahrzeug gestartete Titel laden im Hintergrund dennoch die
+vollständige Quellqueue, sodass Weiter, Zurück und Shuffle korrekt bleiben.
+
 ## Zielbild
 
 Adolar Android soll auch ohne konfigurierten oder erreichbaren Adolar-Server als
@@ -32,6 +52,13 @@ sein:
 - lokaler Playcount und lokaler Favoritenstatus;
 - dauerhafte Warteschlange für noch nicht übertragene Hör-, Favoriten- und
   Last.fm-Aktionen.
+
+Android Auto ist dabei keine optionale Ergänzung, sondern eine
+Hauptanforderung von Adolar Next. Die lokale Bibliothek und lokale Playlists
+müssen im Offlinebetrieb im Fahrzeug durchsuch- und abspielbar bleiben; bei
+bestehender Adolar-Verbindung kommen die Adolar-Radios hinzu. Telefon,
+Benachrichtigung, Sperrbildschirm, Bluetooth und Android Auto steuern immer
+dieselbe persistierte Queue einschließlich Shuffle-Zustand.
 
 Sobald wieder Netzwerk verfügbar ist, synchronisiert die App ausstehende
 Aktionen. Wiederholte Requests dürfen Playcounts oder Last.fm-Scrobbles nicht
@@ -335,6 +362,13 @@ HTTP-Cache wird nur für `REMOTE` benutzt. Queue, aktuelle Position und Quelle
 werden gespeichert, damit ein Prozessneustart die Sitzung sinnvoll
 wiederherstellen kann. Der MediaBrowser-Root bietet für Android Auto getrennte
 Knoten für lokale Musik/Playlists und Adolar Radio an.
+
+**TODO:** Crossfade für lokale Dateien folgt nach der stabilen Queue- und
+Android-Auto-Unterstützung. Dafür muss der nächste lokale Titel vorab lesbar
+und dekodierbar sein; Playcount-/Scrobble-Grenzen, manuelles Überspringen,
+Audiofokus und Wiederherstellung dürfen durch die Überblendung nicht doppelt
+oder falsch ausgelöst werden. Das bereits vorhandene Radio-Crossfade ist davon
+unabhängig.
 
 Beim Abspielen wird lokal sofort gezählt beziehungsweise vorgemerkt:
 

@@ -75,6 +75,14 @@ public final class LocalLibraryRepository {
         queryExecutor.execute(() -> loadTracks(true, callback));
     }
 
+    public void loadTrack(long trackId, TracksCallback callback) {
+        queryExecutor.execute(() -> {
+            LocalTrack track = dao.getTrack(trackId);
+            postTracks(track == null
+                    ? Collections.emptyList() : Collections.singletonList(track), callback);
+        });
+    }
+
     public void searchTracks(String query, TracksCallback callback) {
         queryExecutor.execute(() -> postTracks(dao.searchTracks(query), callback));
     }

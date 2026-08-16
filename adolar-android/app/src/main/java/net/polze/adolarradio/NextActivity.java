@@ -14,6 +14,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.support.v4.media.MediaBrowserCompat;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaControllerCompat;
@@ -31,6 +32,7 @@ import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.text.Editable;
@@ -70,6 +72,8 @@ public class NextActivity extends Activity {
     private LinearLayout contentContainer;
     private View drawerView;
     private RecyclerView trackList;
+    private FrameLayout libraryFrame;
+    private View nowPlayingPanel;
     private TrackAdapter adapter;
     private FacetAdapter facetAdapter;
     private PlaylistAdapter playlistAdapter;
@@ -82,10 +86,25 @@ public class NextActivity extends Activity {
     private Button emptyAction;
     private LinearLayout scanPanel;
     private TextView scanPanelText;
+    private View miniPlayer;
     private TextView miniTitle;
     private TextView miniArtist;
     private TextView miniPlayPause;
     private ImageView miniArtwork;
+    private ImageView playerArtwork;
+    private TextView playerTitle;
+    private TextView playerArtist;
+    private TextView playerAlbum;
+    private TextView playerSource;
+    private TextView playerElapsed;
+    private TextView playerDuration;
+    private TextView playerShuffle;
+    private TextView playerPlayPause;
+    private Button playerLove;
+    private SeekBar playerSeek;
+    private LocalTrack nowPlayingLocalTrack;
+    private long nowPlayingTrackId = -1L;
+    private boolean userSeeking;
     private LocalLibraryRepository repository;
     private ArtworkCache artworkCache;
     private MediaBrowserCompat mediaBrowser;
@@ -100,14 +119,23 @@ public class NextActivity extends Activity {
     private Runnable pendingSearch;
     private int searchGeneration;
     private Screen screen = Screen.TRACKS;
+    private Screen screenBeforeNowPlaying = Screen.TRACKS;
     private FacetType activeFacetType;
     private String activeFacetName;
     private LocalPlaylist activePlaylist;
     private final Set<Long> favoriteTrackIds = new HashSet<>();
 
     private enum Screen {
-        TRACKS, SEARCH, FACETS, FACET_TRACKS, PLAYLISTS, PLAYLIST_TRACKS
+        TRACKS, SEARCH, FACETS, FACET_TRACKS, PLAYLISTS, PLAYLIST_TRACKS, NOW_PLAYING
     }
+
+    private final Runnable playerProgress = new Runnable() {
+        @Override
+        public void run() {
+            updatePlayerProgress();
+            if (screen == Screen.NOW_PLAYING) uiHandler.postDelayed(this, 500L);
+        }
+    };
 
     private final MediaBrowserCompat.ConnectionCallback browserCallback =
             new MediaBrowserCompat.ConnectionCallback() {
@@ -121,6 +149,9 @@ public class NextActivity extends Activity {
                         mediaController.registerCallback(controllerCallback);
                         updateMiniPlayer(
                                 mediaController.getMetadata(), mediaController.getPlaybackState()
+                        );
+                        updateShuffleButton(
+                                mediaController.getShuffleMode(), mediaController.getMetadata()
                         );
                         if (pendingTrackId != null) {
                             long trackId = pendingTrackId;
@@ -159,6 +190,12 @@ public class NextActivity extends Activity {
                 public void onPlaybackStateChanged(PlaybackStateCompat state) {
                     updateMiniPlayer(mediaController == null
                             ? null : mediaController.getMetadata(), state);
+                }
+
+                @Override
+                public void onShuffleModeChanged(int shuffleMode) {
+                    updateShuffleButton(shuffleMode, mediaController == null
+                            ? null : mediaController.getMetadata());
                 }
             };
 
@@ -234,7 +271,7 @@ public class NextActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ));
 
-        FrameLayout libraryFrame = new FrameLayout(this);
+        libraryFrame = new FrameLayout(this);
         LinearLayout.LayoutParams libraryParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         );
@@ -284,7 +321,14 @@ public class NextActivity extends Activity {
         );
         libraryFrame.addView(emptyAction, emptyParams);
 
-        content.addView(buildMiniPlayer(), new LinearLayout.LayoutParams(
+        nowPlayingPanel = buildNowPlayingPanel();
+        nowPlayingPanel.setVisibility(View.GONE);
+        libraryFrame.addView(nowPlayingPanel, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+
+        miniPlayer = buildMiniPlayer();
+        content.addView(miniPlayer, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(72)
         ));
 
@@ -491,8 +535,8 @@ public class NextActivity extends Activity {
         miniArtist.setSingleLine(true);
         labels.addView(miniTitle);
         labels.addView(miniArtist);
-        labels.setContentDescription(getString(R.string.now_playing_toggle));
-        labels.setOnClickListener(view -> togglePlayback());
+        labels.setContentDescription(getString(R.string.now_playing_open));
+        labels.setOnClickListener(view -> showNowPlaying());
         controls.addView(labels, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
@@ -512,6 +556,133 @@ public class NextActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ));
         return mini;
+    }
+
+    private View buildNowPlayingPanel() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(color(R.color.bg_tertiary));
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setGravity(Gravity.CENTER_HORIZONTAL);
+        panel.setPadding(dp(24), dp(16), dp(24), dp(24));
+        scroll.addView(panel, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        playerSource = text(getString(R.string.local_source), 13, R.color.accent_light);
+        playerSource.setGravity(Gravity.CENTER);
+        panel.addView(playerSource, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(32)
+        ));
+
+        playerArtwork = new ImageView(this);
+        showArtworkPlaceholder(playerArtwork);
+        int artworkSize = Math.min(
+                dp(280), getResources().getDisplayMetrics().widthPixels - dp(72)
+        );
+        LinearLayout.LayoutParams artworkParams = new LinearLayout.LayoutParams(
+                artworkSize, artworkSize
+        );
+        artworkParams.setMargins(0, dp(8), 0, dp(18));
+        panel.addView(playerArtwork, artworkParams);
+
+        playerTitle = text(getString(R.string.library_now_playing_empty), 24, R.color.text_primary);
+        playerTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        playerTitle.setGravity(Gravity.CENTER);
+        playerTitle.setSingleLine(true);
+        panel.addView(playerTitle, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(42)
+        ));
+        playerArtist = text(getString(R.string.library_unknown_artist), 17, R.color.text_secondary);
+        playerArtist.setGravity(Gravity.CENTER);
+        playerArtist.setSingleLine(true);
+        panel.addView(playerArtist, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(30)
+        ));
+        playerAlbum = text("", 14, R.color.text_secondary);
+        playerAlbum.setGravity(Gravity.CENTER);
+        playerAlbum.setSingleLine(true);
+        panel.addView(playerAlbum, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(28)
+        ));
+
+        playerSeek = new SeekBar(this);
+        playerSeek.setMax(1000);
+        playerSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser) {
+                    long duration = currentDurationMs();
+                    playerElapsed.setText(formatDuration(duration * progress / 1000L / 1000L));
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+                userSeeking = true;
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                long duration = currentDurationMs();
+                if (mediaController != null && duration > 0L) {
+                    mediaController.getTransportControls().seekTo(
+                            duration * seekBar.getProgress() / 1000L
+                    );
+                }
+                userSeeking = false;
+            }
+        });
+        panel.addView(playerSeek, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
+        ));
+
+        LinearLayout times = new LinearLayout(this);
+        times.setOrientation(LinearLayout.HORIZONTAL);
+        playerElapsed = text("0:00", 12, R.color.text_secondary);
+        playerDuration = text("0:00", 12, R.color.text_secondary);
+        playerDuration.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        times.addView(playerElapsed, new LinearLayout.LayoutParams(0, dp(24), 1f));
+        times.addView(playerDuration, new LinearLayout.LayoutParams(0, dp(24), 1f));
+        panel.addView(times, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(24)
+        ));
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setGravity(Gravity.CENTER);
+        playerShuffle = playerButton(
+                getString(R.string.shuffle_symbol), R.string.shuffle_enable,
+                false, view -> toggleShuffle()
+        );
+        controls.addView(playerShuffle, new LinearLayout.LayoutParams(dp(56), dp(64)));
+        controls.addView(playerButton(
+                getString(R.string.previous), R.string.previous_track,
+                false, view -> skipPlayback(-1)
+        ), new LinearLayout.LayoutParams(dp(64), dp(64)));
+        playerPlayPause = playerButton(
+                getString(R.string.play), R.string.play, true, view -> togglePlayback()
+        );
+        LinearLayout.LayoutParams playParams = new LinearLayout.LayoutParams(dp(72), dp(64));
+        playParams.setMargins(dp(12), 0, dp(12), 0);
+        controls.addView(playerPlayPause, playParams);
+        controls.addView(playerButton(
+                getString(R.string.next), R.string.next_track,
+                false, view -> skipPlayback(1)
+        ), new LinearLayout.LayoutParams(dp(64), dp(64)));
+        panel.addView(controls, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(76)
+        ));
+
+        playerLove = new Button(this);
+        playerLove.setAllCaps(false);
+        playerLove.setText(R.string.love_local_off);
+        playerLove.setOnClickListener(view -> toggleNowPlayingFavorite());
+        panel.addView(playerLove, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(52)
+        ));
+        return scroll;
     }
 
     private TextView playerButton(
@@ -672,6 +843,7 @@ public class NextActivity extends Activity {
     }
 
     private void showAllTracks() {
+        leaveNowPlayingSurface();
         screen = Screen.TRACKS;
         activeFacetType = null;
         activeFacetName = null;
@@ -686,6 +858,7 @@ public class NextActivity extends Activity {
     }
 
     private void showSearch() {
+        leaveNowPlayingSurface();
         screen = Screen.SEARCH;
         activeFacetType = null;
         activeFacetName = null;
@@ -731,6 +904,7 @@ public class NextActivity extends Activity {
     }
 
     private void showFacets(FacetType type) {
+        leaveNowPlayingSurface();
         screen = Screen.FACETS;
         activeFacetType = type;
         activeFacetName = null;
@@ -756,6 +930,7 @@ public class NextActivity extends Activity {
     }
 
     private void openFacet(LibraryFacet facet) {
+        leaveNowPlayingSurface();
         FacetType type = activeFacetType;
         if (type == null) return;
         screen = Screen.FACET_TRACKS;
@@ -776,6 +951,7 @@ public class NextActivity extends Activity {
     }
 
     private void showPlaylists() {
+        leaveNowPlayingSurface();
         screen = Screen.PLAYLISTS;
         activeFacetType = null;
         activeFacetName = null;
@@ -813,6 +989,7 @@ public class NextActivity extends Activity {
     }
 
     private void openPlaylist(LocalPlaylist playlist) {
+        leaveNowPlayingSurface();
         screen = Screen.PLAYLIST_TRACKS;
         activePlaylist = playlist;
         activeFacetType = null;
@@ -923,6 +1100,8 @@ public class NextActivity extends Activity {
         boolean favorite = favoriteTrackIds.contains(track.id);
         String[] actions = {
                 favorite ? "Nicht mehr lieben" : "Lieben",
+                getString(R.string.queue_play_next),
+                getString(R.string.queue_add),
                 getString(R.string.playlist_add_track)
         };
         new AlertDialog.Builder(this)
@@ -940,11 +1119,39 @@ public class NextActivity extends Activity {
                                 openPlaylist(activePlaylist);
                             }
                         });
+                    } else if (which == 1) {
+                        addTrackToPlaybackQueue(track, true);
+                    } else if (which == 2) {
+                        addTrackToPlaybackQueue(track, false);
                     } else {
                         showAddToPlaylist(track);
                     }
                 })
                 .show();
+    }
+
+    private void addTrackToPlaybackQueue(LocalTrack track, boolean playNext) {
+        MediaMetadataCompat metadata = mediaController == null
+                ? null : mediaController.getMetadata();
+        String mediaId = metadata == null ? null
+                : metadata.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        if (mediaController == null || mediaId == null
+                || !mediaId.startsWith(LOCAL_TRACK_PREFIX)) {
+            playLocalTrack(track.id);
+            Toast.makeText(this, R.string.queue_started, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Bundle extras = new Bundle();
+        extras.putLong(AdolarMediaService.EXTRA_LOCAL_TRACK_ID, track.id);
+        mediaController.getTransportControls().sendCustomAction(
+                playNext ? AdolarMediaService.ACTION_LOCAL_PLAY_NEXT
+                        : AdolarMediaService.ACTION_LOCAL_ADD_TO_QUEUE,
+                extras
+        );
+        Toast.makeText(
+                this, playNext ? R.string.queue_next_added : R.string.queue_added,
+                Toast.LENGTH_SHORT
+        ).show();
     }
 
     private void refreshFavoriteIds() {
@@ -1190,8 +1397,14 @@ public class NextActivity extends Activity {
             connectBrowser();
             return;
         }
+        Bundle extras = new Bundle();
+        extras.putLongArray(AdolarMediaService.EXTRA_LOCAL_QUEUE_IDS, adapter.queueIds());
+        extras.putInt(
+                AdolarMediaService.EXTRA_LOCAL_QUEUE_INDEX, adapter.indexOfTrack(trackId)
+        );
+        extras.putString(AdolarMediaService.EXTRA_LOCAL_QUEUE_NAME, currentQueueName());
         mediaController.getTransportControls().playFromMediaId(
-                LOCAL_TRACK_PREFIX + trackId, null
+                LOCAL_TRACK_PREFIX + trackId, extras
         );
     }
 
@@ -1207,24 +1420,227 @@ public class NextActivity extends Activity {
 
     private void skipPlayback(int direction) {
         if (mediaController == null) return;
-        MediaMetadataCompat metadata = mediaController.getMetadata();
-        String mediaId = metadata == null ? null
-                : metadata.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
-        if (mediaId != null && mediaId.startsWith(LOCAL_TRACK_PREFIX)) {
-            try {
-                long currentId = Long.parseLong(mediaId.substring(LOCAL_TRACK_PREFIX.length()));
-                Long adjacentId = adapter.adjacentTrackId(currentId, direction);
-                if (adjacentId != null) playLocalTrack(adjacentId);
-                return;
-            } catch (NumberFormatException ignored) {
-                // Fall through to the service transport control below.
-            }
-        }
         if (direction < 0) {
             mediaController.getTransportControls().skipToPrevious();
         } else {
             mediaController.getTransportControls().skipToNext();
         }
+    }
+
+    private void toggleShuffle() {
+        if (mediaController == null || playerShuffle == null || !playerShuffle.isEnabled()) return;
+        int current = mediaController.getShuffleMode();
+        int next = current == PlaybackStateCompat.SHUFFLE_MODE_ALL
+                ? PlaybackStateCompat.SHUFFLE_MODE_NONE
+                : PlaybackStateCompat.SHUFFLE_MODE_ALL;
+        mediaController.getTransportControls().setShuffleMode(next);
+        updateShuffleButton(next, mediaController.getMetadata());
+    }
+
+    private void updateShuffleButton(int shuffleMode, MediaMetadataCompat metadata) {
+        if (playerShuffle == null) return;
+        String mediaId = metadata == null ? null
+                : metadata.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        boolean localTrack = mediaId != null && mediaId.startsWith(LOCAL_TRACK_PREFIX);
+        boolean enabled = localTrack && shuffleMode == PlaybackStateCompat.SHUFFLE_MODE_ALL;
+        playerShuffle.setEnabled(localTrack);
+        playerShuffle.setAlpha(localTrack ? 1f : 0.35f);
+        playerShuffle.setBackgroundColor(enabled ? color(R.color.accent_deep) : Color.TRANSPARENT);
+        playerShuffle.setContentDescription(getString(
+                enabled ? R.string.shuffle_disable : R.string.shuffle_enable
+        ));
+    }
+
+    private String currentQueueName() {
+        if (screen == Screen.PLAYLIST_TRACKS && activePlaylist != null) {
+            return activePlaylist.name;
+        }
+        if (screen == Screen.FACET_TRACKS && activeFacetName != null) {
+            return activeFacetName;
+        }
+        if (screen == Screen.SEARCH) return getString(R.string.library_drawer_search);
+        return getString(R.string.library_tracks);
+    }
+
+    private void showNowPlaying() {
+        if (screen != Screen.NOW_PLAYING) screenBeforeNowPlaying = screen;
+        screen = Screen.NOW_PLAYING;
+        hideSearchInput();
+        toolbarBack.setVisibility(View.VISIBLE);
+        toolbarIcon.setText("▶");
+        toolbarTitle.setText(R.string.now_playing_title);
+        toolbarSearch.setVisibility(View.GONE);
+        statusView.setVisibility(View.GONE);
+        miniPlayer.setVisibility(View.GONE);
+        trackList.setVisibility(View.GONE);
+        emptyAction.setVisibility(View.GONE);
+        scanPanel.setVisibility(View.GONE);
+        nowPlayingPanel.setVisibility(View.VISIBLE);
+        updateNowPlaying(
+                mediaController == null ? null : mediaController.getMetadata(),
+                mediaController == null ? null : mediaController.getPlaybackState()
+        );
+        uiHandler.removeCallbacks(playerProgress);
+        uiHandler.post(playerProgress);
+    }
+
+    private void leaveNowPlayingSurface() {
+        if (nowPlayingPanel != null) nowPlayingPanel.setVisibility(View.GONE);
+        if (trackList != null) trackList.setVisibility(View.VISIBLE);
+        if (statusView != null) statusView.setVisibility(View.VISIBLE);
+        if (miniPlayer != null) miniPlayer.setVisibility(View.VISIBLE);
+        uiHandler.removeCallbacks(playerProgress);
+        userSeeking = false;
+    }
+
+    private void returnFromNowPlaying() {
+        Screen previous = screenBeforeNowPlaying;
+        if (previous == Screen.FACETS && activeFacetType != null) {
+            showFacets(activeFacetType);
+        } else if (previous == Screen.FACET_TRACKS
+                && activeFacetType != null && activeFacetName != null) {
+            restoreFacetTracks();
+        } else if (previous == Screen.PLAYLISTS) {
+            showPlaylists();
+        } else if (previous == Screen.PLAYLIST_TRACKS && activePlaylist != null) {
+            openPlaylist(activePlaylist);
+        } else if (previous == Screen.SEARCH) {
+            showSearch();
+        } else {
+            showAllTracks();
+        }
+    }
+
+    private void restoreFacetTracks() {
+        leaveNowPlayingSurface();
+        screen = Screen.FACET_TRACKS;
+        hideSearchInput();
+        toolbarBack.setVisibility(View.VISIBLE);
+        toolbarIcon.setText(facetIcon(activeFacetType));
+        toolbarTitle.setText(activeFacetName);
+        setToolbarSearchAction();
+        useTrackList();
+        statusView.setText(R.string.library_loading);
+        repository.loadTracksForFacet(activeFacetType, activeFacetName, tracks -> {
+            if (screen != Screen.FACET_TRACKS) return;
+            adapter.setTracks(tracks);
+            statusView.setText(getString(R.string.library_facet_tracks, tracks.size()));
+        });
+    }
+
+    private void updateNowPlaying(
+            MediaMetadataCompat metadata, PlaybackStateCompat playbackState
+    ) {
+        if (playerTitle == null) return;
+        boolean playing = playbackState != null
+                && playbackState.getState() == PlaybackStateCompat.STATE_PLAYING;
+        playerPlayPause.setText(playing ? R.string.pause : R.string.play);
+        playerPlayPause.setContentDescription(getString(playing ? R.string.pause : R.string.play));
+        if (metadata == null || metadata.getDescription().getTitle() == null) {
+            playerTitle.setText(R.string.library_now_playing_empty);
+            playerArtist.setText(R.string.library_unknown_artist);
+            playerAlbum.setText("");
+            playerSource.setText(getString(
+                    R.string.player_source_format, getString(R.string.local_source)
+            ));
+            playerLove.setEnabled(false);
+            nowPlayingLocalTrack = null;
+            nowPlayingTrackId = -1L;
+            playerArtwork.setTag(null);
+            showArtworkPlaceholder(playerArtwork);
+            updateShuffleButton(PlaybackStateCompat.SHUFFLE_MODE_NONE, null);
+            return;
+        }
+        playerTitle.setText(metadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE));
+        playerArtist.setText(metadata.getString(MediaMetadataCompat.METADATA_KEY_ARTIST));
+        playerAlbum.setText(metadata.getString(MediaMetadataCompat.METADATA_KEY_ALBUM));
+        String source = metadata.getString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE);
+        String sourceName = source == null || source.isEmpty()
+                ? getString(R.string.local_source) : source;
+        playerSource.setText(getString(R.string.player_source_format, sourceName));
+        playerDuration.setText(formatDuration(currentDurationMs() / 1000L));
+
+        String mediaId = metadata.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        updateShuffleButton(
+                mediaController == null ? PlaybackStateCompat.SHUFFLE_MODE_NONE
+                        : mediaController.getShuffleMode(),
+                metadata
+        );
+        if (mediaId != null && mediaId.startsWith(LOCAL_TRACK_PREFIX)) {
+            try {
+                long trackId = Long.parseLong(mediaId.substring(LOCAL_TRACK_PREFIX.length()));
+                bindNowPlayingTrack(trackId);
+            } catch (NumberFormatException ignored) {
+                playerLove.setEnabled(false);
+            }
+        } else {
+            nowPlayingLocalTrack = null;
+            nowPlayingTrackId = -1L;
+            playerLove.setEnabled(false);
+            playerArtwork.setTag(null);
+            showArtworkPlaceholder(playerArtwork);
+        }
+    }
+
+    private void bindNowPlayingTrack(long trackId) {
+        if (nowPlayingTrackId == trackId && nowPlayingLocalTrack != null) {
+            updatePlayerLove();
+            return;
+        }
+        nowPlayingTrackId = trackId;
+        nowPlayingLocalTrack = null;
+        playerLove.setEnabled(false);
+        playerArtwork.setTag(null);
+        showArtworkPlaceholder(playerArtwork);
+        repository.loadTrack(trackId, tracks -> {
+            if (nowPlayingTrackId != trackId || tracks.isEmpty()) return;
+            nowPlayingLocalTrack = tracks.get(0);
+            loadArtwork(playerArtwork, nowPlayingLocalTrack);
+            updatePlayerLove();
+        });
+    }
+
+    private void updatePlayerLove() {
+        if (playerLove == null || nowPlayingLocalTrack == null) return;
+        boolean favorite = favoriteTrackIds.contains(nowPlayingLocalTrack.id);
+        playerLove.setEnabled(true);
+        playerLove.setText(favorite ? R.string.love_local_on : R.string.love_local_off);
+    }
+
+    private void toggleNowPlayingFavorite() {
+        LocalTrack track = nowPlayingLocalTrack;
+        if (track == null) return;
+        boolean favorite = favoriteTrackIds.contains(track.id);
+        repository.setFavorite(track.id, !favorite, (success, message) -> {
+            if (!success) return;
+            if (favorite) favoriteTrackIds.remove(track.id);
+            else favoriteTrackIds.add(track.id);
+            adapter.notifyDataSetChanged();
+            updatePlayerLove();
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    private long currentDurationMs() {
+        MediaMetadataCompat metadata = mediaController == null
+                ? null : mediaController.getMetadata();
+        return metadata == null ? 0L
+                : Math.max(0L, metadata.getLong(MediaMetadataCompat.METADATA_KEY_DURATION));
+    }
+
+    private void updatePlayerProgress() {
+        if (playerSeek == null || userSeeking || mediaController == null) return;
+        PlaybackStateCompat state = mediaController.getPlaybackState();
+        long duration = currentDurationMs();
+        long position = state == null ? 0L : Math.max(0L, state.getPosition());
+        if (state != null && state.getState() == PlaybackStateCompat.STATE_PLAYING) {
+            position += Math.max(0L,
+                    SystemClock.elapsedRealtime() - state.getLastPositionUpdateTime());
+        }
+        if (duration > 0L) position = Math.min(position, duration);
+        playerSeek.setProgress(duration <= 0L ? 0 : (int) (position * 1000L / duration));
+        playerElapsed.setText(formatDuration(position / 1000L));
+        playerDuration.setText(formatDuration(duration / 1000L));
     }
 
     private void updateMiniPlayer(
@@ -1252,6 +1668,19 @@ public class NextActivity extends Activity {
                     } else {
                         miniArtwork.setTag(null);
                         showArtworkPlaceholder(miniArtwork);
+                        repository.loadTrack(
+                                Long.parseLong(mediaId.substring(LOCAL_TRACK_PREFIX.length())),
+                                tracks -> {
+                                    MediaMetadataCompat current = mediaController == null
+                                            ? null : mediaController.getMetadata();
+                                    String currentId = current == null ? null : current.getString(
+                                            MediaMetadataCompat.METADATA_KEY_MEDIA_ID
+                                    );
+                                    if (mediaId.equals(currentId) && !tracks.isEmpty()) {
+                                        loadArtwork(miniArtwork, tracks.get(0));
+                                    }
+                                }
+                        );
                     }
                 } catch (NumberFormatException ignored) {
                     showArtworkPlaceholder(miniArtwork);
@@ -1265,6 +1694,7 @@ public class NextActivity extends Activity {
                 && playbackState.getState() == PlaybackStateCompat.STATE_PLAYING;
         miniPlayPause.setText(playing ? R.string.pause : R.string.play);
         miniPlayPause.setContentDescription(getString(playing ? R.string.pause : R.string.play));
+        updateNowPlaying(metadata, playbackState);
     }
 
     private void openRadios() {
@@ -1284,6 +1714,10 @@ public class NextActivity extends Activity {
     public void onBackPressed() {
         if (drawerLayout != null && drawerLayout.isDrawerOpen(Gravity.START)) {
             drawerLayout.closeDrawer(Gravity.START);
+            return;
+        }
+        if (screen == Screen.NOW_PLAYING) {
+            returnFromNowPlaying();
             return;
         }
         if (screen == Screen.FACET_TRACKS && activeFacetType != null) {
@@ -1370,6 +1804,21 @@ public class NextActivity extends Activity {
             int nextIndex = (currentIndex + (direction < 0 ? -1 : 1) + tracks.size())
                     % tracks.size();
             return tracks.get(nextIndex).id;
+        }
+
+        long[] queueIds() {
+            long[] result = new long[tracks.size()];
+            for (int index = 0; index < tracks.size(); index++) {
+                result[index] = tracks.get(index).id;
+            }
+            return result;
+        }
+
+        int indexOfTrack(long trackId) {
+            for (int index = 0; index < tracks.size(); index++) {
+                if (tracks.get(index).id == trackId) return index;
+            }
+            return -1;
         }
 
         @Override

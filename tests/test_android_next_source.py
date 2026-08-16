@@ -103,6 +103,71 @@ def test_library_exposes_navigation_and_complete_mini_player_controls():
     assert "miniPlayPause" in activity
 
 
+def test_local_playback_uses_a_persistent_screen_ordered_queue():
+    activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
+    service = read(
+        "app/src/main/java/net/polze/adolarradio/AdolarMediaService.java"
+    )
+    assert "EXTRA_LOCAL_QUEUE_IDS" in activity
+    assert "adapter.queueIds()" in activity
+    assert "advanceLocalQueue(1)" in service
+    assert 'LOCAL_PLAYBACK_PREFS = "local_playback_session"' in service
+    assert "persistLocalPlayback(true)" in service
+    assert "restoreLocalPlayback()" in service
+    assert "ACTION_LOCAL_PLAY_NEXT" in service
+    assert "ACTION_LOCAL_ADD_TO_QUEUE" in service
+
+
+def test_large_local_player_has_seek_cover_source_and_love_controls():
+    activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
+    assert "buildNowPlayingPanel" in activity
+    assert "playerSeek.setOnSeekBarChangeListener" in activity
+    assert "getTransportControls().seekTo" in activity
+    assert "loadArtwork(playerArtwork" in activity
+    assert "toggleNowPlayingFavorite" in activity
+    assert "Screen.NOW_PLAYING" in activity
+    assert "miniPlayer.setVisibility(View.GONE)" in activity
+    assert "statusView.setVisibility(View.GONE)" in activity
+    assert "R.string.player_source_format" in activity
+
+
+def test_local_player_shuffle_is_persistent_and_media_session_driven():
+    activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
+    service = read(
+        "app/src/main/java/net/polze/adolarradio/AdolarMediaService.java"
+    )
+    assert "onSetShuffleMode" in service
+    assert "ACTION_SET_SHUFFLE_MODE" in service
+    assert "Collections.shuffle" in service
+    assert 'putBoolean("shuffle_enabled", localShuffleEnabled)' in service
+    assert "original_queue_ids" in service
+    assert "getTransportControls().setShuffleMode" in activity
+    assert "onShuffleModeChanged" in activity
+    assert "updateShuffleButton" in activity
+
+
+def test_android_auto_browses_local_music_playlists_and_connected_radios():
+    service = read(
+        "app/src/main/java/net/polze/adolarradio/AdolarMediaService.java"
+    )
+    main_activity = read(
+        "app/src/main/java/net/polze/adolarradio/MainActivity.java"
+    )
+    dao = read("app/src/main/java/net/polze/adolarradio/local/LibraryDao.java")
+    assert 'BROWSE_LOCAL_ROOT = "browse:local"' in service
+    assert 'BROWSE_LOCAL_PLAYLISTS = "browse:local:playlists"' in service
+    assert 'BROWSE_RADIOS_ROOT = "browse:radios"' in service
+    assert "browserRootItems()" in service
+    assert "loadPlaylistBrowserItems" in service
+    assert "loadFacetBrowserItems" in service
+    assert "loadBrowserLocalQueue" in service
+    assert "onSearch(" in service
+    assert "MAX_BROWSER_PAGE_SIZE = 200" in service
+    assert "getActiveTracksPage" in dao
+    assert "searchTracksPage" in dao
+    assert "AdolarMediaService.BROWSE_RADIOS_ROOT" in main_activity
+
+
 def test_local_search_and_facets_are_backed_by_room_queries():
     dao = read("app/src/main/java/net/polze/adolarradio/local/LibraryDao.java")
     repository = read(

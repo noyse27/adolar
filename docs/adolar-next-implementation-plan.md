@@ -34,6 +34,9 @@ ohnehin die betroffenen Klassen ersetzt.
 6. Die Rakete ist der globale Menüknopf und öffnet den Bibliotheks-Drawer.
 7. Bestehende Radio-Wiedergabe bleibt während des Umbaus in jeder Phase
    funktionsfähig.
+8. Android Auto ist eine Hauptanforderung: lokale Bibliothek, lokale
+   Playlists, Queue und Adolar-Radios müssen im Fahrzeug ohne Bedienung des
+   Handydisplays erreichbar und sicher steuerbar sein.
 
 ## Lieferstrategie
 
@@ -143,7 +146,8 @@ Playlist und Schutz der Systemlisten.
 ### Phase 5 – Hybrid-Player
 
 **Ergebnis:** Lokale Musik und bestehende Adolar-Radios benutzen eine robuste
-MediaSession und dieselbe Bedienoberfläche.
+MediaSession und dieselbe Bedienoberfläche auf Handy, Sperrbildschirm,
+Bluetooth und Android Auto.
 
 - Queue-Abstraktion auf `LOCAL` und `REMOTE` erweitern;
 - lokalen Content-DataSource-Pfad vom HTTP-Cache trennen;
@@ -152,11 +156,20 @@ MediaSession und dieselbe Bedienoberfläche.
 - Rakete auch im großen Player als Drawer-Button verwenden;
 - bisher getrennte Favorit-/Love-Aktionen in `Lieben` zusammenführen;
 - Android-Auto-Browser um lokale Musik und lokale Playlists erweitern;
-- Crossfade zunächst nur dort aktivieren, wo beide MediaItems sicher
-  vorbereitet werden können.
+- Shuffle-Zustand und gemischte lokale Queue über MediaSession, Prozessneustart
+  und Android Auto konsistent halten;
+- **TODO Crossfade:** lokale Folgetitel sicher vorladen und ein konfigurierbares
+  Crossfade ohne doppelten Audiofokus, ausgelassene Playcounts oder hörbare
+  Pegelsprünge ergänzen. Das bestehende Crossfade der Adolar-Radios bleibt
+  davon unberührt.
 
 **Tests:** Wechsel Local ↔ Adolar-Radio, Next/Previous, Queue-Ende, Audiofokus,
 Bluetooth, Notification, Sperrbildschirm, Android Auto und Prozessneustart.
+
+**Android-Auto-Abnahme:** Ohne Serververbindung lassen sich lokale Musik und
+Playlists durchsuchen, starten, pausieren, vor-/zurückschalten und mischen. Mit
+Verbindung erscheinen zusätzlich die Adolar-Radios. Alle Aktionen arbeiten auf
+derselben Queue und demselben Wiedergabestatus wie die Handy-App.
 
 ### Phase 6 – Offline-Playcount und Sync-Outbox
 

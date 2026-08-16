@@ -8,6 +8,27 @@ them alone.
 Each entry: what the idea is, why it's blocked or hard right now, and what
 would have to change for it to become worth doing.
 
+## Crossfade für lokale Android-Queues
+
+**Idea:** Einen konfigurierbaren Übergang zwischen lokalen Titeln anbieten,
+ohne die bestehende Queue-, Shuffle- und Offline-Wiedergabe zu verändern. Das
+bereits vorhandene Crossfade für Adolar-Radios bleibt separat.
+
+**Why later:** Der nächste `content://`-Titel muss zuverlässig vorab geöffnet
+und dekodiert werden. Während beide Player kurz gleichzeitig laufen, dürfen
+Audiofokus, Playcount, Scrobble, Skip-Ereignisse, Seek und Prozesspersistenz
+nicht doppelt ausgelöst werden. Auch nicht lesbare Dateien und das Queue-Ende
+benötigen definierte Fallbacks.
+
+**Implementation outline:** Einstellbare Dauer einschließlich `Aus`, lokalen
+Folgetitel über einen zweiten Media3-Pfad vorladen, Lautstärkekurven zentral
+steuern und erst nach erfolgreichem Übergang Queue/Trackzustand umschalten.
+Tests decken Shuffle, manuelles Weiter/Zurück, Pause im Übergang, Audiofokus,
+App-Abbruch und Android Auto ab.
+
+**Recheck trigger:** Sobald die lokale Queue und der Android-Auto-Browser auf
+echten Geräten stabil abgenommen sind.
+
 ## ReplayGain / MP3Gain tags during playback
 
 **Idea:** Use existing loudness information from audio tags for optional
