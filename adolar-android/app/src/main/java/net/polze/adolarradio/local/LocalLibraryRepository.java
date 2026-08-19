@@ -5,6 +5,10 @@ import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 
+import net.polze.adolarradio.local.sync.SyncOutboxWorker;
+
+import org.json.JSONObject;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.HashSet;
@@ -45,6 +49,7 @@ public final class LocalLibraryRepository {
 
     private static volatile LocalLibraryRepository instance;
 
+    private final Context appContext;
     private final LibraryDao dao;
     private final LocalLibraryScanner scanner;
     private final ExecutorService scanExecutor = Executors.newSingleThreadExecutor();
@@ -52,6 +57,7 @@ public final class LocalLibraryRepository {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private LocalLibraryRepository(Context context) {
+        appContext = context;
         dao = LocalLibraryDatabase.get(context).libraryDao();
         scanner = new LocalLibraryScanner(context, dao);
     }
@@ -193,11 +199,48 @@ public final class LocalLibraryRepository {
 
     public void setFavorite(long trackId, boolean favorite, MutationCallback callback) {
         queryExecutor.execute(() -> {
-            dao.setFavorite(trackId, favorite);
+            LocalTrack track = dao.getTrack(trackId);
+            SyncOutboxEntry entry = track == null ? null : buildFavoriteOutboxEntry(track, favorite);
+            if (entry != null) {
+                dao.setFavoriteWithOutbox(trackId, favorite, entry);
+            } else {
+                dao.setFavorite(trackId, favorite);
+            }
             mainHandler.post(() -> callback.onComplete(
                     true, favorite ? "Als Favorit gespeichert." : "Favorit entfernt."
             ));
+            if (entry != null) {
+                SyncOutboxWorker.enqueue(appContext);
+            }
         });
+    }
+
+    /**
+     * Local favorites always apply immediately; this outbox event opportunistically
+     * mirrors the change to the Adolar favorite (and, when the connected account has
+     * auto-love enabled, to Last.fm) once the device is online. See
+     * {@code adolar/android.py}'s "loved"/"unloved" event handling on the server.
+     */
+    private static SyncOutboxEntry buildFavoriteOutboxEntry(LocalTrack track, boolean favorite) {
+        SyncOutboxEntry entry = new SyncOutboxEntry();
+        entry.eventId = "favorite:" + track.id + ":" + System.currentTimeMillis();
+        entry.kind = SyncOutboxEntry.KIND_FAVORITE_EVENT;
+        entry.localTrackId = track.id;
+        entry.createdAt = System.currentTimeMillis();
+        entry.startedAtUtc = entry.createdAt;
+        entry.state = SyncOutboxEntry.STATE_PENDING;
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("event_type", favorite ? "loved" : "unloved");
+            payload.put("local_track_id", track.id);
+            payload.put("artist", track.artist);
+            payload.put("title", track.title);
+            payload.put("album", track.album);
+        } catch (Exception ignored) {
+            // JSONObject.put only throws for NaN/Infinite doubles, never here.
+        }
+        entry.payloadJson = payload.toString();
+        return entry;
     }
 
     private List<LocalTrack> loadSystemTracks(String key) {

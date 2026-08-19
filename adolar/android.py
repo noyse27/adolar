@@ -8,12 +8,14 @@ Priority-2 plan for the full design rationale.
 """
 import time
 
-from . import adolar4u, db, errors, lastfm
+from . import adolar4u, db, errors, favorites, lastfm
 from .application import _submit_lastfm_call
 
 MAX_BATCH_SIZE = 200
 DURATION_TOLERANCE_SECONDS = 3
-EVENT_TYPES = {"started", "skipped", "completed"}
+LISTENING_EVENT_TYPES = {"started", "skipped", "completed"}
+FAVORITE_EVENT_TYPES = {"loved", "unloved"}
+EVENT_TYPES = LISTENING_EVENT_TYPES | FAVORITE_EVENT_TYPES
 
 
 def _norm(text) -> str:
@@ -124,6 +126,9 @@ def match_tracks(user_id: int, tracks: list[dict]) -> list[dict]:
 
 def _apply_matched_event(user: dict, track_id: int, event: dict):
     event_type = event["event_type"]
+    if event_type in FAVORITE_EVENT_TYPES:
+        favorites.set_user_favorite(user["id"], track_id, event_type == "loved")
+        return
     adolar4u.record_event(user["id"], track_id, {
         "event_type": event_type,
         "source": "android_local",
@@ -155,7 +160,8 @@ def _validate_event(event: dict) -> dict:
     event_type = str(event.get("event_type") or "").strip().lower()
     if event_type not in EVENT_TYPES:
         raise errors.ValidationError(
-            "Unbekannter Ereignistyp (erwartet: started, skipped oder completed).")
+            "Unbekannter Ereignistyp (erwartet: started, skipped, completed, "
+            "loved oder unloved).")
     local_track_id = _require_text(event.get("local_track_id"), "local_track_id")
     artist = _require_text(event.get("artist"), "artist")
     title = _require_text(event.get("title"), "title")

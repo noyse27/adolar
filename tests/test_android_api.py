@@ -220,6 +220,49 @@ class AndroidApiTests(unittest.TestCase):
         self.assertEqual(args[3:5], ("Mobile Listener", "Ping"))
         self.assertEqual(kwargs["timestamp"], 1700000000)
 
+    def test_loved_event_sets_adolar_favorite(self):
+        token = self._register_device()
+        response = self.client.post("/api/android/v1/events/batch", json={"events": [{
+            "event_id": "evt-love-1", "event_type": "loved",
+            "local_track_id": "1", "artist": "Mobile Listener", "title": "Ping",
+        }]}, headers=self._auth_headers(token))
+        self.assertEqual(response.get_json()["results"][0]["status"], "applied")
+        self.assertIn(self.TRACK_ID, app_module.db.get_favorite_track_ids(self.USER_ID))
+
+    def test_unloved_event_clears_adolar_favorite(self):
+        token = self._register_device()
+        app_module.db.set_favorite(self.USER_ID, self.TRACK_ID, True)
+        response = self.client.post("/api/android/v1/events/batch", json={"events": [{
+            "event_id": "evt-unlove-1", "event_type": "unloved",
+            "local_track_id": "1", "artist": "Mobile Listener", "title": "Ping",
+        }]}, headers=self._auth_headers(token))
+        self.assertEqual(response.get_json()["results"][0]["status"], "applied")
+        self.assertNotIn(
+            self.TRACK_ID, app_module.db.get_favorite_track_ids(self.USER_ID))
+
+    def test_loved_event_mirrors_to_lastfm_when_auto_love_enabled(self):
+        token = self._register_device()
+        app_module.db.set_lastfm_account(self.USER_ID, "listener", "session-key")
+        with mock.patch.object(android_routes.android.favorites.lastfm, "love") as love:
+            self.client.post("/api/android/v1/events/batch", json={"events": [{
+                "event_id": "evt-love-2", "event_type": "loved",
+                "local_track_id": "1", "artist": "Mobile Listener", "title": "Ping",
+            }]}, headers=self._auth_headers(token))
+        love.assert_called_once_with("session-key", "Mobile Listener", "Ping")
+
+    def test_loved_event_does_not_create_a_listening_event(self):
+        token = self._register_device()
+        self.client.post("/api/android/v1/events/batch", json={"events": [{
+            "event_id": "evt-love-3", "event_type": "loved",
+            "local_track_id": "1", "artist": "Mobile Listener", "title": "Ping",
+        }]}, headers=self._auth_headers(token))
+        with app_module.db.db() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM adolar4u_listening_events WHERE user_id=?",
+                (self.USER_ID,),
+            ).fetchone()["n"]
+        self.assertEqual(count, 0)
+
     def test_events_batch_rejects_oversized_batch(self):
         token = self._register_device()
         events = [{

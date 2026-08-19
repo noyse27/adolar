@@ -1,6 +1,6 @@
 # Adolar Next – Übergabe und aktueller Stand
 
-Stand: 16. August 2026  
+Stand: 19. August 2026  
 Arbeitsbranch: `codex/android-local-library-sync`  
 Repository: `noyse27/adolar`  
 Android-Projekt: `adolar-android`
@@ -202,14 +202,36 @@ Einträge erneut anstößt.
 
 ### Priorität 3 – Einheitliches „Lieben“ und Last.fm
 
-- Lokal weiterhin sofort favorisieren.
-- Bei verbundenem Adolar: persönlichen Adolar-Favorit setzen und bei dort
-  verbundenem Last.fm zusätzlich lieben.
-- Ohne Adolar, aber mit direkter Last.fm-Konfiguration: Last.fm bedienen und
-  lokalen Favoriten behalten.
-- Ohne Verbindung: ausschließlich lokaler Favorit.
-- `unlove` symmetrisch umsetzen und Teilfehler getrennt anzeigen.
-- Keine Last.fm-Secrets fest in die APK einbauen.
+Umgesetzt (Adolar-verbundener Pfad):
+
+- ✅ Lokal wird weiterhin sofort favorisiert, unabhängig vom Verbindungsstatus
+  (`LocalLibraryRepository.setFavorite`).
+- ✅ Neuer Outbox-Ereignistyp `loved`/`unloved` (eigener `KIND_FAVORITE_EVENT`,
+  eigene `favorite:<trackId>:<timestamp>`-Event-ID), wird wie die
+  Hörereignisse über den bestehenden `SyncOutboxWorker`/`HttpSyncBatchSender`
+  ausgeliefert.
+- ✅ Serverseitig setzt `adolar/android.py` bei `loved`/`unloved` direkt den
+  persönlichen Adolar-Favorit über die neue gemeinsame Funktion
+  `adolar/favorites.py::set_user_favorite` (kein `adolar4u.record_event`,
+  das ist kein Hörereignis).
+- ✅ `adolar/favorites.py` bündelt jetzt die vorher in `routes/playlists.py`
+  duplizierte Auto-Love-Logik für Web und Android; **Verhaltensänderung für
+  beide Clients**: `unlove` wird jetzt symmetrisch zu `love` ausgeführt (bei
+  aktiviertem `auto_love_favorites` entliebt Last.fm mit, wenn ein Favorit
+  entfernt wird) – vorher blieb ein Last.fm-Love beim Entfavorisieren stehen.
+- ✅ Kein Last.fm-Secret auf Android nötig, da alles weiterhin über das
+  Adolar-Gerätetoken läuft.
+
+Bewusst zurückgestellt (siehe Nutzer-Entscheidung in dieser Runde):
+
+- Direkter Last.fm-Login ohne Adolar-Konto ("ohne Adolar, aber mit direkter
+  Last.fm-Konfiguration") ist auf Android noch nicht gebaut – dafür bräuchte
+  es einen eigenständigen WebView-Last.fm-Auth-Flow und lokale
+  Session-Key-Speicherung, unabhängig vom Gerätetoken. Backlog-Kandidat.
+- Getrennte Fehleranzeige für Teilfehler (`lastfm_error` im
+  `set_user_favorite`-Ergebnis existiert bereits serverseitig, wird von der
+  Android-UI aber noch nicht ausgewertet, da Outbox-Ereignisse asynchron und
+  ohne direktes UI-Feedback laufen).
 
 ### Priorität 4 – Android Auto abnehmen und Player härten
 
@@ -268,8 +290,18 @@ umgesetzt:
 
 Damit ist das zentrale Produktversprechen – offline hören und später sicher
 synchronisieren – vollständig umgesetzt und gegen einen echten Server
-verifiziert. Nächste sinnvolle Schritte: Priorität 3 (Lieben/Last.fm) oder
-Priorität 4 (Android-Auto-Abnahme).
+verifiziert.
+
+Priorität 3 (Adolar-verbundener Pfad von „Lieben“/Last.fm) ist jetzt
+ebenfalls code-seitig umgesetzt und per Unit-Tests abgedeckt (siehe oben),
+aber **noch nicht auf einem echten Gerät verifiziert** — anders als
+Priorität 1/2 gab es dafür noch keinen End-to-End-Test mit echtem Server und
+echtem Last.fm-Konto. Empfohlener nächster Schritt: Favorisieren/
+Entfavorisieren eines lokalen Titels auf dem Testtelefon gegen eine echte
+Adolar-Instanz mit verbundenem Last.fm-Konto durchspielen und dabei sowohl
+den Adolar-Favoriten als auch den Last.fm-Love/Unlove-Status prüfen. Danach:
+Priorität 4 (Android-Auto-Abnahme) oder der zurückgestellte
+direkte-Last.fm-ohne-Adolar-Pfad aus Priorität 3.
 
 ## Lokale Befehle
 

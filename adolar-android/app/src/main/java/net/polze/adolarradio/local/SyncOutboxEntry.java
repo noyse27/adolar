@@ -12,6 +12,7 @@ import androidx.room.PrimaryKey;
 )
 public class SyncOutboxEntry {
     public static final String KIND_LISTENING_EVENT = "listening_event";
+    public static final String KIND_FAVORITE_EVENT = "favorite_event";
 
     public static final String STATE_PENDING = "pending";
     public static final String STATE_SENDING = "sending";

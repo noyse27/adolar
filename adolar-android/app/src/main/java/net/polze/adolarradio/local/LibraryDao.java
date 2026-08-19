@@ -181,6 +181,13 @@ public interface LibraryDao {
             + "SET favorite=:favorite")
     void setFavorite(long trackId, boolean favorite);
 
+    /** Writes the local favorite flag and its outbox event in one transaction. */
+    @Transaction
+    default void setFavoriteWithOutbox(long trackId, boolean favorite, SyncOutboxEntry entry) {
+        setFavorite(trackId, favorite);
+        insertOutboxEntry(entry);
+    }
+
     @Query("INSERT INTO track_state(localTrackId,playCount,lastPlayedAt,favorite) "
             + "VALUES(:trackId,1,:playedAt,0) ON CONFLICT(localTrackId) DO UPDATE "
             + "SET playCount=playCount+1,lastPlayedAt=:playedAt")
