@@ -13,9 +13,8 @@ _temp_dir = tempfile.TemporaryDirectory()
 os.environ.setdefault("DB_PATH", os.path.join(_temp_dir.name, "adolar4u-test.db"))
 os.environ.setdefault("CONTROL_DB_PATH", os.path.join(_temp_dir.name, "adolar4u-test-control.db"))
 
-from adolar import adolar4u
+from adolar import adolar4u, favorites
 from adolar import application as app_module
-from adolar import favorites
 from adolar.adolar4u import recommender
 from adolar.routes import lastfm as lastfm_routes
 

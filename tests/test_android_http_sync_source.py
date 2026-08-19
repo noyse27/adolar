@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 ANDROID = ROOT / "adolar-android"
 LOCAL = "app/src/main/java/net/polze/adolarradio/local"
