@@ -222,6 +222,11 @@ Umgesetzt (Adolar-verbundener Pfad):
 - ✅ Kein Last.fm-Secret auf Android nötig, da alles weiterhin über das
   Adolar-Gerätetoken läuft.
 
+✅ Auf dem Testtelefon gegen eine isolierte lokale Adolar-Testinstanz und ein
+echtes, verbundenes Last.fm-Konto durchgetestet (beide Richtungen: Favorit
+setzen → Adolar-Favorit + echtes Last.fm-Love; Favorit entfernen →
+Adolar-Favorit weg + echtes Last.fm-Unlove).
+
 Bewusst zurückgestellt (siehe Nutzer-Entscheidung in dieser Runde):
 
 - Direkter Last.fm-Login ohne Adolar-Konto ("ohne Adolar, aber mit direkter
@@ -293,15 +298,20 @@ synchronisieren – vollständig umgesetzt und gegen einen echten Server
 verifiziert.
 
 Priorität 3 (Adolar-verbundener Pfad von „Lieben“/Last.fm) ist jetzt
-ebenfalls code-seitig umgesetzt und per Unit-Tests abgedeckt (siehe oben),
-aber **noch nicht auf einem echten Gerät verifiziert** — anders als
-Priorität 1/2 gab es dafür noch keinen End-to-End-Test mit echtem Server und
-echtem Last.fm-Konto. Empfohlener nächster Schritt: Favorisieren/
-Entfavorisieren eines lokalen Titels auf dem Testtelefon gegen eine echte
-Adolar-Instanz mit verbundenem Last.fm-Konto durchspielen und dabei sowohl
-den Adolar-Favoriten als auch den Last.fm-Love/Unlove-Status prüfen. Danach:
-Priorität 4 (Android-Auto-Abnahme) oder der zurückgestellte
-direkte-Last.fm-ohne-Adolar-Pfad aus Priorität 3.
+ebenfalls vollständig verifiziert — Unit-Tests **und** ein echter
+Gerätetest gegen eine isolierte lokale Adolar-Testinstanz mit dem
+Testtelefon: lokalen Titel favorisiert/entfavorisiert, dabei jeweils per
+DB-Abfrage bestätigt, dass der Adolar-Favorit korrekt gesetzt/entfernt
+wurde, und zusätzlich gegen ein echtes, verbundenes Last.fm-Konto verifiziert
+(nicht nur simuliert), dass `love`/`unlove` dort tatsächlich ankommen —
+der Titel erschien und verschwand wieder in den echten Last.fm Loved
+Tracks. Ein echter Bug wurde dabei gefunden: das erste Testfavorisieren lief
+noch gegen die alte, vor diesem Slice gebaute APK (nie neu installiert),
+weshalb kein Outbox-Event entstand — nach `adb install -r` mit der aktuellen
+APK lief der volle Kreislauf fehlerfrei.
+
+Nächste sinnvolle Schritte: Priorität 4 (Android-Auto-Abnahme) oder der
+zurückgestellte direkte-Last.fm-ohne-Adolar-Pfad aus Priorität 3.
 
 ## Lokale Befehle
 
