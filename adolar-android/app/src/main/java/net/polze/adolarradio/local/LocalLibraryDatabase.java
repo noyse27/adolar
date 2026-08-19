@@ -15,9 +15,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
                 LocalTrack.class,
                 TrackState.class,
                 LocalPlaylist.class,
-                PlaylistTrack.class
+                PlaylistTrack.class,
+                SyncOutboxEntry.class,
+                SyncReceipt.class
         },
-        version = 2,
+        version = 3,
         exportSchema = true
 )
 public abstract class LocalLibraryDatabase extends RoomDatabase {
@@ -54,6 +56,24 @@ public abstract class LocalLibraryDatabase extends RoomDatabase {
         }
     };
 
+    public static final Migration MIGRATION_2_3 = new Migration(2, 3) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase database) {
+            database.execSQL("CREATE TABLE IF NOT EXISTS `sync_outbox` ("
+                    + "`eventId` TEXT PRIMARY KEY NOT NULL, `kind` TEXT NOT NULL, "
+                    + "`localTrackId` INTEGER, `payloadJson` TEXT NOT NULL, "
+                    + "`createdAt` INTEGER NOT NULL, `startedAtUtc` INTEGER NOT NULL, "
+                    + "`state` TEXT NOT NULL, `attempts` INTEGER NOT NULL, "
+                    + "`lastError` TEXT, `nextRetryAt` INTEGER)");
+            database.execSQL("CREATE INDEX IF NOT EXISTS "
+                    + "`index_sync_outbox_state_nextRetryAt` "
+                    + "ON `sync_outbox` (`state`, `nextRetryAt`)");
+            database.execSQL("CREATE TABLE IF NOT EXISTS `sync_receipts` ("
+                    + "`eventId` TEXT PRIMARY KEY NOT NULL, "
+                    + "`confirmedAt` INTEGER NOT NULL)");
+        }
+    };
+
     public abstract LibraryDao libraryDao();
 
     public static LocalLibraryDatabase get(Context context) {
@@ -64,7 +84,7 @@ public abstract class LocalLibraryDatabase extends RoomDatabase {
                             context.getApplicationContext(),
                             LocalLibraryDatabase.class,
                             "adolar-next-library.db"
-                    ).addMigrations(MIGRATION_1_2)
+                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                             .addCallback(new Callback() {
                                 @Override
                                 public void onOpen(@NonNull SupportSQLiteDatabase database) {

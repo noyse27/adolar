@@ -176,15 +176,19 @@ derselben Queue und demselben Wiedergabestatus wie die Handy-App.
 **Ergebnis:** Kein Play und keine Love-Aktion geht bei fehlendem Netz oder
 App-Abbruch verloren.
 
-- Room-Tabellen `sync_outbox` und `sync_receipts` ergänzen;
-- UUID pro unveränderlichem Client-Ereignis erzeugen;
-- lokale Zustandsänderung und Outbox-Insert in einer Transaktion durchführen;
-- bei 50 % plus 30 Sekunden Last.fm-Fähigkeit vormerken;
-- bei 90 % lokalen Adolar-Playcount genau einmal erhöhen;
-- `started`, `skipped` und `completed` samt Startzeit/Position erfassen;
-- WorkManager-Batchsync mit Netzwerkbedingung und exponentiellem Backoff;
-- 401 bis Login pausieren, 429/5xx wiederholen, 4xx sichtbar behandeln;
-- Sync-Screen und kleine Zustandsanzeige im Drawer/Player umsetzen.
+Für Hörereignisse umgesetzt (Love-Aktionen folgen mit Phase 8):
+
+- ✅ Room-Tabellen `sync_outbox` und `sync_receipts` ergänzt;
+- ✅ UUID pro unveränderlichem Client-Ereignis erzeugt;
+- ✅ lokale Zustandsänderung und Outbox-Insert in einer Transaktion;
+- ✅ bei 50 % plus 30 Sekunden Last.fm-Fähigkeit vormerkt;
+- ✅ bei 90 % lokalen Adolar-Playcount genau einmal erhöht;
+- ✅ `started`, `skipped` und `completed` samt Startzeit/Position erfasst;
+- ✅ WorkManager-Batchsync mit Netzwerkbedingung und exponentiellem Backoff
+  (gegen einen austauschbaren `SyncBatchSender`; die konkrete
+  401/429/5xx-Behandlung folgt mit dem echten Endpunkt in Phase 7);
+- ⬜ Sync-Screen und kleine Zustandsanzeige im Drawer/Player umsetzen (noch
+  offen, bewusst nach dem Outbox-Kern zurückgestellt).
 
 **Tests:** Flugmodus vor/während/nach Wiedergabe, Timeout nach erfolgreicher
 Serverannahme, mehrfacher Workerstart, Prozess-Kill, Reboot und Loginablauf.

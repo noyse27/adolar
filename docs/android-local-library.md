@@ -38,6 +38,29 @@ Listen werden in Seiten von standardmäßig 100 und höchstens 200 Einträgen
 geliefert. Aus dem Fahrzeug gestartete Titel laden im Hintergrund dennoch die
 vollständige Quellqueue, sodass Weiter, Zurück und Shuffle korrekt bleiben.
 
+Lokale Hörereignisse verschwinden nicht mehr: `sync_outbox`/`sync_receipts`
+(Room-Schema v3) speichern `started`/`skipped`/`completed` mit stabiler
+Event-ID, ursprünglicher Startzeit und den beiden Schwellenwerten für
+Adolar-Playcount (90 %) und Last.fm-Scrobble-Fähigkeit (50 % und 30 s). Der
+lokale Playcount-Bump und der zugehörige Outbox-Eintrag werden in einer
+Room-Transaktion geschrieben. Ein periodischer WorkManager-Job überträgt
+ausstehende Einträge über ein austauschbares `SyncBatchSender`-Interface.
+
+Der echte Mobile-Endpunkt existiert jetzt (`adolar/routes/android.py`,
+Fachlogik in `adolar/android.py`): ein Keystore-gestütztes Gerätetoken
+(`android_devices`, gehasht gespeichert, per Session-Cookie ausgegeben, aber
+nie selbst zur Sync-Authentifizierung verwendet) authentifiziert
+Track-Matching (`android_track_links`, gecacht und selbstheilend) und den
+idempotenten Event-Batch (`android_event_receipts`,
+`UNIQUE(user_id, device_id, event_id)`). Der Endpunkt dupliziert keine
+Fachlogik, sondern ruft bestehende Funktionen auf: `adolar4u.record_event`
+(Quelle `android_local`), `db.record_user_play` (Playcount) und
+`lastfm.scrobble` über den bestehenden `_submit_lastfm_call`-Retry-
+Mechanismus (mit dem ursprünglichen `started_at`). `HttpSyncBatchSender`
+ersetzt den vorherigen `FakeLocalSyncBatchSender` als Standard-Sender;
+`DeviceTokenStore` (`EncryptedSharedPreferences`) hält das Gerätetoken auf
+dem Gerät, `AdolarMediaService` registriert es beim Start selbständig.
+
 ## Zielbild
 
 Adolar Android soll auch ohne konfigurierten oder erreichbaren Adolar-Server als
@@ -404,6 +427,11 @@ ein clientseitiges `sent`-Flag reicht nicht.
 
 ## Benötigte Backend-Erweiterung
 
+Umgesetzt in `adolar/routes/android.py` und `adolar/android.py`. Die
+folgenden Unterabschnitte sind der ursprüngliche Entwurf; die tatsächliche
+Implementierung weicht in Details ab (siehe Hinweise je Abschnitt), folgt
+aber derselben Absicht.
+
 ### Authentifizierung
 
 Beim Android-Login wird ein widerrufbares, langlebiges und auf Mobile-Sync
@@ -414,13 +442,28 @@ Hintergrund-Syncs.
 
 ### Track-Matching
 
-`POST /api/android/v1/tracks/match` nimmt bis zu etwa 200 lokale Identitäten pro
+`POST /api/android/v1/tracks/match` nimmt bis zu 200 lokale Identitäten pro
 Batch entgegen. Die Antwort liefert pro lokaler ID `matched`, `ambiguous` oder
-`unmatched`, eine Adolar-Track-ID und Matchart/-konfidenz. Ein explizit bereits
-gematchter Server-Track wird weiterhin gegen den angemeldeten Benutzer und die
-aktive Bibliothek validiert.
+`unmatched`, eine Adolar-Track-ID und Matchart/-konfidenz. Ein bereits
+bestätigter Treffer (`android_track_links`, `match_kind='matched'`) wird
+nicht erneut aufgelöst; `ambiguous`/`unmatched` werden bei jedem weiteren
+Aufruf desselben lokalen Titels neu versucht. Android muss diesen Endpunkt
+für den Event-Batch nicht separat vorher aufrufen — `events/batch` löst das
+Matching bei Bedarf inline mit derselben Funktion auf.
 
 ### Idempotenter Event-Batch
+
+Tatsächlich implementierter Vertrag (flacher als im ursprünglichen Entwurf
+unten, ohne `kind`/`identity`-Verschachtelung, da er 1:1 dem Payload
+entspricht, den `AdolarMediaService.enqueueLocalOutboxEvent` bereits schreibt):
+`event_id, event_type, reason?, local_track_id, remote_track_id, artist,
+title, album?, position_seconds, duration_seconds, started_at,
+playcount_eligible, scrobble_eligible, source`. Antwort:
+`{"results": [{"event_id", "status"}]}` mit
+`applied|duplicate|unmatched|ambiguous`; Validierungsfehler kommen als
+regulärer 400 mit kuratierter Fehlermeldung.
+
+Ursprünglicher Entwurf (Beispielform, nicht mehr die tatsächliche Struktur):
 
 `POST /api/android/v1/events/batch` nimmt Hör- und Favoritenereignisse entgegen.
 Beispiel eines Hörereignisses:
@@ -458,8 +501,17 @@ Die Servertransaktion:
 6. liefert je Event `applied`, `duplicate`, `unmatched`, `ambiguous` oder einen
    dauerhaften Validierungsfehler zurück.
 
-Für unverknüpfte Titel wird das Receipt samt Metadaten behalten. Ein
-Reconciliation-Job versucht die Zuordnung nach Bibliotheksscans erneut.
+Für unverknüpfte Titel wird das Receipt samt Metadaten behalten.
+
+Abweichungen der tatsächlichen Implementierung von diesem Entwurf: Die
+90-Prozent-Schwelle wird von Android als `playcount_eligible`-Flag im Event
+mitgeliefert (der Server vertraut diesem Flag, statt selbst Position/Dauer
+neu zu bewerten); der Last.fm-Versand läuft über das bestehende
+In-Process-Retry-Muster (`_submit_lastfm_call`), nicht über einen
+persistenten, eigenständig idempotenten Last.fm-Job; und es gibt noch
+keinen aktiven Reconciliation-Job — `unmatched`/`ambiguous` Titel werden
+nur beim nächsten Sync-Versuch desselben Events automatisch neu aufgelöst,
+nicht proaktiv nach einem Server-Rescan.
 
 Vorgeschlagene neue Tabellen im inhaltsbezogenen Adolar-DB-Kontext:
 

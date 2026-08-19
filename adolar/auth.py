@@ -1,4 +1,5 @@
 """Authentication, session management and brute-force protection for Adolar."""
+import hashlib
 import os
 import secrets
 import threading
@@ -37,6 +38,11 @@ PUBLIC_PREFIXES = (
     "/api/search", "/api/albums",   # read-only; called by Disco server without user session
     "/api/tracks/",                 # lyrics GET/fetch are public; writes check capability in-route
     "/api/client/heartbeat",
+    # Not actually open: these authenticate via android_device_required's own
+    # Bearer check (a device token, never the session cookie or api_tokens
+    # this generic gate looks for), so they must bypass this gate rather than
+    # being rejected here before the route decorator gets a chance to run.
+    "/api/android/v1/tracks/match", "/api/android/v1/events/batch",
     "/static/", "/hilfe/",
 )
 # Disco-specific endpoints (no session needed, called by Disco server)
@@ -247,6 +253,71 @@ def list_api_tokens(user_id: int) -> list[dict]:
             (user_id,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+# ── Android device tokens (background sync, e.g. Adolar Next) ─────────────────
+# Separate from control.api_tokens (admin tools) and control.sessions
+# (interactive screens): only a SHA-256 hash is stored, sent as
+# 'Authorization: Bearer <token>' and checked by android_device_required
+# below rather than the generic before_request() session/API-token flow.
+
+def _hash_device_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+def create_android_device_token(user_id: int, name: str = "") -> str:
+    """Create and return a new Android device token. Like create_api_token,
+    the plaintext value is only ever available here at creation time — only
+    its hash is persisted."""
+    token = secrets.token_urlsafe(32)
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO android_devices (token_hash, user_id, name, created_at) "
+            "VALUES (?,?,?,?)",
+            (_hash_device_token(token), user_id, name or None, time.time())
+        )
+    return token
+
+def get_android_device_and_user(token: str) -> tuple[dict, dict] | None:
+    with db.db() as conn:
+        row = conn.execute(
+            """SELECT d.id AS device_id, d.name AS device_name,
+                      u.id, u.username, u.role, u.allow_download, u.allow_playlists,
+                      u.allow_radio_stations, u.allow_lyrics_edit,
+                      u.contributes_playcount, u.is_active,
+                      u.must_change_password
+               FROM android_devices d JOIN users u ON u.id = d.user_id
+               WHERE d.token_hash=? AND d.revoked_at IS NULL AND u.is_active=1""",
+            (_hash_device_token(token),)
+        ).fetchone()
+    if not row:
+        return None
+    data = dict(row)
+    device = {"id": data.pop("device_id"), "name": data.pop("device_name")}
+    return device, data
+
+def touch_android_device_token(token: str) -> None:
+    with db.db() as conn:
+        conn.execute(
+            "UPDATE android_devices SET last_used_at=? WHERE token_hash=?",
+            (time.time(), _hash_device_token(token))
+        )
+
+def revoke_android_device_token(device_id: int, user_id: int):
+    """Revoke a device by its id, scoped to the owning user."""
+    with db.db() as conn:
+        conn.execute(
+            "UPDATE android_devices SET revoked_at=? WHERE id=? AND user_id=?",
+            (time.time(), device_id, user_id)
+        )
+
+def list_android_devices(user_id: int) -> list[dict]:
+    with db.db() as conn:
+        rows = conn.execute(
+            """SELECT id, name, created_at, last_used_at FROM android_devices
+               WHERE user_id=? AND revoked_at IS NULL ORDER BY created_at DESC""",
+            (user_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
 
 def get_all_users() -> list[dict]:
     with db.db() as conn:
@@ -474,6 +545,22 @@ def login_required(f):
             if request.path.startswith("/api/"):
                 return jsonify({"error": "unauthorized"}), 401
             return redirect("/login")
+        return f(*args, **kwargs)
+    return decorated
+
+def android_device_required(f):
+    """Guards Android background-sync endpoints: only a device-token Bearer
+    header is accepted, never the session cookie (see auth-design note in
+    the Priority-2 plan — background sync must survive a session expiring)."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
+        result = get_android_device_and_user(token) if token else None
+        if not result:
+            return jsonify({"error": "unauthorized"}), 401
+        g.device, g.user = result
+        touch_android_device_token(token)
         return f(*args, **kwargs)
     return decorated
 

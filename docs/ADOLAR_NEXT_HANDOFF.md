@@ -95,6 +95,38 @@ Die ausführliche Zielarchitektur und der Phasenplan stehen in
 - Die alte Radiooberfläche abonniert nur noch den Radio-Knoten und blieb im
   Smoke-Test funktionsfähig.
 
+### Offline-Outbox
+
+- Neue Room-Tabellen `sync_outbox` und `sync_receipts` (Schema-Version 3,
+  nicht-destruktive Migration).
+- Lokale Titel erzeugen jetzt `started`-, `skipped`- und `completed`-
+  Hörereignisse mit stabiler Event-ID und ursprünglicher Startzeit, statt wie
+  bisher stillschweigend verworfen zu werden.
+- Der lokale 90-Prozent-Playcount-Bump und der zugehörige Outbox-Eintrag
+  werden in einer Room-Transaktion geschrieben; eine zusätzliche
+  50-Prozent-plus-30-Sekunden-Schwelle markiert Last.fm-Scrobble-Fähigkeit im
+  Payload.
+- Ein `SyncOutboxWorker` (einmalig und alle 15 Minuten bei Netzverbindung)
+  sendet ausstehende Einträge über ein austauschbares `SyncBatchSender`-
+  Interface.
+
+### Adolar-Mobile-Backend
+
+- Neuer Blueprint `adolar/routes/android.py`: Gerätetoken-Ausgabe/-Widerruf
+  (Session-Cookie), Track-Matching und Event-Batch (beide ausschließlich
+  über ein Bearer-Gerätetoken, nicht über das Session-Cookie).
+- `adolar/android.py` orchestriert nur bestehende Fachlogik:
+  `adolar4u.record_event`, `db.record_user_play`,
+  `lastfm.scrobble`/`_submit_lastfm_call` – keine Dopplung.
+- Neue Tabellen `android_devices` (gehashtes Token), `android_track_links`
+  (gecachtes Matching-Ergebnis, selbstheilend bei `ambiguous`/`unmatched`)
+  und `android_event_receipts` (Idempotenz über
+  `(user_id, device_id, event_id)`).
+- `HttpSyncBatchSender` ersetzt jetzt `FakeLocalSyncBatchSender` als
+  Standard-Sender; `DeviceTokenStore` hält das Gerätetoken Keystore-gestützt
+  (`EncryptedSharedPreferences`), `AdolarMediaService` registriert das Gerät
+  selbständig, sobald ein Session-Cookie vorhanden ist.
+
 ## Verifiziert
 
 Folgende Prüfungen waren im aktuellen Entwicklungsstand erfolgreich:
@@ -123,27 +155,50 @@ Android Auto installiert, aber kein DHU eingerichtet.
 
 ### Priorität 1 – Offline-Outbox und korrekte lokale Hörereignisse
 
-- Room-Tabellen für `sync_outbox` und `sync_receipts` ergänzen.
-- Hörereignisse mit stabiler UUID, ursprünglicher Startzeit und Zustand
-  `pending/sending/confirmed/permanent_error` speichern.
-- Lokale Zustandsänderung und Outbox-Eintrag atomar schreiben.
-- Adolar-Playcount bei mindestens 90 Prozent genau einmal lokal vormerken.
-- Last.fm-Fähigkeit nach mindestens 30 Sekunden und 50 Prozent vormerken.
-- `started`, `skipped` und `completed` sauber aus der lokalen Queue erzeugen.
-- WorkManager-Sync mit Netzwerkbedingung, Backoff und Behandlung von
-  401/429/5xx implementieren.
-- Offline-/Syncstatus in Drawer und Player sichtbar machen.
+Der vertikale Durchstich ist umgesetzt (siehe „Offline-Outbox" oben):
+Room-Tabellen, atomare Transaktion aus Playcount-Bump und Outbox-Eintrag,
+beide Schwellenwerte, `started`/`skipped`/`completed` aus der lokalen Queue
+sowie ein WorkManager-Job mit Backoff gegen einen austauschbaren
+`SyncBatchSender`. Noch offen, weil an Priorität 2 hängend beziehungsweise
+bewusst zurückgestellt:
+
+- Offline-/Syncstatus in Drawer und Player sichtbar machen (UI-Feintuning,
+  bewusst nach dem Outbox-Kern zurückgestellt).
+
+Der `FakeLocalSyncBatchSender` ist jetzt durch den echten `HttpSyncBatchSender`
+ersetzt (siehe Priorität 2), 401/429/5xx werden dort entsprechend behandelt.
 
 ### Priorität 2 – Adolar-Mobile-Backend
 
-- Widerrufbare, gehasht gespeicherte Mobile-Gerätetokens einführen.
-- Batch-Track-Matching für lokale Titel implementieren.
-- Idempotenten Event-Batch mit Eindeutigkeit auf
-  `(user_id, device_id, event_id)` implementieren.
-- Angenommene lokale Plays genau einmal in den persönlichen Playcount schreiben.
-- Android-Hörereignisse als Datenlage `android_local` für Adolar4U verwenden.
-- Nicht oder mehrdeutig zugeordnete Titel behalten und später erneut matchen.
-- Serverseitige Integrations-Outbox für Last.fm vorsehen.
+Umgesetzt:
+
+- ✅ Widerrufbare, gehasht gespeicherte Mobile-Gerätetokens (`android_devices`,
+  Bearer-Auth über `android_device_required`, getrennt vom Session-Cookie).
+- ✅ Batch-Track-Matching (`POST /api/android/v1/tracks/match`, mit Cache in
+  `android_track_links`; wird zusätzlich inline von `events/batch` genutzt,
+  ein separater Aufruf davor ist für Android nicht nötig).
+- ✅ Idempotenter Event-Batch (`POST /api/android/v1/events/batch`) mit
+  Eindeutigkeit auf `(user_id, device_id, event_id)` (`android_event_receipts`).
+- ✅ Angenommene lokale Plays schreiben über das bestehende
+  `db.record_user_play` genau einmal in Archiv- und persönlichen Playcount.
+- ✅ Android-Hörereignisse laufen über das bestehende `adolar4u.record_event`
+  mit `source="android_local"` (dafür `EVENT_SOURCES` in
+  `adolar/adolar4u/service.py` erweitert).
+- ✅ Last.fm-Scrobbles nutzen den bestehenden `_submit_lastfm_call`-
+  Retry-Mechanismus (kein neues `lastfm_outbox` nötig) mit dem ursprünglichen
+  `started_at`-Zeitstempel, dank `lastfm.scrobble`s vorhandenem
+  `timestamp`-Parameter.
+- Android-seitig ersetzt `HttpSyncBatchSender` den Fake-Sender;
+  `DeviceTokenStore` (Keystore-gestützte `EncryptedSharedPreferences`) hält
+  das Gerätetoken, `AdolarMediaService` registriert es beim Start selbständig,
+  sobald ein Session-Cookie vorhanden ist.
+
+Bewusst noch offen: nicht oder mehrdeutig zugeordnete Titel bleiben zwar in
+`android_track_links`/`android_event_receipts` erhalten und werden bei jedem
+weiteren Sync-Versuch desselben Events automatisch neu aufgelöst
+(selbstheilend nach einem späteren Server-Rescan), aber es gibt noch keinen
+aktiven Reconciliation-Job, der von sich aus alte `unmatched`/`ambiguous`
+Einträge erneut anstößt.
 
 ### Priorität 3 – Einheitliches „Lieben“ und Last.fm
 
@@ -181,18 +236,40 @@ Android Auto installiert, aber kein DHU eingerichtet.
 
 ## Empfohlener nächster Arbeitsschritt
 
-Als Nächstes sollte die lokale Offline-Outbox als vollständiger vertikaler
-Durchstich umgesetzt werden:
+Der Offline-Outbox-Durchstich einschließlich echtem Backend ist code-seitig
+umgesetzt:
 
-1. Room-Schema und Migration ergänzen.
-2. Lokale Playback-Grenzen und genau-einmal-Erfassung testen.
-3. Einen zunächst lokalen/gefälschten Batch-Sender hinter einer klaren
-   Schnittstelle anbinden.
-4. Flugmodus, Force-Stop, Reboot und erneute Übertragung ohne Dubletten testen.
-5. Erst danach den echten Mobile-Endpunkt im Adolar-Backend ergänzen.
+1. ✅ Room-Schema und Migration ergänzt (Priorität 1).
+2. ✅ Lokale Playback-Grenzen (90 % Playcount, 50 %/30 s Scrobble-Fähigkeit)
+   implementiert; Source-Contract-Tests in
+   `tests/test_android_sync_outbox_source.py` decken Schema, DAO-Transaktion,
+   Worker und Service-Verdrahtung ab.
+3. ✅ Ein zunächst lokaler/gefälschter Batch-Sender diente als erster
+   Durchstich und ist jetzt durch den echten `HttpSyncBatchSender` ersetzt
+   (Priorität 2: Gerätetoken, Track-Matching, idempotenter Event-Batch,
+   siehe `tests/test_android_api.py` und
+   `tests/test_android_http_sync_source.py`).
+4. ✅ Gerätetest gegen den echten Endpunkt (nicht mehr Fake-Sender): Debug-APK
+   auf dem Testtelefon gegen eine isolierte lokale Testinstanz von Adolar
+   verbunden, Gerät registriert (`android_devices`-Zeile bestätigt), einen
+   lokalen Titel abgespielt und den kompletten Kreislauf live verifiziert —
+   `sync_outbox` geleert, `sync_receipts` bestätigt, serverseitig
+   `android_event_receipts`/`android_track_links`/`user_play_counts`/
+   `adolar4u_listening_events` korrekt befüllt, Playcount exakt einmal
+   erhöht. Dabei einen echten Bug gefunden und behoben:
+   `AdolarMediaService.sessionCookie()` las bisher aus dem WebView-
+   `CookieManager`, das native Login-Bildschirm aber schreibt sein Cookie
+   ausschließlich in `AdolarPrefs` (genau dafür vorgesehen, siehe dessen
+   Dokumentationskommentar) — ohne den Fix hätte die Geräteregistrierung nie
+   ausgelöst. Noch nicht gezielt einzeln nachgestellt: Flugmodus/Force-Stop/
+   Reboot *gegen den echten Sender* (das Verhalten selbst ist unverändert
+   gegenüber dem bereits in Priorität 1 verifizierten Fake-Sender-Kreislauf,
+   nur die Transportschicht ist jetzt neu).
 
-Damit wird das zentrale Produktversprechen – offline hören und später sicher
-synchronisieren – geschlossen, bevor weiteres UI-Feintuning hinzukommt.
+Damit ist das zentrale Produktversprechen – offline hören und später sicher
+synchronisieren – vollständig umgesetzt und gegen einen echten Server
+verifiziert. Nächste sinnvolle Schritte: Priorität 3 (Lieben/Last.fm) oder
+Priorität 4 (Android-Auto-Abnahme).
 
 ## Lokale Befehle
 
@@ -207,7 +284,7 @@ Relevante Source-Tests:
 
 ```powershell
 Set-Location F:\claude\musicapp
-python -m pytest tests/test_android_next_source.py tests/test_android_playback_source.py -q
+python -m pytest tests/test_android_next_source.py tests/test_android_playback_source.py tests/test_android_sync_outbox_source.py tests/test_android_http_sync_source.py tests/test_android_api.py tests/test_adolar4u.py -q
 ```
 
 APK ohne Löschen der App-Daten aktualisieren:

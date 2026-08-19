@@ -4,6 +4,7 @@ import androidx.room.Dao;
 import androidx.room.Insert;
 import androidx.room.OnConflictStrategy;
 import androidx.room.Query;
+import androidx.room.Transaction;
 import androidx.room.Update;
 import androidx.room.Delete;
 
@@ -218,4 +219,48 @@ public interface LibraryDao {
             + "WHERE t.missing=0 AND COALESCE(s.playCount,0)=0 "
             + "ORDER BY t.artist COLLATE NOCASE, t.title COLLATE NOCASE LIMIT 500")
     List<LocalTrack> getNeverPlayedTracks();
+
+    @Insert
+    void insertOutboxEntry(SyncOutboxEntry entry);
+
+    /** Writes the local playcount bump and its outbox entry in one transaction. */
+    @Transaction
+    default void recordLocalListeningOutcome(
+            long trackId, boolean creditsPlaycount, long playedAt, SyncOutboxEntry entry
+    ) {
+        if (creditsPlaycount) {
+            recordCompletedPlay(trackId, playedAt);
+        }
+        insertOutboxEntry(entry);
+    }
+
+    @Query("SELECT * FROM sync_outbox WHERE state IN ('pending','sending') "
+            + "AND (nextRetryAt IS NULL OR nextRetryAt<=:now) ORDER BY createdAt LIMIT :limit")
+    List<SyncOutboxEntry> getSendableOutboxEntries(long now, int limit);
+
+    @Query("UPDATE sync_outbox SET state='sending' WHERE eventId=:eventId")
+    void markOutboxSending(String eventId);
+
+    @Query("DELETE FROM sync_outbox WHERE eventId=:eventId")
+    void deleteOutboxEntry(String eventId);
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    void insertReceipt(SyncReceipt receipt);
+
+    /** Deletes the confirmed outbox entry and files its receipt, atomically. */
+    @Transaction
+    default void confirmOutboxEntry(String eventId, long confirmedAt) {
+        deleteOutboxEntry(eventId);
+        SyncReceipt receipt = new SyncReceipt();
+        receipt.eventId = eventId;
+        receipt.confirmedAt = confirmedAt;
+        insertReceipt(receipt);
+    }
+
+    @Query("UPDATE sync_outbox SET state=:state, attempts=attempts+1, "
+            + "lastError=:error, nextRetryAt=:nextRetryAt WHERE eventId=:eventId")
+    void markOutboxFailed(String eventId, String state, String error, Long nextRetryAt);
+
+    @Query("SELECT COUNT(*) FROM sync_outbox WHERE state!='confirmed'")
+    int countPendingOutbox();
 }

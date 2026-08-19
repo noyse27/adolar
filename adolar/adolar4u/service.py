@@ -10,7 +10,9 @@ from collections import defaultdict
 from .. import errors
 
 EVENT_TYPES = {"started", "skipped", "completed"}
-EVENT_SOURCES = {"library", "playlist", "shuffle", "radio", "adolar4u", "unknown"}
+EVENT_SOURCES = {
+    "library", "playlist", "shuffle", "radio", "adolar4u", "android_local", "unknown",
+}
 EVENT_REASONS = {"manual_next", "track_change", "ended", "error", "stop", None}
 GLOBAL_DEFAULTS = {
     "enabled": False,

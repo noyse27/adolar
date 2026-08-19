@@ -19,7 +19,6 @@ import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 import android.util.Log;
 import android.view.KeyEvent;
-import android.webkit.CookieManager;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
@@ -48,6 +47,9 @@ import net.polze.adolarradio.local.LibraryFacet;
 import net.polze.adolarradio.local.LocalPlaylist;
 import net.polze.adolarradio.local.LocalTrack;
 import net.polze.adolarradio.local.SmartFilter;
+import net.polze.adolarradio.local.DeviceTokenStore;
+import net.polze.adolarradio.local.SyncOutboxEntry;
+import net.polze.adolarradio.local.sync.SyncOutboxWorker;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -158,7 +160,7 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     private final Runnable crossfadeMonitor = new Runnable() {
         @Override
         public void run() {
-            maybeRecordLocalPlay();
+            updateLocalPlaybackEligibility();
             if (!crossfadeActive && player != null && player.isPlaying()
                     && preloadedTrack != null
                     && preloadPlayer.getPlaybackState() == Player.STATE_READY) {
@@ -462,6 +464,51 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         mainHandler.post(connectionHeartbeat);
         mainHandler.post(crossfadeMonitor);
         restoreLocalPlayback();
+        registerDeviceIfNeeded();
+        SyncOutboxWorker.enqueue(this);
+        SyncOutboxWorker.enqueuePeriodic(this);
+    }
+
+    /**
+     * Mints an Android mobile-sync device token once a session cookie is
+     * available, so background sync (SyncOutboxWorker) can keep working with
+     * a token scoped and revocable independently of that session -- see
+     * adolar/routes/android.py's register-device endpoint.
+     */
+    private void registerDeviceIfNeeded() {
+        if (!AdolarPrefs.hasServerUrl(this) || sessionCookie().isEmpty()
+                || DeviceTokenStore.get(this) != null) {
+            return;
+        }
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = openConnection(
+                        AdolarPrefs.apiUrl(this) + "/api/android/v1/register-device", "POST"
+                );
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                connection.setDoOutput(true);
+                JSONObject payload = new JSONObject();
+                payload.put("name", Build.MODEL);
+                byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+                connection.setFixedLengthStreamingMode(body.length);
+                try (OutputStream output = connection.getOutputStream()) {
+                    output.write(body);
+                }
+                if (isSuccessful(connection)) {
+                    JSONObject response = new JSONObject(readAll(connection.getInputStream()));
+                    String token = response.optString("device_token", "");
+                    if (!token.isEmpty()) {
+                        DeviceTokenStore.set(this, token);
+                    }
+                }
+            } catch (Exception ignored) {
+                // Best-effort: the next onCreate() (or SyncOutboxWorker run once
+                // a token exists) retries; sync simply stays pending until then.
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }, "AdolarDeviceRegistration").start();
     }
 
     private void addPlayerDiagnostics(ExoPlayer observed) {
@@ -1319,6 +1366,16 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         if (!track.local) {
             sendListeningEvent(track, "started", null, 0, track.durationMs);
             prepareNextTrack();
+        } else {
+            track.localEventId = UUID.randomUUID().toString();
+            // Best-effort original start time: for a genuine track change this is
+            // "now"; for a restored session (startPositionMs > 0) it backdates by
+            // the resumed position so a later scrobble still carries a plausible
+            // original listen time.
+            track.localStartedAtUtc = System.currentTimeMillis() - startPositionMs;
+            if (startPositionMs == 0L) {
+                enqueueLocalOutboxEvent(track, "started", null, 0, track.durationMs);
+            }
         }
     }
 
@@ -1555,27 +1612,89 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         if (track == null) {
             return;
         }
-        maybeRecordLocalPlay();
-        sendListeningEvent(
-                track, completed ? "completed" : "skipped", reason, player.getCurrentPosition(), track.durationMs
-        );
+        if (track.local) {
+            updateLocalPlaybackEligibility();
+            enqueueLocalOutboxEvent(
+                    track, completed ? "completed" : "skipped", reason,
+                    player.getCurrentPosition(), track.durationMs
+            );
+        } else {
+            sendListeningEvent(
+                    track, completed ? "completed" : "skipped", reason, player.getCurrentPosition(), track.durationMs
+            );
+        }
         currentTrack = null;
     }
 
-    private void maybeRecordLocalPlay() {
+    /**
+     * Latches the local playcount (>=90% position) and scrobble-eligibility
+     * (>=30s and >=50% position) thresholds once each per playback occurrence.
+     * Only sets in-memory flags; the actual local-state write and outbox entry
+     * happen together, exactly once, when the track finishes or is skipped
+     * (see {@link #enqueueLocalOutboxEvent}) so a crash between the two can't
+     * leave one without the other.
+     */
+    private void updateLocalPlaybackEligibility() {
         Track track = currentTrack;
-        if (track == null || !track.local || track.localPlayCountRecorded || player == null) {
+        if (track == null || !track.local || player == null) {
             return;
         }
         long duration = track.durationMs > 0 ? track.durationMs : player.getDuration();
         if (duration <= 0 || duration == C.TIME_UNSET) return;
         long position = Math.max(0L, player.getCurrentPosition());
-        if (position < Math.round(duration * 0.9d)) return;
-        track.localPlayCountRecorded = true;
+        if (!track.localPlayCountRecorded && position >= Math.round(duration * 0.9d)) {
+            track.localPlayCountRecorded = true;
+        }
+        if (!track.localScrobbleEligible && position >= 30_000L
+                && position >= Math.round(duration * 0.5d)) {
+            track.localScrobbleEligible = true;
+        }
+    }
+
+    /**
+     * Writes one {@code sync_outbox} listening event for a local track. The PK
+     * ({@code localEventId + ":" + eventType}) mirrors the existing remote
+     * {@code client_event_id} pattern (session:sequence:eventType) so repeated
+     * calls for the same occurrence can never duplicate a row.
+     */
+    private void enqueueLocalOutboxEvent(
+            Track track, String eventType, String reason, long positionMs, long durationMs
+    ) {
+        if (track.localEventId == null) return;
+        SyncOutboxEntry entry = new SyncOutboxEntry();
+        entry.eventId = track.localEventId + ":" + eventType;
+        entry.kind = SyncOutboxEntry.KIND_LISTENING_EVENT;
+        entry.localTrackId = track.localId;
+        entry.createdAt = System.currentTimeMillis();
+        entry.startedAtUtc = track.localStartedAtUtc;
+        entry.state = SyncOutboxEntry.STATE_PENDING;
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("event_type", eventType);
+            if (reason != null) payload.put("reason", reason);
+            payload.put("local_track_id", track.localId);
+            payload.put("remote_track_id", JSONObject.NULL);
+            payload.put("artist", track.artist);
+            payload.put("title", track.title);
+            payload.put("album", track.album);
+            payload.put("position_seconds", positionMs / 1000.0);
+            payload.put("duration_seconds", durationMs / 1000.0);
+            payload.put("started_at", track.localStartedAtUtc / 1000);
+            payload.put("playcount_eligible", track.localPlayCountRecorded);
+            payload.put("scrobble_eligible", track.localScrobbleEligible);
+            payload.put("source", "android_local");
+        } catch (Exception ignored) {
+            // JSONObject.put only throws for NaN/Infinite doubles, never here.
+        }
+        entry.payloadJson = payload.toString();
+        boolean creditsPlaycount = track.localPlayCountRecorded;
         long localTrackId = track.localId;
-        new Thread(() -> LocalLibraryDatabase.get(this).libraryDao()
-                .recordCompletedPlay(localTrackId, System.currentTimeMillis()),
-                "AdolarLocalPlayCount").start();
+        long playedAt = System.currentTimeMillis();
+        new Thread(() -> {
+            LocalLibraryDatabase.get(this).libraryDao()
+                    .recordLocalListeningOutcome(localTrackId, creditsPlaycount, playedAt, entry);
+            SyncOutboxWorker.enqueue(this);
+        }, "AdolarLocalOutboxEvent").start();
     }
 
     private void rememberCurrentTrack() {
@@ -1645,7 +1764,11 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
     }
 
     private String sessionCookie() {
-        String cookie = CookieManager.getInstance().getCookie(AdolarPrefs.apiUrl(this));
+        // The app-owned cookie (AdolarPrefs), not CookieManager: a
+        // MediaBrowserService can start before WebView's cookie store has
+        // finished loading, and the current login screen is native anyway,
+        // so it never populates CookieManager in the first place.
+        String cookie = AdolarPrefs.getSessionCookie(this);
         return cookie == null ? "" : cookie;
     }
 
@@ -1881,6 +2004,9 @@ public class AdolarMediaService extends MediaBrowserServiceCompat {
         long localId;
         boolean local;
         boolean localPlayCountRecorded;
+        boolean localScrobbleEligible;
+        String localEventId;
+        long localStartedAtUtc;
         String localDocumentUri;
         String title;
         String artist;

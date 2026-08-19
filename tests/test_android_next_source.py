@@ -183,14 +183,13 @@ def test_local_search_and_facets_are_backed_by_room_queries():
     assert "showSearch()" in activity
 
 
-def test_playlists_use_schema_two_and_a_non_destructive_migration():
+def test_playlists_use_a_non_destructive_migration_history():
     database = read(
         "app/src/main/java/net/polze/adolarradio/local/LocalLibraryDatabase.java"
     )
     dao = read("app/src/main/java/net/polze/adolarradio/local/LibraryDao.java")
-    assert "version = 2" in database
     assert "MIGRATION_1_2" in database
-    assert ".addMigrations(MIGRATION_1_2)" in database
+    assert ".addMigrations(MIGRATION_1_2, MIGRATION_2_3)" in database
     assert "fallbackToDestructiveMigration" not in database
     assert "getStaticPlaylistTracks" in dao
     assert "getNeverPlayedTracks" in dao
@@ -225,7 +224,7 @@ def test_local_favorites_and_playcounts_feed_system_lists():
     assert "getRecentlyPlayedTracks" in dao
     assert "getLeastPlayedTracks" in dao
     assert "showTrackActions" in activity
-    assert "maybeRecordLocalPlay" in service
+    assert "updateLocalPlaybackEligibility" in service
     assert "duration * 0.9d" in service
 
 
