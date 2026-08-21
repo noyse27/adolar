@@ -66,34 +66,38 @@ class TrackActionsTestBase(unittest.TestCase):
 
 
 class TrackBpmRouteTests(TrackActionsTestBase):
-    def test_requires_admin(self):
-        with self._login():
-            response = self.client.post(f"/api/track/{self.track_id}/bpm", json={"bpm": 128})
-        self.assertEqual(response.status_code, 403)
+    def test_does_not_require_authentication(self):
+        # Regression test: Adolar Disco (server/bpm.py) reports BPM via a plain
+        # unauthenticated POST, like /disco-played. This must not 401.
+        response = self.client.post(f"/api/track/{self.track_id}/bpm", json={"bpm": 128})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["updated"])
 
     def test_rejects_missing_bpm(self):
-        with self._login(role="admin"):
-            response = self.client.post(f"/api/track/{self.track_id}/bpm", json={})
+        response = self.client.post(f"/api/track/{self.track_id}/bpm", json={})
         self.assertEqual(response.status_code, 400)
 
     def test_rejects_non_positive_bpm(self):
-        with self._login(role="admin"):
-            response = self.client.post(f"/api/track/{self.track_id}/bpm", json={"bpm": 0})
+        response = self.client.post(f"/api/track/{self.track_id}/bpm", json={"bpm": 0})
         self.assertEqual(response.status_code, 400)
 
     def test_rejects_non_numeric_bpm(self):
-        with self._login(role="admin"):
-            response = self.client.post(f"/api/track/{self.track_id}/bpm", json={"bpm": "fast"})
+        response = self.client.post(f"/api/track/{self.track_id}/bpm", json={"bpm": "fast"})
         self.assertEqual(response.status_code, 400)
 
     def test_valid_bpm_updates_the_track(self):
-        with self._login(role="admin"):
-            response = self.client.post(f"/api/track/{self.track_id}/bpm", json={"bpm": 128.456})
+        response = self.client.post(f"/api/track/{self.track_id}/bpm", json={"bpm": 128.456})
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.get_json()["updated"])
         with app_module.db.db() as conn:
             bpm = conn.execute("SELECT bpm FROM tracks WHERE id=?", (self.track_id,)).fetchone()["bpm"]
         self.assertEqual(bpm, 128.46)
+
+    def test_does_not_expose_unrelated_admin_scan_route(self):
+        # /api/scan/bpm ends with "/bpm" too but is a different, admin-only route
+        # (full-library rescan trigger) and must stay protected.
+        response = self.client.post("/api/scan/bpm")
+        self.assertEqual(response.status_code, 401)
 
 
 class TrackPlayedRouteTests(TrackActionsTestBase):
