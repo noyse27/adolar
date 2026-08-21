@@ -1,0 +1,50 @@
+# Pfad-basierte Ownership fuer den Adolar-Server nach Produkt.
+# Aktuell ist @noyse27 einziger Maintainer fuer alles - dieser Datei geht es
+# primaer darum, Produktgrenzen sichtbar/durchsetzbar zu machen, sobald ein
+# weiterer Mitentwickler dazukommt. Siehe docs/PRODUCT_INTEGRATIONS.md fuer
+# den vollstaendigen Integrations-Ist-Stand und
+# docs/INTEGRATION_STANDARDS.md fuer die Regeln dahinter.
+#
+# Reihenfolge zaehlt: die letzte passende Regel gewinnt (Standard-Git-
+# CODEOWNERS-Verhalten). Deshalb stehen die generischen/Kernpfade zuerst,
+# die spezifischeren Produktpfade danach.
+
+# Fallback: alles, was keine spezifischere Regel unten trifft.
+*                                   @noyse27
+
+# --- Kernpfade: hoehere Review-Schwelle, betreffen ALLE Produkte ---
+# Aenderungen hier gegen docs/PRODUCT_INTEGRATIONS.md Abschnitt 6
+# (produktuebergreifende Beobachtungen) gegenpruefen.
+/adolar/db.py                      @noyse27
+/adolar/auth.py                    @noyse27
+/adolar/application.py             @noyse27
+/adolar/routes/auth.py             @noyse27
+/adolar/routes/admin.py            @noyse27
+/static/js/app.js                  @noyse27
+/templates/index.html              @noyse27
+
+# --- Produkt: Adolar Android / Android Next ---
+/adolar-android/                   @noyse27
+
+# --- Produkt: Adolar Radio Companion ---
+# Companion hat keinen eigenen Client-Code (pywebview-Huelle) - "sein"
+# eigentlicher Code sind diese Server-Templates/Routen.
+/companion/                        @noyse27
+/templates/radio_settings.html     @noyse27
+/adolar/routes/radio.py            @noyse27
+
+# --- Produkt: Adolar Songster (Server-seitiger Anteil) ---
+/adolar/songster/                  @noyse27
+/adolar/routes/songster.py         @noyse27
+/tests/test_songster.py            @noyse27
+
+# --- Produkt: Adolar Disco (Server-seitiger Anteil) ---
+# Disco selbst liegt im separaten Repo adolar-disco; das hier sind nur
+# die Server-Routen, die es unauthentifiziert aufruft.
+/adolar/routes/media.py            @noyse27
+/adolar/routes/catalog.py          @noyse27
+
+# --- Produkt: Adolar Taggster (Server-seitiger Anteil) ---
+# Taggster selbst liegt im separaten Repo tagmegently; das hier ist der
+# API-Token-Mechanismus, den es nutzt.
+/adolar/routes/scanner.py          @noyse27
