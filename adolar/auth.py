@@ -41,6 +41,10 @@ PUBLIC_PREFIXES = (
 )
 # Disco-specific endpoints (no session needed, called by Disco server)
 PUBLIC_SUFFIXES = ("/disco-played",)
+# Disco-specific /api/track/<id>/... endpoints, matched by suffix on that prefix only
+# (a bare suffix in PUBLIC_SUFFIXES would also expose unrelated admin routes, e.g.
+# "/bpm" would match the admin-only /api/scan/bpm library rescan trigger).
+PUBLIC_TRACK_SUFFIXES = ("/bpm",)
 
 # ── In-memory brute-force tracker ─────────────────────────────────────────────
 _bf_lock  = threading.Lock()
@@ -373,7 +377,11 @@ def verify_password(user: dict, password: str) -> bool:
 def _is_public(path: str) -> bool:
     if any(path == prefix or path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
         return True
-    return any(path.endswith(suffix) for suffix in PUBLIC_SUFFIXES)
+    if any(path.endswith(suffix) for suffix in PUBLIC_SUFFIXES):
+        return True
+    return path.startswith("/api/track/") and any(
+        path.endswith(suffix) for suffix in PUBLIC_TRACK_SUFFIXES
+    )
 
 
 def setting_enabled(key: str, default: bool = False) -> bool:

@@ -274,9 +274,9 @@ def api_download():
 # ── Play count ───────────────────────────────────────────────────────────────
 
 @blueprint.post("/api/track/<int:track_id>/bpm")
-@_auth.admin_required
 def api_track_bpm(track_id):
-    """Accept a BPM value from an external tool (e.g. Adolar Disco)."""
+    """Accept a BPM value from an external tool. Called by Adolar Disco without
+    a session, like /disco-played — see auth.PUBLIC_TRACK_SUFFIXES."""
     data = request.get_json(silent=True) or {}
     bpm = data.get("bpm")
     if bpm is None or not isinstance(bpm, (int, float)) or bpm <= 0:
