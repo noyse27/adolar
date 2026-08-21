@@ -474,6 +474,8 @@ def init_db():
             "ALTER TABLE api_tokens ADD COLUMN connection_id INTEGER",
             "ALTER TABLE tracks ADD COLUMN original_year INTEGER",
             "ALTER TABLE radio_stations ADD COLUMN songster_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE api_tokens ADD COLUMN product TEXT NOT NULL DEFAULT 'taggster'",
+            "ALTER TABLE connection_log ADD COLUMN client_version TEXT",
         ]:
             with contextlib.suppress(Exception):
                 conn.execute(migration)
@@ -1554,6 +1556,24 @@ def list_radio_stations(user_id: int | None = None, include_all_private: bool = 
     return [_radio_station_from_row(r) for r in rows]
 
 
+def list_songster_playlists() -> list[dict]:
+    """Songster-enabled stations, for the /api/songster/playlists route.
+    Mirror image of list_radio_stations' exclusion filter: only
+    songster_enabled=1 stations, regardless of scope/owner."""
+    with db() as conn:
+        rows = conn.execute("""
+            SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
+                   rs.owner_id, u.username AS owner_name, rs.jingle_path,
+                   rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
+                   rs.created_at, rs.updated_at, rs.engine, rs.songster_enabled
+            FROM radio_stations rs
+            LEFT JOIN users u ON u.id=rs.owner_id
+            WHERE rs.songster_enabled = 1
+            ORDER BY rs.name COLLATE NOCASE
+        """).fetchall()
+    return [_radio_station_from_row(r) for r in rows]
+
+
 def get_radio_station(station_id: int) -> dict | None:
     with db() as conn:
         row = conn.execute("""
@@ -1760,6 +1780,43 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
         use_genre_spacing=not _radio_filter_uses_genre(filter_def),
     )
     return _track_rows_to_dicts(selected)
+
+
+def list_songster_playlist_tracks(station_id: int, limit: int = 200, offset: int = 0) -> dict | None:
+    """Return the full, deterministically-ordered track set for a
+    songster_enabled radio station, for the /api/songster/* game-client API.
+
+    Unlike get_radio_station_tracks (random sampling for live radio
+    playback), Songster needs the *complete* matching set — its own batch
+    algorithm (year-spread, one-artist-per-batch, last_played_at malus)
+    runs client-side on the full pool, not on a pre-shuffled subset.
+    Ordering by t.id keeps pagination stable across calls.
+    """
+    station = get_radio_station(station_id)
+    if not station or not station.get("songster_enabled"):
+        return None
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, int(offset))
+    where_sql, params = _radio_filter_sql(station.get("filter") or {})
+    where = f"WHERE {where_sql}" if where_sql else ""
+    with db() as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) AS n FROM tracks t {where}", params
+        ).fetchone()["n"]
+        rows = conn.execute(f"""
+            SELECT t.id, t.title, t.artist, t.album, t.genre,
+                   COALESCE(t.original_year, t.year) AS year, t.duration
+            FROM tracks t
+            {where}
+            ORDER BY t.id
+            LIMIT ? OFFSET ?
+        """, params + [limit, offset]).fetchall()
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "tracks": [dict(r) for r in rows],
+    }
 
 
 def update_bpm(track_id: int, bpm: float) -> bool:
