@@ -314,6 +314,7 @@ def init_db():
                 size        INTEGER,
                 cover_hash  TEXT,
                 bpm         REAL,
+                original_year INTEGER,
                 mtime       REAL,
                 play_count  INTEGER NOT NULL DEFAULT 0,
                 play_count_tag_dirty INTEGER NOT NULL DEFAULT 0,
@@ -471,6 +472,7 @@ def init_db():
             "ALTER TABLE sessions ADD COLUMN connection_id INTEGER",
             "ALTER TABLE connection_log ADD COLUMN client_key TEXT",
             "ALTER TABLE api_tokens ADD COLUMN connection_id INTEGER",
+            "ALTER TABLE tracks ADD COLUMN original_year INTEGER",
         ]:
             with contextlib.suppress(Exception):
                 conn.execute(migration)
@@ -1794,19 +1796,21 @@ def upsert_track(data: dict):
     data.setdefault("bpm", None)
     data.setdefault("loved", False)
     data.setdefault("album_artist", None)
+    data.setdefault("original_year", None)
     with db() as conn:
         existing = conn.execute(
             "SELECT id, mtime FROM tracks WHERE path=?", (data["path"],)
         ).fetchone()
         conn.execute("""
-            INSERT INTO tracks (path, title, artist, album, album_artist, genre, year, track_no,
-                                duration, bitrate, size, cover_hash, bpm, mtime, play_count, loved)
-            VALUES (:path, :title, :artist, :album, :album_artist, :genre, :year, :track_no,
-                    :duration, :bitrate, :size, :cover_hash, :bpm, :mtime, :play_count, :loved)
+            INSERT INTO tracks (path, title, artist, album, album_artist, genre, year, original_year,
+                                track_no, duration, bitrate, size, cover_hash, bpm, mtime, play_count, loved)
+            VALUES (:path, :title, :artist, :album, :album_artist, :genre, :year, :original_year,
+                    :track_no, :duration, :bitrate, :size, :cover_hash, :bpm, :mtime, :play_count, :loved)
             ON CONFLICT(path) DO UPDATE SET
                 title=excluded.title, artist=excluded.artist, album=excluded.album,
                 album_artist=excluded.album_artist,
-                genre=excluded.genre, year=excluded.year, track_no=excluded.track_no,
+                genre=excluded.genre, year=excluded.year, original_year=excluded.original_year,
+                track_no=excluded.track_no,
                 duration=excluded.duration, bitrate=excluded.bitrate, size=excluded.size,
                 cover_hash=excluded.cover_hash, mtime=excluded.mtime,
                 indexed_at=unixepoch(),

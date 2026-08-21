@@ -167,6 +167,12 @@ def _scan_file(path: str) -> dict | None:
             "album_artist": pick("albumartist", "TPE2", "aART", "ALBUMARTIST"),
             "genre": pick("genre", "TCON"),
             "year": pick_int("date", "TDRC", "TYER"),
+            # Original release year, distinct from "year" above — e.g. a
+            # compilation like "Now Yearbook '91" released in 2025 but whose
+            # songs are from 1991. ID3 TDOR (MP3), ORIGINALYEAR/ORIGINALDATE
+            # (Vorbis comments, MusicBrainz Picard convention). Not written
+            # by Adolar itself; populated by taggers like Adolar Taggster.
+            "original_year": pick_int("originalyear", "originaldate", "TDOR"),
             "track_no": pick_int("tracknumber", "TRCK"),
             "duration": duration,
             "bitrate": bitrate,
