@@ -473,6 +473,7 @@ def init_db():
             "ALTER TABLE connection_log ADD COLUMN client_key TEXT",
             "ALTER TABLE api_tokens ADD COLUMN connection_id INTEGER",
             "ALTER TABLE tracks ADD COLUMN original_year INTEGER",
+            "ALTER TABLE radio_stations ADD COLUMN songster_enabled INTEGER NOT NULL DEFAULT 0",
         ]:
             with contextlib.suppress(Exception):
                 conn.execute(migration)
@@ -1510,6 +1511,7 @@ def _radio_filter_sql(filter_def) -> tuple[str, list]:
 def _radio_station_from_row(row) -> dict:
     d = dict(row)
     d["is_system"] = bool(d["is_system"])
+    d["songster_enabled"] = bool(d.get("songster_enabled"))
     d["jingle_enabled"] = bool(d.get("jingle_enabled"))
     d["has_jingle"] = bool(d.pop("jingle_path", None))
     d["scope"] = d.get("scope") or "global"
@@ -1522,6 +1524,9 @@ def _radio_station_from_row(row) -> dict:
 
 
 def list_radio_stations(user_id: int | None = None, include_all_private: bool = False) -> list[dict]:
+    # Songster-enabled stations are managed and consumed through the
+    # separate /api/songster/* surface only (see adolar/songster/) and
+    # must never appear in Adolar Web/Radio/Disco's own station list.
     with db() as conn:
         _seed_radio_stations(conn)
         params = []
@@ -1535,10 +1540,10 @@ def list_radio_stations(user_id: int | None = None, include_all_private: bool = 
             SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
                    rs.owner_id, u.username AS owner_name, rs.jingle_path,
                    rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
-                   rs.created_at, rs.updated_at, rs.engine
+                   rs.created_at, rs.updated_at, rs.engine, rs.songster_enabled
             FROM radio_stations rs
             LEFT JOIN users u ON u.id=rs.owner_id
-            WHERE """ + " OR ".join(where) + """
+            WHERE rs.songster_enabled = 0 AND (""" + " OR ".join(where) + """)
             GROUP BY rs.id
             ORDER BY rs.is_system DESC,
                      CASE rs.engine WHEN 'adolar4u' THEN 1 ELSE 0 END,
@@ -1555,7 +1560,7 @@ def get_radio_station(station_id: int) -> dict | None:
             SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
                    rs.owner_id, u.username AS owner_name, rs.jingle_path,
                    rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
-                   rs.created_at, rs.updated_at, rs.engine
+                   rs.created_at, rs.updated_at, rs.engine, rs.songster_enabled
             FROM radio_stations rs
             LEFT JOIN users u ON u.id=rs.owner_id
             WHERE rs.id=?
