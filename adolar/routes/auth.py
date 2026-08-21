@@ -226,8 +226,9 @@ def api_tokens_list():
 def api_tokens_create():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
-    token = _auth.create_api_token(g.user["id"], name)
-    db.log_audit(g.user["id"], "api_token.created", details=json.dumps({"name": name}))
+    product = (data.get("product") or "taggster").strip()
+    token = _auth.create_api_token(g.user["id"], name, product)
+    db.log_audit(g.user["id"], "api_token.created", details=json.dumps({"name": name, "product": product}))
     return jsonify({"token": token})
 
 @blueprint.delete("/api/admin/tokens/<int:token_id>")

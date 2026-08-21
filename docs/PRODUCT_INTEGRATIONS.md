@@ -128,31 +128,32 @@ jeder Verbindung genau das HTML, das der Server aktuell ausliefert.
   Bearer <token>` (`tagger.py:2739,2773,3839,3919,3949,3995,4001`),
   konfiguriert im "Adolar verbinden"-Dialog (`tagger.py:2605-2641`).
   Server: dedizierter Token-Pfad getrennt von Session-Cookies
-  (`adolar/auth.py:166-249`: `get_user_by_api_token`, `create_api_token`,
+  (`adolar/auth.py`: `get_user_by_api_token`, `create_api_token`,
   `revoke_api_token`, `list_api_tokens`). Jede Token-Nutzung aktualisiert
   Praesenz via `touch_api_token()`, das einen `client_key` der Form
-  `f"taggster-token-{id}"` synthetisiert und `product="taggster"` fest
-  einprogrammiert in `connection_log` schreibt (`adolar/auth.py:220,225`)
-  - obwohl der Mechanismus (API-Token) generisch ist.
+  `f"{product}-token-{id}"` synthetisiert, `product` dabei aus der neuen
+  `api_tokens.product`-Spalte gelesen (Default `"taggster"` fuer
+  Bestandstoken, siehe Namenskollisions-Risiko unten - **geloest**).
 - **Genutzte Routen**: `GET /api/me`, `GET /api/admin/libraries`, `POST
   /api/scan/start`, `POST /api/admin/libraries/<id>/rename-path`.
 - **Settings/Feature-Flags**: keine `taggster_enabled`-Einstellung; Zugriff
   haengt allein davon ab, ob das Token einem aktiven Nutzer gehoert - ein
   API-Token mit Admin-Faehigkeit gewaehrt vollen Admin-Routenzugriff, keine
   auf "taggster" beschraenkte Berechtigung.
-- **DB-Schema**: generische `api_tokens`-Tabelle, geteilte
-  `connection_log`.
+- **DB-Schema**: generische `api_tokens`-Tabelle (jetzt mit `product`-Spalte,
+  siehe Songster unten), geteilte `connection_log` (jetzt mit
+  `client_version`-Spalte).
 - **Rate-Limits**: keine. Der Login-Brute-Force-Schutz
   (`adolar/auth.py:24-29`) gilt nur fuer `/api/radio/login`, nicht fuer
   Token-authentifizierte Routen - wiederholtes Token-Raten wird nicht
   gedrosselt.
 - **Versionierung**: nicht gefunden.
-- **Namenskollisions-Risiko**: `touch_api_token()` labelt jede
-  Token-Verbindung fest als `"taggster"` (`adolar/auth.py:220,225`). Ein
-  zukuenftiges zweites Admin-Tool auf demselben Token-Mechanismus wuerde in
-  der Admin-"Aktuelle Verbindungen"-Ansicht faelschlich ebenfalls als
-  `taggster` erscheinen. Bei Einfuehrung eines weiteren API-Token-Clients:
-  `product`-Wert aus dem Token-Datensatz ableiten statt hart zu kodieren.
+- **Namenskollisions-Risiko (geloest 2026-08-21)**: `touch_api_token()`
+  labelte frueher jede Token-Verbindung fest als `"taggster"`. Jetzt liest
+  `create_api_token(user_id, name, product)` einen validierten
+  `product`-Wert (`auth.KNOWN_PRODUCTS`) und `touch_api_token()` verwendet
+  ihn statt der Konstante - siehe Abschnitt 5 (Songster), das der erste
+  Nutzer des generalisierten Mechanismus ist.
 
 ---
 
@@ -161,31 +162,60 @@ jeder Verbindung genau das HTML, das der Server aktuell ausliefert.
 **Repo**: `adolar-songster` (autark).
 **Konzeptdokument**: `adolar-songster/docs/Adolar_Songster_Adolar_Integration_Konzept_v1_20260821.md`
 
-Umsetzungsstand (Stand 2026-08-21): **teilweise implementiert.**
+Umsetzungsstand (Stand 2026-08-21): **teilweise implementiert (Schritt 1+2 von 3).**
 
 Bereits umgesetzt:
 - Globaler Schalter `songster_enabled`, persistiert ueber
   `control.settings` (Muster wie Adolar4U) - `adolar/songster/service.py`.
 - `GET /api/songster/status` (session-authentifiziert) -
-  `adolar/routes/songster.py:17-22`.
+  `adolar/routes/songster.py`.
 - `GET/PUT /api/admin/songster/settings` (admin-only, audit-geloggt) -
-  `adolar/routes/songster.py:25-42`.
-- Neue Spalte `radio_stations.songster_enabled` (`adolar/db.py:476`),
+  `adolar/routes/songster.py`.
+- Neue Spalte `radio_stations.songster_enabled` (`adolar/db.py`),
   Songster-Sender werden aus der normalen Sender-Listung ausgeschlossen
-  (`adolar/db.py:1546`).
+  (`db.list_radio_stations`) und stattdessen ueber `db.list_songster_playlists`
+  separat gelistet.
 - Eigenes Package `adolar/songster/`, Blueprint registriert
-  (`adolar/routes/__init__.py:16,28`), Tests in `tests/test_songster.py`.
+  (`adolar/routes/__init__.py`), Tests in `tests/test_songster.py`.
+- **Schritt 2 (neu)**: Server-zu-Server-Datenzugriff fuer den Songster-
+  Spielserver, **nicht** wie urspruenglich im Konzeptdokument geplant per
+  eigenem Session-Login-Endpoint, sondern ueber den bestehenden
+  API-Token-Mechanismus (Bearer, wie Taggster - siehe
+  INTEGRATION_STANDARDS.md Abschnitt 3 und Abschnitt 4 oben):
+  - `api_tokens.product` (neue Spalte, Default `"taggster"` fuer
+    Bestandstoken) - ein Admin legt fuer den Songster-Spielserver ein Token
+    mit `product="songster"` unter `POST /api/admin/tokens` an.
+  - `GET /api/songster/playlists` - listet alle `songster_enabled`-Sender
+    (`db.list_songster_playlists`); nur mit Bearer-Token `product="songster"`
+    UND globalem Schalter `enabled=true` erreichbar
+    (`_songster_token_required` in `adolar/routes/songster.py`).
+  - `GET /api/songster/playlists/<id>/tracks?limit=&offset=` - vollstaendiger,
+    deterministisch nach `t.id` sortierter Track-Pool eines Senders
+    (`db.list_songster_playlist_tracks`); liefert `id`, `title`, `artist`,
+    `album`, `genre`, `year` (`COALESCE(original_year, year)`), `duration`.
+    Bewusst **keine** Zufallsauswahl serverseitig - Songsters eigener
+    Batch-Algorithmus (Jahresspreizung, ein Interpret pro Batch,
+    `last_played_at`-Malus) laeuft clientseitig auf dem vollen Pool.
+  - `connection_log.client_version` (neue Spalte) - generischer
+    Client-Versions-Header `X-Adolar-Client-Version` wird bei jedem
+    Bearer-Aufruf mitgeschrieben (nicht songster-spezifisch, siehe
+    Abschnitt 6 Punkt 2 - jetzt geloest).
+  - Kein eigener Login-Endpoint (`/api/songster/login` aus dem
+    Konzeptdokument entfaellt) - das Bearer-Token ersetzt ihn vollstaendig.
 
 Noch nicht umgesetzt (naechste Schritte laut Konzeptdokument):
-- Kein `X-Adolar-Product: songster` Header-Handling (aktuell nur
-  `android`/`companion` erkannt, `adolar/routes/auth.py:139`,
-  `adolar/routes/admin.py:133`).
-- Keine `/api/songster/login|playlists|playlists/{id}/tracks|status`
-  Routen (nur `status` + `settings` existieren bisher).
+- Kein `X-Adolar-Product: songster` Header-Handling fuer den Browser-
+  Session-Pfad (aktuell nur `android`/`companion` erkannt,
+  `adolar/routes/auth.py`, `adolar/routes/admin.py`) - wird fuer den
+  Spielserver nicht benoetigt (Bearer-Token statt Session), bleibt fuer
+  Schritt 3 (Admin-UI) relevant, falls das Songster-Verwaltungs-Frontend
+  selbst als Adolar-Web-Client identifiziert werden soll.
 - Keine Rate-Limits (60/min allgemein, 10/min Login sind Konzept, noch
   nicht gebaut - siehe auch Abschnitt 6, generelles Rate-Limit-Defizit).
-- Kein Admin-UI-Toggle in Templates/`app.js` fuer `songster_enabled`
-  gefunden - Backend-Endpoint existiert, Frontend fehlt noch.
+- Kein Admin-UI-Toggle in Templates/`app.js` fuer `songster_enabled`, keine
+  "Songster Playlists"-Verwaltungsdialoge (Play-Button = Freischalten,
+  Zahnrad = Bearbeiten, Papierkorb = Loeschen) - Backend-Endpoints
+  existieren, Frontend (Schritt 3) fehlt noch.
 
 ---
 
@@ -198,11 +228,12 @@ Noch nicht umgesetzt (naechste Schritte laut Konzeptdokument):
    Disco, Taggster und Songster (aktuell) nutzen ihn gar nicht. **Bei jeder
    neuen Produktintegration**: diese beiden Allow-Lists erweitern oder den
    Mechanismus generalisieren (siehe INTEGRATION_STANDARDS.md).
-2. **Keine Client-Versionierung irgendwo im System.** Kein Produkt meldet
-   seine Version an den Server (Header, Payload, `connection_log`-Spalte).
-   Songsters Konzeptdokument plant das erstmalig (`clientVersion` auf
-   `/api/songster/login`) - Empfehlung: gleich generisch fuer alle
-   Produkte einfuehren statt songster-spezifisch.
+2. **Client-Versionierung (geloest 2026-08-21 im Rahmen von Songster
+   Schritt 2).** Neue Spalte `connection_log.client_version`, generisch
+   ueber den Header `X-Adolar-Client-Version` auf dem Bearer-Token-Pfad
+   (`adolar/auth.py: before_request`) befuellt - nicht songster-spezifisch,
+   von jedem API-Token-Client nutzbar (aktuell nur von Songster gesendet;
+   Taggster kann jederzeit nachziehen).
 3. **Keine Rate-Limits irgendwo im System.** `Flask-Limiter` ist nicht
    installiert. Einzige Drosselung ist der IP-basierte
    Brute-Force-Schutz auf `/api/radio/login`, produktunabhaengig.

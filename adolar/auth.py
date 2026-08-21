@@ -41,6 +41,12 @@ PUBLIC_PREFIXES = (
 )
 # Disco-specific endpoints (no session needed, called by Disco server)
 PUBLIC_SUFFIXES = ("/disco-played",)
+
+# Every Adolar-family product identified via X-Adolar-Product (session
+# login) or api_tokens.product (Bearer auth). Shared allowlist so new
+# products get validated consistently instead of each call site hard-
+# coding its own tuple (see docs/INTEGRATION_STANDARDS.md section 3).
+KNOWN_PRODUCTS = frozenset({"adolar_web", "companion", "android", "taggster", "songster"})
 # Disco-specific /api/track/<id>/... endpoints, matched by suffix on that prefix only
 # (a bare suffix in PUBLIC_SUFFIXES would also expose unrelated admin routes, e.g.
 # "/bpm" would match the admin-only /api/scan/bpm library rescan trigger).
@@ -177,29 +183,35 @@ def get_user_by_api_token(token: str) -> dict | None:
             """SELECT u.id, u.username, u.role, u.allow_download, u.allow_playlists,
                       u.allow_radio_stations, u.allow_lyrics_edit,
                       u.contributes_playcount, u.is_active,
-                      u.must_change_password
+                      u.must_change_password, t.product AS token_product
                FROM api_tokens t JOIN users u ON u.id = t.user_id
                WHERE t.token=? AND t.revoked_at IS NULL AND u.is_active=1""",
             (token,)
         ).fetchone()
     return dict(row) if row else None
 
-def create_api_token(user_id: int, name: str = "") -> str:
+def create_api_token(user_id: int, name: str = "", product: str = "taggster") -> str:
     """Create and return a new API token. The plaintext token is only ever
-    available here at creation time — it is not retrievable afterwards."""
+    available here at creation time — it is not retrievable afterwards.
+    `product` scopes which product-specific API surface (e.g. /api/songster/*)
+    this token may use; unrecognized values fall back to "taggster" (the
+    original, pre-multi-product default) rather than silently accepting
+    anything, matching KNOWN_PRODUCTS validation elsewhere."""
     token = secrets.token_urlsafe(32)
+    product = product if product in KNOWN_PRODUCTS else "taggster"
     with db.db() as conn:
         conn.execute(
-            "INSERT INTO api_tokens (token, user_id, name, created_at) VALUES (?,?,?,?)",
-            (token, user_id, name or None, time.time())
+            "INSERT INTO api_tokens (token, user_id, name, product, created_at) VALUES (?,?,?,?,?)",
+            (token, user_id, name or None, product, time.time())
         )
     return token
 
-def touch_api_token(token: str, ip_address: str = "") -> None:
+def touch_api_token(token: str, ip_address: str = "", client_version: str = "") -> None:
     """Update last_used_at and keep a connection_log entry for this token so
-    it shows up in the admin 'Aktuelle Verbindungen' view, identified as
-    product 'taggster'. One connection_log row per token, refreshed on every
-    use (unlike sessions, which get a fresh row per login).
+    it shows up in the admin 'Aktuelle Verbindungen' view, identified by the
+    token's own product (see create_api_token) rather than a hardcoded value.
+    One connection_log row per token, refreshed on every use (unlike
+    sessions, which get a fresh row per login).
 
     A connection only counts as "current" (see app._monitor_connections) if
     it has a client_key set OR a linked non-expired session — API tokens have
@@ -209,25 +221,29 @@ def touch_api_token(token: str, ip_address: str = "") -> None:
     now = time.time()
     with db.db() as conn:
         row = conn.execute(
-            "SELECT id, connection_id, user_id FROM api_tokens WHERE token=?", (token,)
+            "SELECT id, connection_id, user_id, product FROM api_tokens WHERE token=?", (token,)
         ).fetchone()
         if not row:
             return
         conn.execute("UPDATE api_tokens SET last_used_at=? WHERE token=?", (now, token))
         if row["connection_id"]:
             conn.execute(
-                "UPDATE connection_log SET last_seen_at=?, ip_address=? WHERE id=?",
-                (now, ip_address, row["connection_id"])
+                """UPDATE connection_log SET last_seen_at=?, ip_address=?,
+                          client_version=COALESCE(?, client_version)
+                   WHERE id=?""",
+                (now, ip_address, client_version or None, row["connection_id"])
             )
         else:
             user = conn.execute("SELECT username FROM users WHERE id=?", (row["user_id"],)).fetchone()
-            client_key = f"taggster-token-{row['id']}"
+            product = row["product"] or "taggster"
+            client_key = f"{product}-token-{row['id']}"
             cur = conn.execute(
                 """INSERT INTO connection_log
-                       (user_id, username, product, ip_address, connected_at, last_seen_at, client_key)
-                   VALUES (?,?,?,?,?,?,?)""",
-                (row["user_id"], user["username"] if user else "Unbekannt", "taggster",
-                 ip_address, now, now, client_key),
+                       (user_id, username, product, ip_address, connected_at, last_seen_at,
+                        client_key, client_version)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (row["user_id"], user["username"] if user else "Unbekannt", product,
+                 ip_address, now, now, client_key, client_version or None),
             )
             conn.execute(
                 "UPDATE api_tokens SET connection_id=? WHERE token=?", (cur.lastrowid, token)
@@ -246,7 +262,7 @@ def list_api_tokens(user_id: int) -> list[dict]:
     """List a user's active tokens — never includes the plaintext token value."""
     with db.db() as conn:
         rows = conn.execute(
-            """SELECT id, name, created_at, last_used_at FROM api_tokens
+            """SELECT id, name, product, created_at, last_used_at FROM api_tokens
                WHERE user_id=? AND revoked_at IS NULL ORDER BY created_at DESC""",
             (user_id,)
         ).fetchall()
@@ -423,6 +439,7 @@ def _get_dev_admin() -> dict | None:
 def before_request():
     """Attach current user to g; redirect unauthenticated requests."""
     g.user = None
+    g.token_product = None
     if request.method == "HEAD":
         return
     if DEV_ADMIN_ENABLED:
@@ -450,8 +467,13 @@ def before_request():
         if api_token:
             user = get_user_by_api_token(api_token)
             if user:
+                g.token_product = user.pop("token_product", None)
                 g.user = user
-                touch_api_token(api_token, ip_address=_get_client_ip())
+                touch_api_token(
+                    api_token,
+                    ip_address=_get_client_ip(),
+                    client_version=request.headers.get("X-Adolar-Client-Version", ""),
+                )
                 return
 
     if _is_public(request.path):

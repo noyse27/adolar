@@ -114,6 +114,54 @@ class ApiTokenFunctionsTests(ApiTokenAuthTestBase):
         # Repeated use refreshes the same connection_log row, not a new one each time.
         self.assertEqual(count, 1)
 
+    def test_create_api_token_defaults_product_to_taggster(self):
+        user_id = auth.create_user("admin", "password123", role="admin")
+        token = auth.create_api_token(user_id, "Taggster")
+        with db.db() as conn:
+            row = conn.execute("SELECT product FROM api_tokens WHERE token=?", (token,)).fetchone()
+        self.assertEqual(row["product"], "taggster")
+
+    def test_create_api_token_accepts_a_known_product(self):
+        user_id = auth.create_user("admin", "password123", role="admin")
+        token = auth.create_api_token(user_id, "Songster Game Server", product="songster")
+        with db.db() as conn:
+            row = conn.execute("SELECT product FROM api_tokens WHERE token=?", (token,)).fetchone()
+        self.assertEqual(row["product"], "songster")
+
+    def test_create_api_token_rejects_unknown_product(self):
+        user_id = auth.create_user("admin", "password123", role="admin")
+        token = auth.create_api_token(user_id, "x", product="not-a-real-product")
+        with db.db() as conn:
+            row = conn.execute("SELECT product FROM api_tokens WHERE token=?", (token,)).fetchone()
+        self.assertEqual(row["product"], "taggster")
+
+    def test_touch_api_token_labels_connection_log_with_the_tokens_own_product(self):
+        user_id = auth.create_user("admin", "password123", role="admin")
+        token = auth.create_api_token(user_id, "Songster Game Server", product="songster")
+        auth.touch_api_token(token, ip_address="10.0.0.5")
+        with db.db() as conn:
+            row = conn.execute(
+                "SELECT product, client_key FROM connection_log WHERE product='songster'"
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertTrue(row["client_key"].startswith("songster-token-"))
+
+    def test_touch_api_token_records_client_version(self):
+        user_id = auth.create_user("admin", "password123", role="admin")
+        token = auth.create_api_token(user_id, "Songster Game Server", product="songster")
+        auth.touch_api_token(token, ip_address="10.0.0.5", client_version="1.2.3")
+        with db.db() as conn:
+            row = conn.execute(
+                "SELECT client_version FROM connection_log WHERE product='songster'"
+            ).fetchone()
+        self.assertEqual(row["client_version"], "1.2.3")
+
+    def test_get_user_by_api_token_exposes_token_product(self):
+        user_id = auth.create_user("admin", "password123", role="admin")
+        token = auth.create_api_token(user_id, "Songster Game Server", product="songster")
+        user = auth.get_user_by_api_token(token)
+        self.assertEqual(user["token_product"], "songster")
+
 
 class ApiTokenMigrationTests(ApiTokenAuthTestBase):
     def test_api_tokens_table_and_connection_id_column_survive_reinitialization(self):
