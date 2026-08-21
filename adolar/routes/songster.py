@@ -23,7 +23,8 @@ login_required/admin_required.
 from flask import Blueprint, g, jsonify, request
 
 from .. import auth as _auth
-from .. import db, songster
+from .. import db, errors, songster
+from ..application import _client_error
 
 blueprint = Blueprint("songster", __name__)
 
@@ -101,3 +102,104 @@ def api_songster_playlist_tracks(playlist_id):
     if result is None:
         return jsonify({"error": "not_found"}), 404
     return jsonify(result)
+
+
+# ── Step 3: admin management of Songster playlists (browser session, not
+# Bearer token - this is the "Songster Playlists" dialog, reusing the radio
+# station editor components minus jingle/scope, see concept doc section 3.3).
+
+
+@blueprint.get("/api/admin/songster/playlists")
+@_auth.admin_required
+def api_admin_songster_playlists_list():
+    return jsonify(db.list_songster_admin_playlists())
+
+
+@blueprint.post("/api/admin/songster/playlists")
+@_auth.admin_required
+def api_admin_songster_playlists_create():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    try:
+        playlist_id = db.create_songster_playlist(
+            name=name,
+            description=data.get("description") or "",
+            filter_def=data.get("filter") or {"mode": "all", "rules": []},
+            user_id=g.user["id"],
+        )
+    except errors.ValidationError as e:
+        return _client_error(e.user_message, e)
+    except ValueError as e:
+        return _client_error("Ungültige Playlist-Definition.", e)
+    except Exception as e:
+        if "UNIQUE" in str(e).upper():
+            return jsonify({"error": "name already exists"}), 409
+        raise
+    db.log_audit(g.user["id"], "songster.playlist_created", str(playlist_id), name)
+    return jsonify(db.get_radio_station(playlist_id)), 201
+
+
+def _songster_playlist_or_404(playlist_id: int) -> dict | None:
+    station = db.get_radio_station(playlist_id)
+    if not station or not station.get("songster_managed"):
+        return None
+    return station
+
+
+@blueprint.put("/api/admin/songster/playlists/<int:playlist_id>")
+@_auth.admin_required
+def api_admin_songster_playlists_update(playlist_id):
+    if not _songster_playlist_or_404(playlist_id):
+        return jsonify({"error": "not_found"}), 404
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    try:
+        ok = db.update_radio_station(
+            playlist_id,
+            name=name,
+            description=data.get("description") or "",
+            filter_def=data.get("filter") or {"mode": "all", "rules": []},
+            user_id=g.user["id"],
+            is_admin=True,
+        )
+    except errors.ValidationError as e:
+        return _client_error(e.user_message, e)
+    except ValueError as e:
+        return _client_error("Ungültige Playlist-Definition.", e)
+    except Exception as e:
+        if "UNIQUE" in str(e).upper():
+            return jsonify({"error": "name already exists"}), 409
+        raise
+    if not ok:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(db.get_radio_station(playlist_id))
+
+
+@blueprint.delete("/api/admin/songster/playlists/<int:playlist_id>")
+@_auth.admin_required
+def api_admin_songster_playlists_delete(playlist_id):
+    if not _songster_playlist_or_404(playlist_id):
+        return jsonify({"error": "not_found"}), 404
+    db.delete_radio_station(playlist_id, g.user["id"], is_admin=True)
+    db.log_audit(g.user["id"], "songster.playlist_deleted", str(playlist_id))
+    return jsonify({"ok": True})
+
+
+@blueprint.put("/api/admin/songster/playlists/<int:playlist_id>/enabled")
+@_auth.admin_required
+def api_admin_songster_playlists_set_enabled(playlist_id):
+    data = request.get_json(silent=True) or {}
+    if "enabled" not in data or not isinstance(data["enabled"], bool):
+        return jsonify({"error": "enabled (boolean) required"}), 400
+    if not db.set_songster_playlist_enabled(playlist_id, data["enabled"]):
+        return jsonify({"error": "not_found"}), 404
+    db.log_audit(
+        g.user["id"],
+        "songster.playlist_enabled" if data["enabled"] else "songster.playlist_disabled",
+        str(playlist_id),
+    )
+    return jsonify(db.get_radio_station(playlist_id))
