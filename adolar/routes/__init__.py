@@ -13,6 +13,7 @@ def register_blueprints(app) -> None:
     from .playlists import blueprint as playlists_blueprint
     from .radio import blueprint as radio_blueprint
     from .scanner import blueprint as scanner_blueprint
+    from .songster import blueprint as songster_blueprint
 
     app.register_blueprint(adolar4u_blueprint)
     app.register_blueprint(admin_blueprint)
@@ -24,6 +25,7 @@ def register_blueprints(app) -> None:
     app.register_blueprint(playlists_blueprint)
     app.register_blueprint(radio_blueprint)
     app.register_blueprint(scanner_blueprint)
+    app.register_blueprint(songster_blueprint)
 
 
 def start_lyrics_startup_scan() -> None:
