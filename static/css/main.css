@@ -744,6 +744,7 @@
     }
     .icon-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
     .icon-btn.danger:hover { color: #e03e3e; }
+    .songster-toggle.active { color: var(--accent); border-color: var(--accent); }
     .radio-primary-btn {
       display: inline-flex;
       align-items: center;

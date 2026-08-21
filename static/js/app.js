@@ -68,6 +68,17 @@ const LANG = {
     radio_no_stations:"Keine Sender gefunden.",
     radio_jingle:     "Jingle / Station-ID",
     radio_jingle_every:"alle N Tracks",
+    songster:              "Songster",
+    songster_manage:       "Songster Playlists",
+    songster_new:          "Neue Playlist erstellen",
+    songster_name:         "Playlistname",
+    songster_no_playlists: "Noch keine Songster-Playlists.",
+    songster_unlock:       "Für Songster freischalten",
+    songster_lock:         "Freischaltung zurücknehmen",
+    songster_edit:         "Playlist bearbeiten",
+    songster_delete:       "Playlist löschen",
+    songster_delete_confirm: (name) => `Songster-Playlist „${name}" löschen?`,
+    songster_disabled_badge: "Nicht freigeschaltet",
     basket:           "Korb",
     basket_empty:     "Korb ist leer",
     basket_download:  "Als ZIP herunterladen",
@@ -167,6 +178,17 @@ const LANG = {
     radio_no_stations:"No stations found.",
     radio_jingle:     "Jingle / station ID",
     radio_jingle_every:"every N tracks",
+    songster:              "Songster",
+    songster_manage:       "Songster Playlists",
+    songster_new:          "Create new playlist",
+    songster_name:         "Playlist name",
+    songster_no_playlists: "No Songster playlists yet.",
+    songster_unlock:       "Unlock for Songster",
+    songster_lock:         "Revoke unlock",
+    songster_edit:         "Edit playlist",
+    songster_delete:       "Delete playlist",
+    songster_delete_confirm: (name) => `Delete Songster playlist "${name}"?`,
+    songster_disabled_badge: "Not unlocked",
     basket:           "Cart",
     basket_empty:     "Cart is empty",
     basket_download:  "Download as ZIP",
@@ -3116,6 +3138,358 @@ function setupRadioModalDrag() {
   });
 }
 
+// ── Songster playlist management ──────────────────────────
+// Admin-only "Songster Playlists" dialog (concept doc section 3.3): reuses
+// the radio-station editor's rule-builder pieces (RADIO_FIELDS/_opsForField/
+// _setRadioRuleValueControl above) but talks to the separate
+// /api/admin/songster/playlists* surface, has no jingle box and no
+// global/private scope selector (songster playlists are always
+// scope='global'), and repurposes the play icon as a freischalten toggle
+// instead of "start playback".
+let _songsterPlaylists = [];
+let _editingSongsterPlaylist = null;
+let _songsterDraftAfterTest = null;
+let _songsterRuleMode = "normal";
+let _songsterSmartFilter = null;
+let _songsterSmartInterpretation = "";
+
+function setSongsterRuleMode(mode) {
+  _songsterRuleMode = mode === "smart" ? "smart" : "normal";
+  $("songster-normal-rule-editor").style.display = _songsterRuleMode === "normal" ? "block" : "none";
+  $("songster-smart-rule-editor").style.display = _songsterRuleMode === "smart" ? "grid" : "none";
+  $("songster-rule-mode-normal").classList.toggle("active", _songsterRuleMode === "normal");
+  $("songster-rule-mode-smart").classList.toggle("active", _songsterRuleMode === "smart");
+}
+
+async function generateSongsterSmartRules() {
+  const err = $("songster-error");
+  err.style.display = "none";
+  const text = $("songster-smart-rule-text").value.trim();
+  try {
+    const parsed = await requestSmartRuleParse(text);
+    _songsterSmartFilter = parsed.filter;
+    _songsterSmartInterpretation = parsed.interpretation || "";
+    $("songster-smart-rule-interpretation").textContent = `Interpretation: ${_songsterSmartInterpretation}`;
+  } catch (error) {
+    _songsterSmartFilter = null;
+    _songsterSmartInterpretation = "";
+    $("songster-smart-rule-interpretation").textContent = "";
+    err.textContent = error.message;
+    err.style.display = "block";
+  }
+}
+
+async function loadSongsterPlaylists() {
+  try {
+    const r = await fetch(`${API}/api/admin/songster/playlists`);
+    _songsterPlaylists = r.ok ? await r.json() : [];
+  } catch {
+    _songsterPlaylists = [];
+  }
+  renderSongsterPlaylists();
+}
+
+function openSongsterPanel() {
+  $("songster-modal").classList.add("open");
+  loadSongsterPlaylists();
+}
+
+function closeSongsterPanel() {
+  $("songster-modal")?.classList.remove("open");
+}
+
+function renderSongsterPlaylists() {
+  const list = $("songster-playlist-list");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!_songsterPlaylists.length) {
+    list.innerHTML = `<div class="empty-state" style="padding:24px">${t().songster_no_playlists}</div>`;
+    return;
+  }
+  _songsterPlaylists.forEach(pl => list.appendChild(renderSongsterPlaylistRow(pl)));
+}
+
+function renderSongsterPlaylistRow(pl) {
+  const row = document.createElement("div");
+  row.className = "radio-station-row";
+  const desc = pl.description || (pl.songster_enabled ? "" : t().songster_disabled_badge);
+  row.innerHTML = `
+    <div>
+      <div class="radio-station-name">${esc(pl.name)}</div>
+      <div class="radio-station-desc">${esc(desc)}</div>
+    </div>
+    <div class="radio-row-actions">
+      <button class="icon-btn songster-toggle ${pl.songster_enabled ? "active" : ""}"
+              title="${pl.songster_enabled ? t().songster_lock : t().songster_unlock}">
+        <i class="ti ti-player-play"></i>
+      </button>
+      <button class="icon-btn songster-edit" title="${t().songster_edit}"><i class="ti ti-settings"></i></button>
+      <button class="icon-btn danger songster-delete" title="${t().songster_delete}"><i class="ti ti-trash"></i></button>
+    </div>`;
+  row.querySelector(".songster-toggle").onclick = async () => {
+    await fetch(`${API}/api/admin/songster/playlists/${pl.id}/enabled`, {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({enabled: !pl.songster_enabled}),
+    });
+    await loadSongsterPlaylists();
+  };
+  row.querySelector(".songster-edit").onclick = () => openSongsterEditor(pl);
+  row.querySelector(".songster-delete").onclick = async () => {
+    if (!confirm(t().songster_delete_confirm(pl.name))) return;
+    await fetch(`${API}/api/admin/songster/playlists/${pl.id}`, { method: "DELETE" });
+    await loadSongsterPlaylists();
+  };
+  return row;
+}
+
+function openSongsterEditor(playlist = null) {
+  _editingSongsterPlaylist = playlist;
+  $("songster-editor-title").textContent = playlist ? t().songster_edit : t().songster_new;
+  $("songster-name").value = playlist?.name || "";
+  $("songster-desc").value = playlist?.description || "";
+  $("songster-error").style.display = "none";
+  const filter = playlist?.filter || { mode: "all", rules: [] };
+  const smartMode = filter.editor_mode === "smart";
+  _songsterSmartFilter = smartMode ? {mode: filter.mode, rules: filter.rules || []} : null;
+  _songsterSmartInterpretation = smartMode ? (filter.smart?.interpretation || "") : "";
+  $("songster-smart-rule-text").value = smartMode ? (filter.smart?.text || "") : "";
+  $("songster-smart-rule-interpretation").textContent = _songsterSmartInterpretation
+    ? `Interpretation: ${_songsterSmartInterpretation}` : "";
+  $("songster-smart-rule-text").oninput = () => {
+    _songsterSmartFilter = null;
+    _songsterSmartInterpretation = "";
+    $("songster-smart-rule-interpretation").textContent = "Text geändert – Regeln bitte neu erzeugen.";
+  };
+  const normalFilter = smartMode ? {mode:"all", rules:[]} : filter;
+  const allRules = [];
+  const anyRules = [];
+  (normalFilter.rules || []).forEach(rule => {
+    if (rule.rules && rule.mode === "any") anyRules.push(...rule.rules);
+    else if (!rule.rules) allRules.push(rule);
+  });
+  $("songster-rules-all").innerHTML = "";
+  $("songster-rules-any").innerHTML = "";
+  (allRules.length ? allRules : [{field:"artist", op:"contains", value:""}]).forEach(r => addSongsterRule("all", r));
+  anyRules.forEach(r => addSongsterRule("any", r));
+  setSongsterRuleMode(smartMode ? "smart" : "normal");
+  $("songster-editor").style.display = "block";
+}
+
+function restoreSongsterEditorDraft(draft) {
+  _editingSongsterPlaylist = draft.editingPlaylist;
+  $("songster-editor-title").textContent = _editingSongsterPlaylist ? t().songster_edit : t().songster_new;
+  $("songster-name").value = draft.name || "";
+  $("songster-desc").value = draft.description || "";
+  $("songster-error").style.display = "none";
+  const smartMode = draft.filter?.editor_mode === "smart";
+  _songsterSmartFilter = smartMode
+    ? {mode: draft.filter.mode, rules: draft.filter.rules || []} : null;
+  _songsterSmartInterpretation = smartMode ? (draft.filter.smart?.interpretation || "") : "";
+  $("songster-smart-rule-text").value = smartMode ? (draft.filter.smart?.text || "") : "";
+  $("songster-smart-rule-interpretation").textContent = _songsterSmartInterpretation
+    ? `Interpretation: ${_songsterSmartInterpretation}` : "";
+  $("songster-smart-rule-text").oninput = () => {
+    _songsterSmartFilter = null;
+    _songsterSmartInterpretation = "";
+    $("songster-smart-rule-interpretation").textContent = "Text geändert – Regeln bitte neu erzeugen.";
+  };
+  $("songster-rules-all").innerHTML = "";
+  $("songster-rules-any").innerHTML = "";
+  const allRules = [];
+  const anyRules = [];
+  const normalFilter = smartMode ? {mode:"all", rules:[]} : (draft.filter || {});
+  (normalFilter.rules || []).forEach(rule => {
+    if (rule.rules && rule.mode === "any") anyRules.push(...rule.rules);
+    else if (!rule.rules) allRules.push(rule);
+  });
+  (allRules.length ? allRules : [{field:"artist", op:"contains", value:""}]).forEach(r => addSongsterRule("all", r));
+  anyRules.forEach(r => addSongsterRule("any", r));
+  setSongsterRuleMode(smartMode ? "smart" : "normal");
+  $("songster-editor").style.display = "block";
+}
+
+function closeSongsterEditor() {
+  $("songster-editor").style.display = "none";
+  _editingSongsterPlaylist = null;
+}
+
+function addSongsterRule(group, rule = {}) {
+  const wrap = group === "any" ? $("songster-rules-any") : $("songster-rules-all");
+  const row = document.createElement("div");
+  row.className = "radio-rule-row";
+  const field = rule.field || "title";
+  const ops = _opsForField(field);
+  const op = rule.op && ops[rule.op] ? rule.op : Object.keys(ops)[0];
+  row.innerHTML = `
+    <select class="radio-select radio-field">${Object.entries(RADIO_FIELDS).map(([v,l]) => `<option value="${v}" ${v===field?"selected":""}>${l}</option>`).join("")}</select>
+    <select class="radio-select radio-op">${Object.entries(ops).map(([v,l]) => `<option value="${v}" ${v===op?"selected":""}>${l}</option>`).join("")}</select>
+    <span class="radio-rule-value-wrap"></span>
+    <button class="icon-btn danger radio-rule-remove" title="Entfernen"><i class="ti ti-minus"></i></button>`;
+  const fieldEl = row.querySelector(".radio-field");
+  const opEl = row.querySelector(".radio-op");
+  _setRadioRuleValueControl(row, rule);
+  fieldEl.onchange = () => {
+    const nextOps = _opsForField(fieldEl.value);
+    opEl.innerHTML = Object.entries(nextOps).map(([v,l]) => `<option value="${v}">${l}</option>`).join("");
+    _setRadioRuleValueControl(row);
+  };
+  row.querySelector(".radio-rule-remove").onclick = () => row.remove();
+  wrap.appendChild(row);
+}
+
+function readSongsterRuleRows(group) {
+  const wrap = group === "any" ? $("songster-rules-any") : $("songster-rules-all");
+  return [...wrap.querySelectorAll(".radio-rule-row")].map(row => {
+    const rule = {
+      field: row.querySelector(".radio-field").value,
+      op: row.querySelector(".radio-op").value,
+      value: row.querySelector(".radio-value").value.trim(),
+    };
+    const unit = row.querySelector(".radio-unit");
+    if (unit) rule.unit = unit.value;
+    return rule;
+  }).filter(r => r.value !== "");
+}
+
+function buildSongsterFilterFromEditor() {
+  if (_songsterRuleMode === "smart") {
+    const text = $("songster-smart-rule-text").value.trim();
+    if (!_songsterSmartFilter) throw new Error("Bitte die smarten Regeln zuerst erzeugen.");
+    return {
+      mode: _songsterSmartFilter.mode,
+      rules: _songsterSmartFilter.rules,
+      editor_version: 2,
+      editor_mode: "smart",
+      smart: {text, interpretation: _songsterSmartInterpretation},
+    };
+  }
+  const allRules = readSongsterRuleRows("all");
+  const anyRules = readSongsterRuleRows("any");
+  const rules = [...allRules];
+  if (anyRules.length) rules.push({ mode: "any", rules: anyRules });
+  return { mode: "all", rules };
+}
+
+async function saveSongsterPlaylist() {
+  const err = $("songster-error");
+  err.style.display = "none";
+  const name = $("songster-name").value.trim();
+  if (!name) {
+    err.textContent = t().songster_name;
+    err.style.display = "block";
+    return;
+  }
+  let filter;
+  try {
+    filter = buildSongsterFilterFromEditor();
+  } catch (error) {
+    err.textContent = error.message;
+    err.style.display = "block";
+    return;
+  }
+  const payload = { name, description: $("songster-desc").value.trim(), filter };
+  const url = _editingSongsterPlaylist
+    ? `${API}/api/admin/songster/playlists/${_editingSongsterPlaylist.id}`
+    : `${API}/api/admin/songster/playlists`;
+  const r = await fetch(url, {
+    method: _editingSongsterPlaylist ? "PUT" : "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    err.textContent = d.error || "Speichern fehlgeschlagen";
+    err.style.display = "block";
+    return;
+  }
+  closeSongsterEditor();
+  await loadSongsterPlaylists();
+}
+
+async function testSongsterPlaylistFilter() {
+  const err = $("songster-error");
+  err.style.display = "none";
+  let filter;
+  try {
+    filter = buildSongsterFilterFromEditor();
+  } catch (error) {
+    err.textContent = error.message;
+    err.style.display = "block";
+    return;
+  }
+  _songsterDraftAfterTest = {
+    editingPlaylist: _editingSongsterPlaylist,
+    name: $("songster-name").value.trim(),
+    description: $("songster-desc").value.trim(),
+    filter,
+  };
+  const payload = { filter, count: 50 };
+  const r = await fetch(`${API}/api/radio-stations/test`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    err.textContent = d.error || "Test fehlgeschlagen";
+    err.style.display = "block";
+    return;
+  }
+  const data = await r.json();
+  stopRadio();
+  state.tracks = data.results || [];
+  state.total = data.total || state.tracks.length;
+  state.page = 1;
+  state.pages = 1;
+  renderTracks();
+  renderPagination();
+  $("result-count").textContent = `Test – ${state.tracks.length} Tracks`;
+  $("radio-test-label").textContent = `Testansicht: ${_songsterDraftAfterTest.name || t().songster_new} – ${state.tracks.length} Tracks`;
+  $("radio-test-banner").querySelector("button").setAttribute("onclick", "returnToSongsterDraft()");
+  $("radio-test-banner").classList.add("visible");
+  closeSongsterPanel();
+  document.getElementById('track-list')?.scrollTo({ top: 0, behavior: 'instant' });
+}
+
+function returnToSongsterDraft() {
+  if (!_songsterDraftAfterTest) return;
+  openSongsterPanel();
+  restoreSongsterEditorDraft(_songsterDraftAfterTest);
+  $("radio-test-banner").querySelector("button").setAttribute("onclick", "returnToRadioDraft()");
+}
+
+function setupSongsterModalDrag() {
+  const box = $("songster-modal-box");
+  const head = $("songster-modal-head");
+  if (!box || !head) return;
+  let drag = null;
+  head.addEventListener("pointerdown", e => {
+    if (e.target.closest("button")) return;
+    const r = box.getBoundingClientRect();
+    box.style.position = "fixed";
+    box.style.left = `${r.left}px`;
+    box.style.top = `${r.top}px`;
+    box.style.width = `${r.width}px`;
+    box.style.margin = "0";
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    head.setPointerCapture(e.pointerId);
+  });
+  head.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const maxLeft = Math.max(0, window.innerWidth - box.offsetWidth);
+    const maxTop = Math.max(0, window.innerHeight - Math.min(box.offsetHeight, window.innerHeight));
+    const left = Math.min(Math.max(0, e.clientX - drag.dx), maxLeft);
+    const top = Math.min(Math.max(0, e.clientY - drag.dy), maxTop);
+    box.style.left = `${left}px`;
+    box.style.top = `${top}px`;
+  });
+  head.addEventListener("pointerup", e => {
+    drag = null;
+    try { head.releasePointerCapture(e.pointerId); } catch {}
+  });
+}
+
 // ── Mini-Player Popup ─────────────────────────────────────
 const miniCh = new BroadcastChannel("adolar-player");
 let miniWin = null;
@@ -5073,12 +5447,21 @@ async function pleSave() {
 // ── Current user / auth ───────────────────────────────────────────────────────
 let _me = null;
 let _adolar4u = { collecting: false, global: {}, user: {} };
+let _songsterStatus = { enabled: false };
 
 async function loadAdolar4UStatus() {
   if (!_me) return;
   try {
     const r = await fetch("/api/adolar4u/status", {cache: "no-store"});
     if (r.ok) _adolar4u = await r.json();
+  } catch {}
+}
+
+async function loadSongsterStatus() {
+  if (!_me) return;
+  try {
+    const r = await fetch("/api/songster/status", {cache: "no-store"});
+    if (r.ok) _songsterStatus = await r.json();
   } catch {}
 }
 
@@ -5106,6 +5489,9 @@ async function loadMe() {
     $("btn-user-mgmt").style.display = "flex";
     $("btn-monitor").style.display = "flex";
     $("btn-library").style.display = "flex";
+
+    await loadSongsterStatus();
+    $("btn-songster").style.display = _songsterStatus.enabled ? "flex" : "none";
   }
 
   await loadAdolar4UStatus();
@@ -5149,6 +5535,7 @@ async function openUserMgmt() {
   await refreshUserList();
   await refreshAccessSettings();
   await refreshAdolar4UAdminSettings();
+  await refreshSongsterAdminSettings();
   await refreshLyricsAdminSettings();
   await refreshBlockedIps();
   await refreshApiTokens();
@@ -5323,6 +5710,26 @@ async function saveAdolar4UAdminSettings() {
     return;
   }
   await loadAdolar4UStatus();
+}
+
+async function refreshSongsterAdminSettings() {
+  const r = await fetch("/api/admin/songster/settings");
+  if (!r.ok) return;
+  const settings = await r.json();
+  $("setting-songster-enabled").checked = Boolean(settings.enabled);
+}
+
+async function saveSongsterAdminSettings() {
+  const r = await fetch("/api/admin/songster/settings", {
+    method: "PUT", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ enabled: $("setting-songster-enabled").checked }),
+  });
+  if (!r.ok) {
+    alert("Songster-Einstellungen konnten nicht gespeichert werden.");
+    return;
+  }
+  await loadSongsterStatus();
+  $("btn-songster").style.display = _songsterStatus.enabled ? "flex" : "none";
 }
 
 async function refreshLyricsAdminSettings() {
@@ -5800,6 +6207,7 @@ setInterval(checkDiscoBadge, 30000);
 (async () => {
   applyLang();
   setupRadioModalDrag();
+  setupSongsterModalDrag();
   await meReady;
   hydrateInitialTrackCache();
   // Prioritize the visible track list on a cold NAS disk. Secondary metadata

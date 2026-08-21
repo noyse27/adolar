@@ -476,6 +476,7 @@ def init_db():
             "ALTER TABLE radio_stations ADD COLUMN songster_enabled INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE api_tokens ADD COLUMN product TEXT NOT NULL DEFAULT 'taggster'",
             "ALTER TABLE connection_log ADD COLUMN client_version TEXT",
+            "ALTER TABLE radio_stations ADD COLUMN songster_managed INTEGER NOT NULL DEFAULT 0",
         ]:
             with contextlib.suppress(Exception):
                 conn.execute(migration)
@@ -1514,6 +1515,7 @@ def _radio_station_from_row(row) -> dict:
     d = dict(row)
     d["is_system"] = bool(d["is_system"])
     d["songster_enabled"] = bool(d.get("songster_enabled"))
+    d["songster_managed"] = bool(d.get("songster_managed"))
     d["jingle_enabled"] = bool(d.get("jingle_enabled"))
     d["has_jingle"] = bool(d.pop("jingle_path", None))
     d["scope"] = d.get("scope") or "global"
@@ -1526,9 +1528,14 @@ def _radio_station_from_row(row) -> dict:
 
 
 def list_radio_stations(user_id: int | None = None, include_all_private: bool = False) -> list[dict]:
-    # Songster-enabled stations are managed and consumed through the
-    # separate /api/songster/* surface only (see adolar/songster/) and
-    # must never appear in Adolar Web/Radio/Disco's own station list.
+    # Stations created via the "Songster Playlists" dialog (songster_managed)
+    # are managed and consumed through the separate /api/songster/* surface
+    # and the admin-only songster playlist routes only (see adolar/songster/)
+    # and must never appear in Adolar Web/Radio/Disco's own station list -
+    # regardless of songster_enabled, which only gates the *game client's*
+    # view (a freshly created, not-yet-freigeschaltet songster playlist must
+    # still be hidden here, see Adolar_Songster_Adolar_Integration_Konzept
+    # section 3.2/3.3).
     with db() as conn:
         _seed_radio_stations(conn)
         params = []
@@ -1542,10 +1549,11 @@ def list_radio_stations(user_id: int | None = None, include_all_private: bool = 
             SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
                    rs.owner_id, u.username AS owner_name, rs.jingle_path,
                    rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
-                   rs.created_at, rs.updated_at, rs.engine, rs.songster_enabled
+                   rs.created_at, rs.updated_at, rs.engine, rs.songster_enabled,
+                   rs.songster_managed
             FROM radio_stations rs
             LEFT JOIN users u ON u.id=rs.owner_id
-            WHERE rs.songster_enabled = 0 AND (""" + " OR ".join(where) + """)
+            WHERE rs.songster_managed = 0 AND (""" + " OR ".join(where) + """)
             GROUP BY rs.id
             ORDER BY rs.is_system DESC,
                      CASE rs.engine WHEN 'adolar4u' THEN 1 ELSE 0 END,
@@ -1557,21 +1565,69 @@ def list_radio_stations(user_id: int | None = None, include_all_private: bool = 
 
 
 def list_songster_playlists() -> list[dict]:
-    """Songster-enabled stations, for the /api/songster/playlists route.
-    Mirror image of list_radio_stations' exclusion filter: only
-    songster_enabled=1 stations, regardless of scope/owner."""
+    """Songster-managed stations that are also freigeschaltet
+    (songster_enabled=1), for the game-client GET /api/songster/playlists
+    route. Both flags are required: songster_managed marks "belongs to the
+    Songster Playlists admin dialog" (see list_songster_admin_playlists for
+    the unfiltered admin view), songster_enabled is the separate, explicit
+    per-playlist freischalten toggle."""
     with db() as conn:
         rows = conn.execute("""
             SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
                    rs.owner_id, u.username AS owner_name, rs.jingle_path,
                    rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
-                   rs.created_at, rs.updated_at, rs.engine, rs.songster_enabled
+                   rs.created_at, rs.updated_at, rs.engine, rs.songster_enabled,
+                   rs.songster_managed
             FROM radio_stations rs
             LEFT JOIN users u ON u.id=rs.owner_id
-            WHERE rs.songster_enabled = 1
+            WHERE rs.songster_managed = 1 AND rs.songster_enabled = 1
             ORDER BY rs.name COLLATE NOCASE
         """).fetchall()
     return [_radio_station_from_row(r) for r in rows]
+
+
+def list_songster_admin_playlists() -> list[dict]:
+    """All songster_managed stations regardless of songster_enabled, for the
+    admin "Songster Playlists" management dialog - a freshly created,
+    not-yet-freigeschaltet playlist must still show up here to be
+    freischaltbar/editable/deletable."""
+    with db() as conn:
+        rows = conn.execute("""
+            SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
+                   rs.owner_id, u.username AS owner_name, rs.jingle_path,
+                   rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
+                   rs.created_at, rs.updated_at, rs.engine, rs.songster_enabled,
+                   rs.songster_managed
+            FROM radio_stations rs
+            LEFT JOIN users u ON u.id=rs.owner_id
+            WHERE rs.songster_managed = 1
+            ORDER BY rs.name COLLATE NOCASE
+        """).fetchall()
+    return [_radio_station_from_row(r) for r in rows]
+
+
+def create_songster_playlist(name: str, description: str, filter_def: dict, user_id: int) -> int:
+    """Create a new songster_managed radio station: always scope='global',
+    songster_enabled starts at 0 (no auto-freischalten, see concept doc
+    section 3.1/3.3 - freischalten is always a separate, explicit step)."""
+    return create_radio_station(
+        name, description, filter_def, user_id, scope="global", songster_managed=True,
+    )
+
+
+def set_songster_playlist_enabled(station_id: int, enabled: bool) -> bool:
+    """Toggle songster_enabled for a songster_managed station (the
+    Freischalt-Button/play-icon in the admin dialog). Returns False if the
+    station doesn't exist or wasn't created via the Songster Playlists
+    dialog - the general radio-station admin surface must not be able to
+    flip this flag on an unrelated station."""
+    with db() as conn:
+        cur = conn.execute(
+            """UPDATE radio_stations SET songster_enabled=?, updated_at=datetime('now')
+               WHERE id=? AND songster_managed=1""",
+            (1 if enabled else 0, station_id),
+        )
+        return cur.rowcount > 0
 
 
 def get_radio_station(station_id: int) -> dict | None:
@@ -1580,7 +1636,8 @@ def get_radio_station(station_id: int) -> dict | None:
             SELECT rs.id, rs.name, rs.description, rs.filter_json, rs.scope,
                    rs.owner_id, u.username AS owner_name, rs.jingle_path,
                    rs.jingle_every_tracks, rs.jingle_enabled, rs.is_system, rs.created_by,
-                   rs.created_at, rs.updated_at, rs.engine, rs.songster_enabled
+                   rs.created_at, rs.updated_at, rs.engine, rs.songster_enabled,
+                   rs.songster_managed
             FROM radio_stations rs
             LEFT JOIN users u ON u.id=rs.owner_id
             WHERE rs.id=?
@@ -1591,24 +1648,26 @@ def get_radio_station(station_id: int) -> dict | None:
 
 
 def create_radio_station(name: str, description: str, filter_def: dict,
-                         user_id: int, scope: str = "private") -> int:
+                         user_id: int, scope: str = "private",
+                         songster_managed: bool = False) -> int:
     clean = validate_radio_filter(filter_def)
-    scope = scope if scope in ("global", "private") else "private"
+    scope = "global" if songster_managed else (scope if scope in ("global", "private") else "private")
     owner_id = None if scope == "global" else int(user_id)
     with db() as conn:
         existing = conn.execute("""
             SELECT 1 FROM radio_stations
             WHERE scope=? AND COALESCE(owner_id, 0)=COALESCE(?, 0)
-              AND LOWER(name)=LOWER(?)
-        """, (scope, owner_id, name.strip())).fetchone()
+              AND songster_managed=? AND LOWER(name)=LOWER(?)
+        """, (scope, owner_id, 1 if songster_managed else 0, name.strip())).fetchone()
         if existing:
             raise sqlite3.IntegrityError("UNIQUE radio station name")
         cur = conn.execute("""
             INSERT INTO radio_stations
-                (name, description, filter_json, scope, owner_id, is_system, created_by, updated_at)
-            VALUES (?, ?, ?, ?, ?, 0, ?, datetime('now'))
+                (name, description, filter_json, scope, owner_id, is_system, created_by,
+                 songster_managed, updated_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?, datetime('now'))
         """, (name.strip(), (description or "").strip(), json.dumps(clean, ensure_ascii=False),
-              scope, owner_id, user_id))
+              scope, owner_id, user_id, 1 if songster_managed else 0))
         return cur.lastrowid
 
 
@@ -1631,8 +1690,9 @@ def update_radio_station(station_id: int, name: str, description: str, filter_de
         existing = conn.execute("""
             SELECT 1 FROM radio_stations
             WHERE id<>? AND scope=? AND COALESCE(owner_id, 0)=COALESCE(?, 0)
-              AND LOWER(name)=LOWER(?)
-        """, (station_id, new_scope, owner_id, name.strip())).fetchone()
+              AND songster_managed=? AND LOWER(name)=LOWER(?)
+        """, (station_id, new_scope, owner_id,
+              1 if station.get("songster_managed") else 0, name.strip())).fetchone()
         if existing:
             raise sqlite3.IntegrityError("UNIQUE radio station name")
         cur = conn.execute("""
@@ -1793,7 +1853,7 @@ def list_songster_playlist_tracks(station_id: int, limit: int = 200, offset: int
     Ordering by t.id keeps pagination stable across calls.
     """
     station = get_radio_station(station_id)
-    if not station or not station.get("songster_enabled"):
+    if not station or not station.get("songster_managed") or not station.get("songster_enabled"):
         return None
     limit = max(1, min(int(limit), 500))
     offset = max(0, int(offset))

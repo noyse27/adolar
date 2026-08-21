@@ -162,22 +162,20 @@ jeder Verbindung genau das HTML, das der Server aktuell ausliefert.
 **Repo**: `adolar-songster` (autark).
 **Konzeptdokument**: `adolar-songster/docs/Adolar_Songster_Adolar_Integration_Konzept_v1_20260821.md`
 
-Umsetzungsstand (Stand 2026-08-21): **teilweise implementiert (Schritt 1+2 von 3).**
+Umsetzungsstand (Stand 2026-08-21): **Schritt 1-3 von 3 umgesetzt (Adolar-Seite abgeschlossen).**
 
 Bereits umgesetzt:
 - Globaler Schalter `songster_enabled`, persistiert ueber
   `control.settings` (Muster wie Adolar4U) - `adolar/songster/service.py`.
+  Admin-UI-Toggle im Einstellungsdialog ("Songster aktivieren",
+  `templates/index.html`, Sektion analog Adolar4U).
 - `GET /api/songster/status` (session-authentifiziert) -
   `adolar/routes/songster.py`.
 - `GET/PUT /api/admin/songster/settings` (admin-only, audit-geloggt) -
   `adolar/routes/songster.py`.
-- Neue Spalte `radio_stations.songster_enabled` (`adolar/db.py`),
-  Songster-Sender werden aus der normalen Sender-Listung ausgeschlossen
-  (`db.list_radio_stations`) und stattdessen ueber `db.list_songster_playlists`
-  separat gelistet.
 - Eigenes Package `adolar/songster/`, Blueprint registriert
   (`adolar/routes/__init__.py`), Tests in `tests/test_songster.py`.
-- **Schritt 2 (neu)**: Server-zu-Server-Datenzugriff fuer den Songster-
+- **Schritt 2**: Server-zu-Server-Datenzugriff fuer den Songster-
   Spielserver, **nicht** wie urspruenglich im Konzeptdokument geplant per
   eigenem Session-Login-Endpoint, sondern ueber den bestehenden
   API-Token-Mechanismus (Bearer, wie Taggster - siehe
@@ -185,7 +183,7 @@ Bereits umgesetzt:
   - `api_tokens.product` (neue Spalte, Default `"taggster"` fuer
     Bestandstoken) - ein Admin legt fuer den Songster-Spielserver ein Token
     mit `product="songster"` unter `POST /api/admin/tokens` an.
-  - `GET /api/songster/playlists` - listet alle `songster_enabled`-Sender
+  - `GET /api/songster/playlists` - listet alle freigeschalteten Sender
     (`db.list_songster_playlists`); nur mit Bearer-Token `product="songster"`
     UND globalem Schalter `enabled=true` erreichbar
     (`_songster_token_required` in `adolar/routes/songster.py`).
@@ -202,20 +200,52 @@ Bereits umgesetzt:
     Abschnitt 6 Punkt 2 - jetzt geloest).
   - Kein eigener Login-Endpoint (`/api/songster/login` aus dem
     Konzeptdokument entfaellt) - das Bearer-Token ersetzt ihn vollstaendig.
+- **Schritt 3 (neu)**: Admin-UI "Songster Playlists" - Menueeintrag im
+  User-Dropdown (`#btn-songster`, sichtbar nur fuer Admins bei aktiviertem
+  globalen Schalter, analog Adolar4U-Muster), Verwaltungsdialog
+  (`#songster-modal`, `templates/index.html`) durch Wiederverwendung der
+  Radio-Sender-Editor-Komponenten (Regel-Builder, Smarte Eingabe) minus
+  Jingle-Box/Scope-Auswahl, siehe `static/js/app.js` Abschnitt "Songster
+  playlist management".
+  - **Zwei-Flags-Modell statt einem** (Abweichung vom urspruenglichen
+    Konzeptdokument-Entwurf, der nur `songster_enabled` fuer beide Zwecke
+    vorsah): neue Spalte `radio_stations.songster_managed` markiert "gehoert
+    zum Songster-Playlisten-Dialog" (immer 1 bei Erstellung ueber diesen
+    Dialog, unabhaengig vom Freischalt-Status), waehrend `songster_enabled`
+    weiterhin die separate, explizite Freischalt-Aktion ist. Grund: das
+    Konzeptdokument (Abschnitt 3.3) verlangt selbst, dass frisch angelegte,
+    noch nicht freigeschaltete Playlisten trotzdem in Adolar Web/Radio/Disco
+    unsichtbar UND im Admin-Dialog sichtbar/editierbar bleiben - mit nur
+    einem Flag nicht abbildbar (ein `songster_enabled=0`-Sender waere sonst
+    in der normalen Ansicht sichtbar). `list_radio_stations()` filtert jetzt
+    auf `songster_managed=0`, `list_songster_admin_playlists()` (neu, fuer
+    den Admin-Dialog) auf `songster_managed=1` (unabhaengig vom
+    Freischalt-Status), `list_songster_playlists()` (Spielclient-Route) auf
+    beide Flags.
+  - Neue admin-only Routen (`adolar/routes/songster.py`): `GET/POST
+    /api/admin/songster/playlists`, `PUT/DELETE
+    /api/admin/songster/playlists/<id>`, `PUT
+    /api/admin/songster/playlists/<id>/enabled` (Freischalt-Toggle, prueft
+    `songster_managed=1` - kann keine normalen Radiosender kapern). Nutzt
+    den bestehenden `POST /api/radio-stations/test` fuer die "Testen"-Funktion
+    unveraendert mit (generischer Endpoint, keine Duplizierung noetig).
+  - Neu erstellte Songster-Playlisten sind immer `scope='global'`,
+    `songster_enabled` startet bei 0 (kein Auto-Freischalten, siehe
+    Konzeptdokument 3.1/3.3).
 
-Noch nicht umgesetzt (naechste Schritte laut Konzeptdokument):
+Damit ist die komplette Adolar-seitige Umsetzung aus dem Konzeptdokument
+(Abschnitt 6, Schritte 1-3) fertig. Offen sind nur noch die
+Songster-seitigen Schritte 4-5 (Adolar-Client, Batch-Algorithmus,
+End-to-End-Test) - siehe `adolar-songster`-Repo.
+
+Noch nicht umgesetzt:
 - Kein `X-Adolar-Product: songster` Header-Handling fuer den Browser-
   Session-Pfad (aktuell nur `android`/`companion` erkannt,
-  `adolar/routes/auth.py`, `adolar/routes/admin.py`) - wird fuer den
-  Spielserver nicht benoetigt (Bearer-Token statt Session), bleibt fuer
-  Schritt 3 (Admin-UI) relevant, falls das Songster-Verwaltungs-Frontend
-  selbst als Adolar-Web-Client identifiziert werden soll.
+  `adolar/routes/auth.py`, `adolar/routes/admin.py`) - wird nicht benoetigt,
+  da sowohl der Spielserver (Bearer-Token) als auch das Admin-UI
+  (normale Adolar-Web-Session) bestehende Mechanismen nutzen.
 - Keine Rate-Limits (60/min allgemein, 10/min Login sind Konzept, noch
   nicht gebaut - siehe auch Abschnitt 6, generelles Rate-Limit-Defizit).
-- Kein Admin-UI-Toggle in Templates/`app.js` fuer `songster_enabled`, keine
-  "Songster Playlists"-Verwaltungsdialoge (Play-Button = Freischalten,
-  Zahnrad = Bearbeiten, Papierkorb = Loeschen) - Backend-Endpoints
-  existieren, Frontend (Schritt 3) fehlt noch.
 
 ---
 

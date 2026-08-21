@@ -67,6 +67,9 @@
       <button class="user-dd-item" id="btn-adolar4u" style="display:none" onclick="openAdolar4USettings()">
         <i class="ti ti-sparkles"></i> Adolar4U
       </button>
+      <button class="user-dd-item" id="btn-songster" style="display:none" onclick="openSongsterPanel()">
+        <i class="ti ti-music"></i> Songster
+      </button>
       <button class="user-dd-item" id="btn-user-mgmt" style="display:none" onclick="openUserMgmt()">
         <i class="ti ti-settings"></i> Einstellungen
       </button>
@@ -613,6 +616,80 @@
   </div>
 </div>
 
+<!-- ── Songster Playlists Modal ── -->
+<div id="songster-modal" class="modal-backdrop" onclick="if(event.target===this)closeSongsterPanel()">
+  <div class="modal-box" id="songster-modal-box">
+    <div class="modal-head" id="songster-modal-head">
+      <div class="modal-title"><i class="ti ti-music"></i><span>Songster Playlists</span></div>
+      <button class="modal-close" onclick="closeSongsterPanel()"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div id="songster-playlist-list"></div>
+
+    <div style="display:flex;justify-content:space-between;gap:10px;margin-top:16px;flex-wrap:wrap">
+      <button id="btn-songster-new" class="radio-primary-btn" onclick="openSongsterEditor()">
+        <i class="ti ti-plus"></i><span>Neue Playlist erstellen</span>
+      </button>
+      <button class="radio-secondary-btn" onclick="closeSongsterPanel()">Schließen</button>
+    </div>
+
+    <div id="songster-editor" style="display:none;margin-top:18px;border-top:0.5px solid var(--border-subtle);padding-top:18px">
+      <div class="modal-title" id="songster-editor-title" style="margin-bottom:12px">Neue Playlist</div>
+      <div class="radio-form-grid">
+        <input id="songster-name" class="radio-input" type="text" placeholder="Playlistname">
+        <input id="songster-desc" class="radio-input" type="text" placeholder="Beschreibung">
+      </div>
+
+      <div class="smart-rule-mode" role="group" aria-label="Regelmodus">
+        <button id="songster-rule-mode-normal" class="smart-rule-mode-btn active" type="button" onclick="setSongsterRuleMode('normal')">Normale Regeln</button>
+        <button id="songster-rule-mode-smart" class="smart-rule-mode-btn" type="button" onclick="setSongsterRuleMode('smart')">Smarte Eingabe</button>
+      </div>
+
+      <div id="songster-normal-rule-editor">
+        <div class="radio-builder-group">
+          <div class="radio-builder-head">
+            <div class="radio-builder-title">Alles der folgenden</div>
+            <button class="radio-secondary-btn" onclick="addSongsterRule('all')">
+              <i class="ti ti-plus"></i><span>Regel hinzufügen</span>
+            </button>
+          </div>
+          <div id="songster-rules-all"></div>
+        </div>
+
+        <div class="radio-builder-group">
+          <div class="radio-builder-head">
+            <div class="radio-builder-title">Eines der folgenden</div>
+            <button class="radio-secondary-btn" onclick="addSongsterRule('any')">
+              <i class="ti ti-plus"></i><span>Regel hinzufügen</span>
+            </button>
+          </div>
+          <div id="songster-rules-any"></div>
+        </div>
+      </div>
+
+      <div id="songster-smart-rule-editor" class="smart-rule-panel" style="display:none">
+        <label for="songster-smart-rule-text">Beschreibe die gewünschten Titel</label>
+        <textarea id="songster-smart-rule-text" class="smart-rule-text" rows="4" maxlength="2000" placeholder="Album enthält Bravo oder Ronny und Jahrzehnt ist 1980 oder 1990 und Genre ist Hiphop oder Rap"></textarea>
+        <button class="radio-primary-btn" type="button" onclick="generateSongsterSmartRules()">
+          <i class="ti ti-sparkles"></i><span>Regeln erzeugen</span>
+        </button>
+        <div id="songster-smart-rule-interpretation" class="smart-rule-interpretation"></div>
+      </div>
+
+      <div id="songster-error" class="radio-error"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap">
+        <button class="radio-secondary-btn" onclick="closeSongsterEditor()">Abbrechen</button>
+        <button class="radio-secondary-btn" onclick="testSongsterPlaylistFilter()">
+          <i class="ti ti-list-search"></i><span>Testen</span>
+        </button>
+        <button class="radio-primary-btn" onclick="saveSongsterPlaylist()">
+          <i class="ti ti-device-floppy"></i><span>Speichern</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Administration settings modal ── -->
 <div id="usermgmt-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);align-items:center;justify-content:center" onclick="if(event.target===this)closeUserMgmt()">
   <div class="settings-modal-box">
@@ -684,6 +761,16 @@
             <label for="setting-adolar4u-collaborative">Aggregiertes Lernen aus anderen Plays erlauben (in Vorbereitung)</label><input id="setting-adolar4u-collaborative" type="checkbox" onchange="saveAdolar4UAdminSettings()">
           </div>
           <p class="settings-hint">Standardmäßig aus. Jeder Benutzer muss das persönliche Lernen zusätzlich selbst aktivieren.</p>
+        </div>
+      </details>
+
+      <details class="settings-section">
+        <summary><span><i class="ti ti-music"></i> Songster</span><i class="ti ti-chevron-down settings-chevron"></i></summary>
+        <div class="settings-section-body">
+          <div class="settings-grid">
+            <label for="setting-songster-enabled">Songster aktivieren</label><input id="setting-songster-enabled" type="checkbox" onchange="saveSongsterAdminSettings()">
+          </div>
+          <p class="settings-hint">Erlaubt Songster-Spielservern die Verbindung und blendet den Menüeintrag „Songster" ein. Playlisten werden separat über den Menüeintrag verwaltet.</p>
         </div>
       </details>
 
