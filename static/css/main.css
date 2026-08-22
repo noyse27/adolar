@@ -1038,7 +1038,8 @@
       flex-wrap: wrap;
       gap: 8px;
     }
-    .settings-new-user input {
+    .settings-new-user input,
+    .settings-new-user select {
       flex: 1;
       min-width: 140px;
       padding: 7px 10px;

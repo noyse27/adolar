@@ -5543,6 +5543,12 @@ async function openUserMgmt() {
 }
 function closeUserMgmt() {
   $("usermgmt-modal").style.display = "none";
+  // The API-Zugriff panel promises the plaintext token is shown "nur
+  // einmal bei der Erzeugung" - clear it on close so reopening the modal
+  // doesn't leave a stale token sitting on screen.
+  const created = $("apitoken-created");
+  created.style.display = "none";
+  created.innerHTML = "";
 }
 
 async function refreshUserList() {
@@ -6137,6 +6143,7 @@ async function refreshApiTokens() {
     row.innerHTML = `
       <i class="ti ti-key" style="color:var(--text-tertiary);font-size:12px"></i>
       <span style="flex:1">${esc(t.name || "(ohne Bezeichnung)")}</span>
+      <span style="color:var(--text-tertiary);font-size:11px;border:0.5px solid var(--border-subtle);border-radius:5px;padding:1px 6px">${esc(t.product || "taggster")}</span>
       <span style="color:var(--text-tertiary);font-size:11px">${t.last_used_at ? "zuletzt genutzt: " + esc(new Date(t.last_used_at*1000).toLocaleString()) : "noch nicht genutzt"}</span>
       <button data-id="${t.id}" class="revoke-token-btn"
               style="background:none;border:0.5px solid var(--border-subtle);border-radius:5px;color:#e03e3e;cursor:pointer;padding:2px 7px;font-size:11px">
@@ -6155,9 +6162,10 @@ async function refreshApiTokens() {
 
 async function createApiToken() {
   const name = $("new-token-name").value.trim();
+  const product = $("new-token-product").value;
   const r = await fetch("/api/admin/tokens", {
     method: "POST", headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({name})
+    body: JSON.stringify({name, product})
   });
   const d = await r.json();
   if (d.token) {

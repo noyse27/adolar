@@ -744,7 +744,11 @@
           <div class="settings-subsection">
             <div class="settings-subsection-title">Neuer Token</div>
             <div class="settings-new-user">
-              <input id="new-token-name" type="text" placeholder="Bezeichnung (z.B. Taggster)">
+              <select id="new-token-product">
+                <option value="taggster">Taggster</option>
+                <option value="songster">Songster</option>
+              </select>
+              <input id="new-token-name" type="text" placeholder="Bezeichnung (optional)">
               <button onclick="createApiToken()">Erzeugen</button>
             </div>
             <div id="apitoken-created" style="display:none"></div>
