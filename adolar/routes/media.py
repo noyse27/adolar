@@ -116,6 +116,14 @@ def _set_stream_cache_headers(response, *, etag: str, last_modified: str, immuta
 @blueprint.get("/api/stream/<int:track_id>")
 def api_stream(track_id):
     _touch_disco()
+    return stream_track_response(track_id)
+
+
+def stream_track_response(track_id):
+    """Range-aware audio streaming for one track - shared by the player's
+    own /api/stream/<id> route above and the Songster game-server proxy
+    route (routes/songster.py's api_songster_track_stream), which forwards
+    Range headers through unmodified so seeking still works end-to-end."""
     with db.db() as conn:
         row = conn.execute(
             "SELECT path FROM tracks WHERE id = ?", (track_id,)

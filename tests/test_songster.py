@@ -444,5 +444,80 @@ class SongsterAdminPlaylistRouteTests(SongsterTestBase):
         self.assertIsNotNone(db.get_radio_station(normal_id))
 
 
+class SongsterTrackStreamRouteTests(SongsterTestBase):
+    def setUp(self):
+        super().setUp()
+        self.registry_patch = mock.patch.object(
+            app_module, "LIBRARY_REGISTRY_PATH", os.path.join(self.temp.name, "libraries.json"),
+        )
+        self.registry_patch.start()
+        self.addCleanup(self.registry_patch.stop)
+
+        self.music_root = os.path.join(self.temp.name, "music")
+        os.makedirs(self.music_root)
+        self.music_root_patch = mock.patch.object(app_module, "MUSIC_ROOT", self.music_root)
+        self.music_root_patch.start()
+        self.addCleanup(self.music_root_patch.stop)
+
+        self.admin_id = auth.create_user("admin", "password123", role="admin")
+        self.station_id = db.create_songster_playlist(
+            "Querbeet", "", {"mode": "all", "rules": []}, self.admin_id,
+        )
+        db.set_songster_playlist_enabled(self.station_id, True)
+        songster.update_global_settings({"enabled": True})
+        self.songster_token = auth.create_api_token(self.admin_id, "Songster Game Server", product="songster")
+        self.taggster_token = auth.create_api_token(self.admin_id, "Taggster", product="taggster")
+        self.client = app_module.app.test_client()
+
+        self.content = b"0123456789" * 10  # 100 bytes
+        full_path = os.path.join(self.music_root, "song.mp3")
+        with open(full_path, "wb") as f:
+            f.write(self.content)
+        with db.db() as conn:
+            cur = conn.execute("INSERT INTO tracks (path, title) VALUES ('song.mp3', 'Song')")
+            self.track_id = cur.lastrowid
+
+    def _bearer(self, token):
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_requires_songster_token(self):
+        anon = self.client.get(f"/api/songster/tracks/{self.track_id}/stream")
+        self.assertEqual(anon.status_code, 401)
+
+        wrong_product = self.client.get(
+            f"/api/songster/tracks/{self.track_id}/stream", headers=self._bearer(self.taggster_token),
+        )
+        self.assertEqual(wrong_product.status_code, 401)
+
+    def test_rejected_when_globally_disabled(self):
+        songster.update_global_settings({"enabled": False})
+        response = self.client.get(
+            f"/api/songster/tracks/{self.track_id}/stream", headers=self._bearer(self.songster_token),
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_streams_full_track(self):
+        response = self.client.get(
+            f"/api/songster/tracks/{self.track_id}/stream", headers=self._bearer(self.songster_token),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "audio/mpeg")
+        self.assertEqual(response.data, self.content)
+
+    def test_range_request_returns_partial_content(self):
+        response = self.client.get(
+            f"/api/songster/tracks/{self.track_id}/stream",
+            headers={**self._bearer(self.songster_token), "Range": "bytes=10-19"},
+        )
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.data, self.content[10:20])
+
+    def test_missing_track_returns_404(self):
+        response = self.client.get(
+            "/api/songster/tracks/999999/stream", headers=self._bearer(self.songster_token),
+        )
+        self.assertEqual(response.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

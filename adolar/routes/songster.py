@@ -104,6 +104,20 @@ def api_songster_playlist_tracks(playlist_id):
     return jsonify(result)
 
 
+# Audio playback (Step 4): the game server proxies this through to its own
+# players rather than handing out this Bearer token, so it's fine for this
+# to be a plain byte stream - same Range-aware streaming as the regular
+# player's /api/stream/<id>, just gated behind the songster product token
+# (and the global Songster switch) instead of being open to anyone on the
+# network, see routes/media.py's stream_track_response docstring.
+@blueprint.get("/api/songster/tracks/<int:track_id>/stream")
+@_songster_token_required
+def api_songster_track_stream(track_id):
+    from .media import stream_track_response
+
+    return stream_track_response(track_id)
+
+
 # ── Step 3: admin management of Songster playlists (browser session, not
 # Bearer token - this is the "Songster Playlists" dialog, reusing the radio
 # station editor components minus jingle/scope, see concept doc section 3.3).
