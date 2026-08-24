@@ -19,6 +19,7 @@ def api_scan_start():
     music_root = _current_music_root()
     data = request.get_json(silent=True) or {}
     path_input = (data.get("path") or "").strip()
+    force = bool(data.get("force"))
     if path_input:
         # Folder-scoped scan (e.g. triggered by Adolar Taggster after an
         # edit) — skips the full-library BPM/thumbnail follow-up sweeps.
@@ -27,11 +28,11 @@ def api_scan_start():
             return jsonify({"error": "path liegt nicht innerhalb der aktiven Bibliothek."}), 400
         if not os.path.isdir(candidate):
             return jsonify({"error": f"Pfad nicht gefunden: {candidate}"}), 400
-        scanner.run_scan(candidate, run_followups=False)
+        scanner.run_scan(candidate, run_followups=False, force=force)
         return jsonify({"status": "started", "path": candidate})
     if not os.path.isdir(music_root):
         return jsonify({"error": f"MUSIC_ROOT not found: {music_root}"}), 400
-    scanner.run_scan(music_root)
+    scanner.run_scan(music_root, force=force)
     return jsonify({"status": "started"})
 
 

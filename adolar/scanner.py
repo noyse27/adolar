@@ -442,13 +442,22 @@ def run_bpm_scan(limit: int = 0, trigger: str = "manual"):
     t.start()
 
 
-def run_scan(music_root: str, trigger: str = "manual", run_followups: bool = True):
+def run_scan(music_root: str, trigger: str = "manual", run_followups: bool = True, force: bool = False):
     """Scan music_root (recursively) for new/changed MP3s.
 
     run_followups=False skips the trailing full-library BPM/thumbnail
     sweeps — used for folder-scoped triggers from external tools (e.g.
     Adolar Taggster after a single edit), where those whole-table sweeps
     would be needlessly expensive on a large library.
+
+    force=True re-reads every file's tags regardless of mtime, instead of
+    skipping files the mtime-based check considers unchanged. Needed after
+    a scanner code change starts extracting a field it didn't before (e.g.
+    original_year) - the mtime-skip otherwise means already-scanned files
+    never get re-read just because Adolar's tag logic improved, even though
+    the file itself never changed again after being tagged. Ordinary
+    incremental scans should stay fast, so this is opt-in via the "Full
+    Scan" admin action rather than the default.
     """
     if _status["running"]:
         return
@@ -481,8 +490,8 @@ def run_scan(music_root: str, trigger: str = "manual", run_followups: bool = Tru
                     mtime = os.stat(path).st_mtime
                 except OSError:
                     continue
-                # Skip unchanged files
-                if path in existing_mtimes and abs(existing_mtimes[path] - mtime) < 1.0:
+                # Skip unchanged files (unless force=True re-reads everything)
+                if not force and path in existing_mtimes and abs(existing_mtimes[path] - mtime) < 1.0:
                     skipped += 1
                     _update(skipped=skipped)
                     continue

@@ -3960,6 +3960,22 @@ async function rescanLibrary() {
   $("lib-message").textContent = "Scan gestartet.";
 }
 
+async function fullscanLibrary() {
+  const confirmed = confirm(
+    "Vollständiger Scan: Es werden ALLE Dateien erneut eingelesen, auch " +
+    "unveränderte. Das kann bei einer großen Bibliothek sehr lange dauern. Fortfahren?"
+  );
+  if (!confirmed) return;
+  await fetch(`${API}/api/scan/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force: true }),
+  });
+  showBanner("Vollständiger Scan läuft, das kann sehr lange dauern…");
+  startScanPolling();
+  $("lib-message").textContent = "Vollständiger Scan gestartet.";
+}
+
 async function readLibraryCovers() {
   const message = $("lib-message");
   try {
@@ -3989,6 +4005,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btn-lib-create").onclick = createLibrary;
   $("btn-lib-move").onclick = moveLibrary;
   $("btn-lib-rescan").onclick = rescanLibrary;
+  $("btn-lib-fullscan").onclick = fullscanLibrary;
   $("btn-lib-covers").onclick = readLibraryCovers;
   $("btn-backup-create").onclick = startDatabaseBackup;
   $("btn-backup-config-save").onclick = saveBackupConfig;

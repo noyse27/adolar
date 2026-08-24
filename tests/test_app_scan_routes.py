@@ -66,7 +66,14 @@ class ScanStartRouteTests(ScanRouteTestBase):
             response = self.client.post("/api/scan/start")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["status"], "started")
-        run_scan.assert_called_once_with(self.music_root)
+        run_scan.assert_called_once_with(self.music_root, force=False)
+
+    def test_force_flag_is_forwarded_to_the_scanner(self):
+        os.makedirs(self.music_root)
+        with self._login(role="admin"), mock.patch.object(scanner_routes.scanner, "run_scan") as run_scan:
+            response = self.client.post("/api/scan/start", json={"force": True})
+        self.assertEqual(response.status_code, 200)
+        run_scan.assert_called_once_with(self.music_root, force=True)
 
 
 class BpmTagsRouteTests(ScanRouteTestBase):

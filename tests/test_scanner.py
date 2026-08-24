@@ -264,6 +264,24 @@ class RunScanIntegrationTests(unittest.TestCase):
         self.assertEqual(scanner.status()["skipped"], 1)
         self.assertEqual(len(self._tracks()), 1)
 
+    def test_force_rescan_rereads_unchanged_files(self):
+        path = os.path.join(self.music_root, "one.mp3")
+        _make_mp3(path, title="One")
+
+        scanner.run_scan(self.music_root)
+        self._wait_for_scan_to_finish()
+        self.assertEqual(len(self._tracks()), 1)
+
+        # Same file, same mtime — an ordinary scan would skip it, but a
+        # tag-only change made without touching mtime (or, as in the real
+        # bug this guards against, a scanner code change that now extracts
+        # a field it didn't before) should still be picked up by force=True.
+        scanner.run_scan(self.music_root, force=True)
+        self._wait_for_scan_to_finish()
+
+        self.assertEqual(scanner.status()["skipped"], 0)
+        self.assertEqual(len(self._tracks()), 1)
+
     def test_rescan_after_tag_change_updates_existing_row(self):
         path = os.path.join(self.music_root, "one.mp3")
         _make_mp3(path, title="Old Title")
