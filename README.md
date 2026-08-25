@@ -1,6 +1,6 @@
 # Adolar
 
-Current version: **1.9.0**
+Current version: **1.10.0**
 
 A self-hosted music archive web app for Synology NAS (or any Docker host). Browse, search, and stream your local MP3/FLAC/M4A collection from any browser — no cloud required.
 
@@ -53,6 +53,39 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Bookmark button** — add any track to a personal playlist directly from the track list; create new playlists on the fly
 - **Radio favorites** — the Radio companion uses the same personal Favorites list as the Web player
 - **DE / EN interface** — language switch in topbar
+
+## What's new in 1.10.0
+
+- **Adolar Next merged into main** — the offline-first Android player,
+  its mobile-sync backend (device tokens, track matching, idempotent
+  event batch), and the unified favorite/Last.fm love handling are now
+  part of the main codebase. See the "Adolar Android" section below and
+  the `android-next-0.1.0-beta` release for the APK.
+- **Unified Last.fm love/unlove** — removing a favorite now unloves it on
+  a connected Last.fm account (with `auto_love_favorites` enabled), the
+  same way adding one already loved it. Previously unfavoriting left a
+  stale Last.fm love in place. Applies to both the web UI and Android.
+- **Songster integration (step 1)** — radio stations can be marked
+  curated for the Songster game client and hidden from the normal
+  station picker; a global on/off switch and admin settings gate the
+  feature; an admin UI manages Songster playlists; the game client gets
+  its own authenticated, product-token-gated track-matching, playlist,
+  and audio-streaming routes.
+- **API tokens now carry a product** — the "Neuer Token" dialog lets an
+  admin pick Taggster or Songster when creating a token, instead of
+  every token silently defaulting to Taggster; the token list shows each
+  token's product.
+- Fixed Adolar Disco's BPM callback (`POST /api/track/<id>/bpm`) being
+  unreachable — it's called unauthenticated but was blocked by
+  `before_request()` before its own (redundant) admin check ever ran.
+- New **"Vollständiger Scan"** admin button forces a full re-read of every
+  file's tags, bypassing the mtime-skip — needed when a scanner change
+  starts extracting a field (e.g. `original_year`) that untouched files
+  were never re-read for. The existing quick scan is now labeled
+  "Schnellscan".
+- Added `tracks.original_year` (from TDOR/ORIGINALYEAR/ORIGINALDATE) to
+  distinguish a compilation's release year from its songs' original
+  years — written by Adolar Taggster, read-only in Adolar itself.
 
 ## What's new in 1.9.0
 
