@@ -1,7 +1,8 @@
 # Adolar Next – Übergabe und aktueller Stand
 
-Stand: 19. August 2026  
-Arbeitsbranch: `codex/android-local-library-sync`  
+Stand: 25. August 2026  
+Arbeitsbranch: `main` (Priorität 1–3 wurden am 25.08.2026 über PR #42 gemergt;
+Release `android-next-0.1.0-beta`)  
 Repository: `noyse27/adolar`  
 Android-Projekt: `adolar-android`
 
