@@ -1,45 +1,24 @@
 """Favorites, playlists, and smart-rule editor routes."""
 
 import json
-import logging
 from datetime import UTC
 
 from flask import Blueprint, g, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 from .. import auth as _auth
-from .. import db, errors, lastfm, smart_rules
+from .. import db, errors, favorites, smart_rules
 from ..application import _client_error
 
 blueprint = Blueprint("playlists", __name__)
-
-def _set_user_favorite(user_id: int, track_id: int, favorite: bool) -> tuple[dict, int]:
-    with db.db() as conn:
-        track = conn.execute(
-            "SELECT id, artist, title FROM tracks WHERE id=?", (int(track_id),)
-        ).fetchone()
-    if not track:
-        return {"error": "track not found"}, 404
-    db.set_favorite(user_id, track_id, favorite)
-    result = {"ok": True, "favorite": bool(favorite), "lastfm_synced": False}
-    account = db.get_lastfm_account(user_id)
-    if favorite and account and account["auto_love_favorites"]:
-        try:
-            lastfm.love(account["session_key"], track["artist"] or "", track["title"] or "")
-            db.set_lastfm_loved(user_id, track["artist"], track["title"], True)
-            result["lastfm_synced"] = True
-        except Exception:
-            logging.getLogger(__name__).exception("Favorite saved but Last.fm love failed")
-            result["lastfm_error"] = "Last.fm konnte nicht aktualisiert werden."
-    return result, 200
 
 
 @blueprint.get("/api/favorites")
 def api_favorites_status():
     ids_raw = request.args.get("ids", "")
     track_ids = [int(value) for value in ids_raw.split(",") if value.strip().isdigit()]
-    favorites = db.get_favorite_track_ids(g.user["id"], track_ids or None)
-    return jsonify({"track_ids": sorted(favorites)})
+    favorite_ids = db.get_favorite_track_ids(g.user["id"], track_ids or None)
+    return jsonify({"track_ids": sorted(favorite_ids)})
 
 
 @blueprint.put("/api/favorites/<int:track_id>")
@@ -48,7 +27,7 @@ def api_favorite_set(track_id):
     favorite = data.get("favorite")
     if not isinstance(favorite, bool):
         return jsonify({"error": "favorite must be boolean"}), 400
-    result, status = _set_user_favorite(g.user["id"], track_id, favorite)
+    result, status = favorites.set_user_favorite(g.user["id"], track_id, favorite)
     return jsonify(result), status
 
 
@@ -58,7 +37,7 @@ def api_radio_bookmark(track_id):
     user = _auth.get_user_by_token(token) if token else None
     if not user:
         return jsonify({"error": "unauthorized"}), 401
-    result, status = _set_user_favorite(user["id"], track_id, True)
+    result, status = favorites.set_user_favorite(user["id"], track_id, True)
     if status == 200:
         result["playlist_id"] = db.get_or_create_favorites(user["id"])
     return jsonify(result), status

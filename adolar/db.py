@@ -246,6 +246,21 @@ def init_db():
                 connection_id INTEGER
             );
 
+            -- Long-lived device tokens for Android background sync, separate
+            -- from control.api_tokens (admin tools) and control.sessions
+            -- (interactive web/app screens). Only the SHA-256 hash is stored;
+            -- the plaintext token is returned once at creation time. See
+            -- auth.create_android_device_token / get_android_device_and_user.
+            CREATE TABLE IF NOT EXISTS control.android_devices (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_hash    TEXT    NOT NULL UNIQUE,
+                user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name          TEXT,
+                created_at    REAL    NOT NULL DEFAULT (unixepoch()),
+                last_used_at  REAL,
+                revoked_at    REAL
+            );
+
             CREATE TABLE IF NOT EXISTS control.connection_log (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -321,6 +336,41 @@ def init_db():
                 loved       INTEGER NOT NULL DEFAULT 0,
                 added_at    REAL DEFAULT (unixepoch()),
                 indexed_at  REAL DEFAULT (unixepoch())
+            );
+
+            -- Cached Android local-track -> server-track matches, keyed per
+            -- user so the same local file matches consistently across
+            -- devices. 'unmatched'/'ambiguous' rows are retried on each
+            -- sync attempt (self-healing after a later library rescan);
+            -- 'matched' rows are trusted as-is. See adolar/android.py.
+            CREATE TABLE IF NOT EXISTS android_track_links (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id         INTEGER NOT NULL,
+                local_track_id  TEXT    NOT NULL,
+                track_id        INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+                match_kind      TEXT    NOT NULL DEFAULT 'unmatched'
+                                CHECK(match_kind IN ('matched','ambiguous','unmatched')),
+                confidence      TEXT,
+                created_at      REAL    NOT NULL DEFAULT (unixepoch()),
+                updated_at      REAL    NOT NULL DEFAULT (unixepoch()),
+                UNIQUE(user_id, local_track_id)
+            );
+
+            -- Idempotency ledger for Android listening events, mirroring
+            -- adolar4u_listening_events' UNIQUE(user_id, client_event_id)
+            -- pattern but additionally scoped per device, as specified in
+            -- docs/android-local-library.md.
+            CREATE TABLE IF NOT EXISTS android_event_receipts (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id         INTEGER NOT NULL,
+                device_id       INTEGER NOT NULL,
+                event_id        TEXT    NOT NULL,
+                event_type      TEXT    NOT NULL,
+                local_track_id  TEXT    NOT NULL,
+                track_id        INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+                status          TEXT    NOT NULL,
+                created_at      REAL    NOT NULL DEFAULT (unixepoch()),
+                UNIQUE(user_id, device_id, event_id)
             );
 
             CREATE TABLE IF NOT EXISTS track_lyrics (

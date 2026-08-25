@@ -26,6 +26,7 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Optional library crossfade** — persistent crossfade switch for normal playback, playlists, and shuffled queues; kept separate from Radio playback
 - **Atomic playback handoff** — the Web player keeps the already-buffered incoming audio slot, refills radio queues off the critical path, and validates buffered duration before fading
 - **Native Android crossfade** — dual Media3 ExoPlayers provide an eight-second equal-power transition backed by a shared version-safe 384 MB disk cache and a five-track local queue
+- **Adolar Next (beta)** — offline-first Android player with its own local library, playlists, and favorites; syncs local plays, favorites, and Last.fm love/unlove back to Adolar once a device is connected
 - **Clear Radio exit** — stop the active station and return directly to the library from the Radio button or Now Playing view
 - **AdolarRadio** — Windows companion app: native window, auto-starts radio, About dialog, buildable to `.exe`
 - **Mini-player** — popup window with cover art, controls, progress bar, Last.fm love button
@@ -256,6 +257,15 @@ Cover images failing with `--verbose` are corrupt embedded tags — normal, they
 
 Download the latest `.exe` from [Releases](https://github.com/noyse27/adolar/releases).
 Connect it to your Adolar server in the settings dialog. An optional Adolar login unlocks personal stations and radio bookmarks; connection and login state are restored on the next start.
+
+## Adolar Android
+
+Two independent Android apps, installable side by side (different application IDs, no shared data):
+
+- **Adolar Radio** (`net.polze.adolarradio`) — the original Android companion: native station picker and playback controls, Android Auto support, connected to your Adolar server.
+- **Adolar Next** (`net.polze.adolarnext`, currently beta) — an offline-first local music player with its own library, playlists, and favorites (Room-backed, works without a server), plus optional background sync: local play history, favorites, and Last.fm love/unlove mirror to your Adolar account once connected. See [`adolar-android/README.md`](adolar-android/README.md) and [`docs/android-local-library.md`](docs/android-local-library.md) for the architecture.
+
+Download the latest APKs from [Releases](https://github.com/noyse27/adolar/releases) and sideload (enable "Install unknown apps" for your file manager/browser). Both are debug-signed builds for sideloading, not Play Store releases.
 
 ## First Run
 

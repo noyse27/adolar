@@ -60,7 +60,7 @@ import org.json.JSONObject;
  * can disappear without creating a second player or interrupting the queue.
  */
 public class MainActivity extends Activity {
-    private static final String ROOT_ID = "adolar_root";
+    private static final String ROOT_ID = AdolarMediaService.BROWSE_RADIOS_ROOT;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private MediaBrowserCompat mediaBrowser;

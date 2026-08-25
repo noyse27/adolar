@@ -1,11 +1,15 @@
-# Adolar Radio Android
+# Adolar Next Android
 
-Android companion app for Adolar Radio.
+Offline-first Android music player and Adolar companion.
+
+Adolar Next uses the application ID `net.polze.adolarnext`. It can therefore be
+installed alongside the existing Adolar Radio app (`net.polze.adolarradio`)
+without replacing it or sharing its private app data.
 
 It has two surfaces backed by one player:
 
 - Phone app: native station picker and playback controls connected to the app's media service.
-- Android Auto: exposes a media service named "Adolar Radio" that uses Adolar's session-aware Smart Shuffle via `/api/random` and streams tracks from `/api/stream/<id>`.
+- Android Auto: exposes a media service named "Adolar Next" that uses Adolar's session-aware Smart Shuffle via `/api/random` and streams tracks from `/api/stream/<id>`.
 
 The phone app and Android Auto control the same MediaSession. Playback never lives in a WebView, so locking the phone or leaving the phone UI does not create a second player or interrupt track advancement. Android Auto does not allow arbitrary browser/WebView UIs in the car; music apps must expose a media session/browser service instead.
 
@@ -18,7 +22,7 @@ The phone app and Android Auto control the same MediaSession. Playback never liv
    - Android settings -> About phone -> tap "Build number" 7 times.
    - Developer options -> enable "USB debugging".
 5. Connect the phone by USB and press **Run** in Android Studio.
-6. Open **Adolar Radio** on the phone and enter your server URL, for example:
+6. Open **Adolar Next** on the phone and enter your server URL, for example:
 
    ```text
    http://192.168.1.100:15002
@@ -29,7 +33,7 @@ The phone app and Android Auto control the same MediaSession. Playback never liv
 1. Open Android Auto settings on the phone.
 2. Tap the Android Auto version repeatedly until developer settings are enabled.
 3. In Android Auto developer settings, enable **Unknown sources**.
-4. Start Android Auto. The app should appear as a media app named **Adolar Radio**.
+4. Start Android Auto. The app should appear as a media app named **Adolar Next**.
 
 ## Notes
 

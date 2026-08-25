@@ -13,11 +13,10 @@ _temp_dir = tempfile.TemporaryDirectory()
 os.environ.setdefault("DB_PATH", os.path.join(_temp_dir.name, "adolar4u-test.db"))
 os.environ.setdefault("CONTROL_DB_PATH", os.path.join(_temp_dir.name, "adolar4u-test-control.db"))
 
-from adolar import adolar4u
+from adolar import adolar4u, favorites
 from adolar import application as app_module
 from adolar.adolar4u import recommender
 from adolar.routes import lastfm as lastfm_routes
-from adolar.routes import playlists as playlist_routes
 
 
 class Adolar4UTests(unittest.TestCase):
@@ -700,9 +699,10 @@ class Adolar4UTests(unittest.TestCase):
         self.assertTrue(signal["is_favorite"])
         self.assertEqual(signal["signal_strength"], 2)
 
-    def test_favorite_auto_loves_once_but_unfavorite_keeps_lastfm_love(self):
+    def test_favorite_auto_loves_and_unfavorite_auto_unloves_symmetrically(self):
         app_module.db.set_lastfm_account(self.USER_ID, "listener", "secret-session")
-        with self._login(), mock.patch.object(playlist_routes.lastfm, "love") as love:
+        with self._login(), mock.patch.object(favorites.lastfm, "love") as love, \
+                mock.patch.object(favorites.lastfm, "unlove") as unlove:
             added = self.client.put(
                 f"/api/favorites/{self.TRACK_ID}", json={"favorite": True},
             )
@@ -713,13 +713,15 @@ class Adolar4UTests(unittest.TestCase):
         self.assertTrue(added.get_json()["lastfm_synced"])
         love.assert_called_once_with("secret-session", "Listener", "Signal")
         self.assertEqual(removed.status_code, 200)
+        self.assertTrue(removed.get_json()["lastfm_synced"])
+        unlove.assert_called_once_with("secret-session", "Listener", "Signal")
         self.assertNotIn(self.TRACK_ID, app_module.db.get_favorite_track_ids(self.USER_ID))
         with app_module.db.db() as conn:
             loved = conn.execute("""
                 SELECT 1 FROM lastfm_loved_tracks
                 WHERE user_id=? AND artist_norm='listener' AND title_norm='signal'
             """, (self.USER_ID,)).fetchone()
-        self.assertIsNotNone(loved)
+        self.assertIsNone(loved)
 
     def test_lastfm_endpoints_use_the_authenticated_users_account(self):
         other_user = {**self.user, "id": 22, "username": "other-listener"}
