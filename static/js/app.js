@@ -77,7 +77,10 @@ const LANG = {
     songster_lock:         "Freischaltung zurücknehmen",
     songster_edit:         "Playlist bearbeiten",
     songster_delete:       "Playlist löschen",
-    songster_delete_confirm: (name) => `Songster-Playlist „${name}" löschen?`,
+    songster_delete_confirm: (name) =>
+      `Songster-Playlist „${name}" löschen?\n\nSongster übernimmt das erst mit dem nächsten Sync-Zyklus - bis dahin bleibt die Playlist dort noch sichtbar/spielbar.`,
+    songster_lock_confirm: (name) =>
+      `Freischaltung von „${name}" für Songster zurücknehmen?\n\nSongster übernimmt das erst mit dem nächsten Sync-Zyklus - bis dahin bleibt die Playlist dort noch sichtbar/spielbar.`,
     songster_disabled_badge: "Nicht freigeschaltet",
     basket:           "Korb",
     basket_empty:     "Korb ist leer",
@@ -187,7 +190,10 @@ const LANG = {
     songster_lock:         "Revoke unlock",
     songster_edit:         "Edit playlist",
     songster_delete:       "Delete playlist",
-    songster_delete_confirm: (name) => `Delete Songster playlist "${name}"?`,
+    songster_delete_confirm: (name) =>
+      `Delete Songster playlist "${name}"?\n\nSongster only picks this up on its next sync cycle - until then, the playlist stays visible/playable there.`,
+    songster_lock_confirm: (name) =>
+      `Revoke Songster unlock for "${name}"?\n\nSongster only picks this up on its next sync cycle - until then, the playlist stays visible/playable there.`,
     songster_disabled_badge: "Not unlocked",
     basket:           "Cart",
     basket_empty:     "Cart is empty",
@@ -3227,6 +3233,11 @@ function renderSongsterPlaylistRow(pl) {
       <button class="icon-btn danger songster-delete" title="${t().songster_delete}"><i class="ti ti-trash"></i></button>
     </div>`;
   row.querySelector(".songster-toggle").onclick = async () => {
+    // Only confirm when revoking the unlock, not when granting it - Songster
+    // only drops the playlist from its own catalog on its next sync cycle
+    // (see adolar-songster's syncAllAdolarPlaylists), so it stays usable
+    // there for a while after this toggle.
+    if (pl.songster_enabled && !confirm(t().songster_lock_confirm(pl.name))) return;
     await fetch(`${API}/api/admin/songster/playlists/${pl.id}/enabled`, {
       method: "PUT",
       headers: {"Content-Type": "application/json"},
