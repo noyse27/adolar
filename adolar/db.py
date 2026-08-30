@@ -1,4 +1,5 @@
 import contextlib
+import datetime as _datetime
 import json
 import logging
 import os
@@ -481,6 +482,37 @@ def init_db():
                 engine      TEXT    NOT NULL DEFAULT 'smart_shuffle',
                 UNIQUE(scope, owner_id, name)
             );
+
+            CREATE TABLE IF NOT EXISTS songster_playlist_tracks (
+                station_id INTEGER NOT NULL REFERENCES radio_stations(id) ON DELETE CASCADE,
+                track_id   INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                mode       TEXT    NOT NULL CHECK(mode IN ('include','exclude')),
+                added_at   REAL    DEFAULT (unixepoch()),
+                PRIMARY KEY (station_id, track_id, mode)
+            );
+            CREATE INDEX IF NOT EXISTS idx_songster_playlist_tracks_station
+            ON songster_playlist_tracks(station_id, mode, added_at);
+
+            CREATE TABLE IF NOT EXISTS songster_playlist_albums (
+                station_id INTEGER NOT NULL REFERENCES radio_stations(id) ON DELETE CASCADE,
+                album      TEXT    NOT NULL,
+                dir        TEXT    NOT NULL,
+                mode       TEXT    NOT NULL CHECK(mode IN ('include','exclude')),
+                added_at   REAL    DEFAULT (unixepoch()),
+                PRIMARY KEY (station_id, album, dir, mode)
+            );
+            CREATE INDEX IF NOT EXISTS idx_songster_playlist_albums_station
+            ON songster_playlist_albums(station_id, mode, added_at);
+
+            CREATE TABLE IF NOT EXISTS songster_playlist_queue (
+                station_id INTEGER NOT NULL REFERENCES radio_stations(id) ON DELETE CASCADE,
+                track_id   INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                added_by   INTEGER,
+                added_at   REAL    DEFAULT (unixepoch()),
+                PRIMARY KEY (station_id, track_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_songster_playlist_queue_station
+            ON songster_playlist_queue(station_id, added_at);
         """)
         # Installs from before the control/content split kept these tables in
         # the same file as tracks; move any such leftover data into the
@@ -530,6 +562,38 @@ def init_db():
         ]:
             with contextlib.suppress(Exception):
                 conn.execute(migration)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS songster_playlist_tracks (
+                station_id INTEGER NOT NULL REFERENCES radio_stations(id) ON DELETE CASCADE,
+                track_id   INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                mode       TEXT    NOT NULL CHECK(mode IN ('include','exclude')),
+                added_at   REAL    DEFAULT (unixepoch()),
+                PRIMARY KEY (station_id, track_id, mode)
+            );
+            CREATE INDEX IF NOT EXISTS idx_songster_playlist_tracks_station
+            ON songster_playlist_tracks(station_id, mode, added_at);
+
+            CREATE TABLE IF NOT EXISTS songster_playlist_albums (
+                station_id INTEGER NOT NULL REFERENCES radio_stations(id) ON DELETE CASCADE,
+                album      TEXT    NOT NULL,
+                dir        TEXT    NOT NULL,
+                mode       TEXT    NOT NULL CHECK(mode IN ('include','exclude')),
+                added_at   REAL    DEFAULT (unixepoch()),
+                PRIMARY KEY (station_id, album, dir, mode)
+            );
+            CREATE INDEX IF NOT EXISTS idx_songster_playlist_albums_station
+            ON songster_playlist_albums(station_id, mode, added_at);
+
+            CREATE TABLE IF NOT EXISTS songster_playlist_queue (
+                station_id INTEGER NOT NULL REFERENCES radio_stations(id) ON DELETE CASCADE,
+                track_id   INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                added_by   INTEGER,
+                added_at   REAL    DEFAULT (unixepoch()),
+                PRIMARY KEY (station_id, track_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_songster_playlist_queue_station
+            ON songster_playlist_queue(station_id, added_at);
+        """)
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_tracks_added_at
             ON tracks(added_at DESC)
@@ -1501,7 +1565,7 @@ def _radio_filter_uses_genre(filter_def) -> bool:
     return False
 
 
-def _radio_filter_sql(filter_def) -> tuple[str, list]:
+def _radio_filter_sql(filter_def, year_expr: str = "t.year") -> tuple[str, list]:
     filter_def = validate_radio_filter(filter_def)
 
     def walk(node) -> tuple[str, list]:
@@ -1530,16 +1594,16 @@ def _radio_filter_sql(filter_def) -> tuple[str, list]:
             elif field == "decade":
                 start, end = int(value), int(value) + 9
                 if op == "eq":
-                    parts.append("(t.year >= ? AND t.year <= ?)")
+                    parts.append(f"({year_expr} >= ? AND {year_expr} <= ?)")
                     params.extend([start, end])
                 elif op == "ne":
-                    parts.append("(t.year IS NULL OR t.year < ? OR t.year > ?)")
+                    parts.append(f"({year_expr} IS NULL OR {year_expr} < ? OR {year_expr} > ?)")
                     params.extend([start, end])
                 elif op == "gt":
-                    parts.append("t.year > ?")
+                    parts.append(f"{year_expr} > ?")
                     params.append(end)
                 elif op == "lt":
-                    parts.append("t.year < ?")
+                    parts.append(f"{year_expr} < ?")
                     params.append(start)
             elif field == "added":
                 amount = int(value) * (7 if rule["unit"] == "weeks" else 1)
@@ -1548,7 +1612,7 @@ def _radio_filter_sql(filter_def) -> tuple[str, list]:
                 parts.append(f"t.added_at {comparison} unixepoch('now', ?)")
                 params.append(modifier)
             else:
-                col = _RADIO_NUM_FIELDS[field]
+                col = year_expr if field == "year" else _RADIO_NUM_FIELDS[field]
                 sql_op = {"eq": "=", "ne": "!=", "gt": ">", "lt": "<"}[op]
                 if op == "ne":
                     parts.append(f"({col} IS NULL OR {col} {sql_op} ?)")
@@ -1653,7 +1717,20 @@ def list_songster_admin_playlists() -> list[dict]:
             WHERE rs.songster_managed = 1
             ORDER BY rs.name COLLATE NOCASE
         """).fetchall()
-    return [_radio_station_from_row(r) for r in rows]
+    playlists = [_radio_station_from_row(r) for r in rows]
+    for playlist in playlists:
+        static_ids = get_songster_playlist_static_track_ids(int(playlist["id"]))
+        static_albums = get_songster_playlist_static_album_refs(int(playlist["id"]))
+        playlist["include_track_ids"] = static_ids["include"]
+        playlist["exclude_track_ids"] = static_ids["exclude"]
+        playlist["include_album_refs"] = static_albums["include"]
+        playlist["exclude_album_refs"] = static_albums["exclude"]
+        playlist["include_track_count"] = len(static_ids["include"])
+        playlist["exclude_track_count"] = len(static_ids["exclude"])
+        playlist["include_album_count"] = len(static_albums["include"])
+        playlist["exclude_album_count"] = len(static_albums["exclude"])
+        playlist["queue_count"] = get_songster_playlist_queue_count(int(playlist["id"]))
+    return playlists
 
 
 def create_songster_playlist(name: str, description: str, filter_def: dict, user_id: int) -> int:
@@ -1663,6 +1740,228 @@ def create_songster_playlist(name: str, description: str, filter_def: dict, user
     return create_radio_station(
         name, description, filter_def, user_id, scope="global", songster_managed=True,
     )
+
+
+def _clean_track_ids(track_ids) -> list[int]:
+    cleaned = []
+    seen = set()
+    for value in track_ids or []:
+        try:
+            track_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if track_id > 0 and track_id not in seen:
+            cleaned.append(track_id)
+            seen.add(track_id)
+    return cleaned[:5000]
+
+
+def _clean_album_refs(album_refs) -> list[dict]:
+    cleaned = []
+    seen = set()
+    for ref in album_refs or []:
+        if not isinstance(ref, dict):
+            continue
+        album = str(ref.get("album") or "").strip()
+        dir_ = str(ref.get("dir") or "").strip()
+        if not album:
+            continue
+        key = (album.casefold(), dir_)
+        if key in seen:
+            continue
+        cleaned.append({"album": album[:300], "dir": dir_[:1000]})
+        seen.add(key)
+    return cleaned[:1000]
+
+
+def set_songster_playlist_static_tracks(
+    station_id: int,
+    include_track_ids=None,
+    exclude_track_ids=None,
+) -> bool:
+    station = get_radio_station(station_id)
+    if not station or not station.get("songster_managed"):
+        return False
+    exclude_ids = _clean_track_ids(exclude_track_ids)
+    exclude_set = set(exclude_ids)
+    include_ids = [track_id for track_id in _clean_track_ids(include_track_ids) if track_id not in exclude_set]
+    with db() as conn:
+        conn.execute("DELETE FROM songster_playlist_tracks WHERE station_id=?", (int(station_id),))
+        for mode, ids in (("include", include_ids), ("exclude", exclude_ids)):
+            for track_id in ids:
+                conn.execute(
+                    """INSERT OR IGNORE INTO songster_playlist_tracks (station_id, track_id, mode)
+                       VALUES (?,?,?)""",
+                    (int(station_id), track_id, mode),
+                )
+    return True
+
+
+def set_songster_playlist_static_albums(
+    station_id: int,
+    include_album_refs=None,
+    exclude_album_refs=None,
+) -> bool:
+    station = get_radio_station(station_id)
+    if not station or not station.get("songster_managed"):
+        return False
+    exclude_refs = _clean_album_refs(exclude_album_refs)
+    exclude_keys = {(ref["album"].casefold(), ref["dir"]) for ref in exclude_refs}
+    include_refs = [
+        ref for ref in _clean_album_refs(include_album_refs)
+        if (ref["album"].casefold(), ref["dir"]) not in exclude_keys
+    ]
+    with db() as conn:
+        conn.execute("DELETE FROM songster_playlist_albums WHERE station_id=?", (int(station_id),))
+        for mode, refs in (("include", include_refs), ("exclude", exclude_refs)):
+            for ref in refs:
+                conn.execute(
+                    """INSERT OR IGNORE INTO songster_playlist_albums (station_id, album, dir, mode)
+                       VALUES (?,?,?,?)""",
+                    (int(station_id), ref["album"], ref["dir"], mode),
+                )
+    return True
+
+
+def get_songster_playlist_static_track_ids(station_id: int) -> dict[str, list[int]]:
+    with db() as conn:
+        rows = conn.execute(
+            """SELECT track_id, mode FROM songster_playlist_tracks
+               WHERE station_id=?
+               ORDER BY mode, added_at, track_id""",
+            (int(station_id),),
+        ).fetchall()
+    result = {"include": [], "exclude": []}
+    for row in rows:
+        if row["mode"] in result:
+            result[row["mode"]].append(int(row["track_id"]))
+    return result
+
+
+def get_songster_playlist_static_album_refs(station_id: int) -> dict[str, list[dict]]:
+    with db() as conn:
+        rows = conn.execute(
+            """SELECT album, dir, mode FROM songster_playlist_albums
+               WHERE station_id=?
+               ORDER BY mode, added_at, album COLLATE NOCASE""",
+            (int(station_id),),
+        ).fetchall()
+    result = {"include": [], "exclude": []}
+    for row in rows:
+        if row["mode"] in result:
+            result[row["mode"]].append({"album": row["album"], "dir": row["dir"]})
+    return result
+
+
+def queue_songster_playlist_track(station_id: int, track_id: int, user_id: int | None = None) -> bool:
+    station = get_radio_station(station_id)
+    if not station or not station.get("songster_managed"):
+        return False
+    with db() as conn:
+        exists = conn.execute("SELECT 1 FROM tracks WHERE id=?", (int(track_id),)).fetchone()
+        if not exists:
+            return False
+        conn.execute(
+            """INSERT OR IGNORE INTO songster_playlist_queue (station_id, track_id, added_by)
+               VALUES (?,?,?)""",
+            (int(station_id), int(track_id), int(user_id) if user_id else None),
+        )
+    return True
+
+
+def get_songster_playlist_queue_count(station_id: int) -> int:
+    with db() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM songster_playlist_queue WHERE station_id=?",
+            (int(station_id),),
+        ).fetchone()
+    return int(row["n"] if row else 0)
+
+
+def list_songster_playlist_queue(station_id: int, limit: int = 100) -> list[dict]:
+    station = get_radio_station(station_id)
+    if not station or not station.get("songster_managed"):
+        return []
+    limit = max(1, min(int(limit or 100), 500))
+    with db() as conn:
+        rows = conn.execute("""
+            SELECT t.id, t.title, t.artist, t.album, t.album_artist, t.genre,
+                   t.year, t.original_year, t.track_no, t.duration, t.bitrate,
+                   t.size, t.mtime, t.cover_hash, t.bpm, t.path
+            FROM songster_playlist_queue q
+            JOIN tracks t ON t.id=q.track_id
+            WHERE q.station_id=?
+            ORDER BY q.added_at, q.track_id
+            LIMIT ?
+        """, (int(station_id), limit)).fetchall()
+    return [_songster_track_api_dict(row) for row in _songster_annotate_year_quality([dict(r) for r in rows])]
+
+
+def _songster_identity(track: dict) -> tuple[str, str]:
+    return (
+        str(track.get("artist") or "").strip().casefold(),
+        str(track.get("title") or "").strip().casefold(),
+    )
+
+
+def sync_songster_playlist_queue(station_id: int) -> dict | None:
+    station = get_radio_station(station_id)
+    if not station or not station.get("songster_managed"):
+        return None
+    queued = list_songster_playlist_queue(station_id, limit=5000)
+    if not queued:
+        return {"queued": 0, "accepted": [], "discarded": []}
+    static_ids = get_songster_playlist_static_track_ids(station_id)
+    static_albums = get_songster_playlist_static_album_refs(station_id)
+    existing_rows = _songster_annotate_year_quality(_songster_matching_track_rows(
+        station.get("filter") or {},
+        static_ids["include"],
+        static_ids["exclude"],
+        static_albums["include"],
+        static_albums["exclude"],
+    ))
+    existing_playable = [
+        track for track in existing_rows
+        if track["year_confidence"] in {"confirmed", "inferred"} and track["effective_year"] is not None
+    ]
+    existing_by_id = {int(track["id"]): track for track in existing_playable}
+    existing_by_identity: dict[tuple[str, str], list[dict]] = {}
+    for track in existing_playable:
+        identity = _songster_identity(track)
+        if all(identity):
+            existing_by_identity.setdefault(identity, []).append(track)
+
+    accepted = []
+    discarded = []
+    include_ids = list(static_ids["include"])
+    for queued_track in queued:
+        track_id = int(queued_track["id"])
+        identity = _songster_identity(queued_track)
+        same_identity = existing_by_identity.get(identity, []) if all(identity) else []
+        if track_id in existing_by_id:
+            discarded.append({**queued_track, "reason": "already_in_pool"})
+            continue
+        if same_identity:
+            reason = "duplicate"
+            if any(track.get("effective_year") != queued_track.get("year") for track in same_identity):
+                reason = "duplicate_different_year"
+            discarded.append({**queued_track, "reason": reason})
+            continue
+        include_ids.append(track_id)
+        accepted.append(queued_track)
+
+    set_songster_playlist_static_tracks(
+        station_id,
+        include_track_ids=include_ids,
+        exclude_track_ids=static_ids["exclude"],
+    )
+    with db() as conn:
+        conn.execute("DELETE FROM songster_playlist_queue WHERE station_id=?", (int(station_id),))
+    return {
+        "queued": len(queued),
+        "accepted": accepted,
+        "discarded": discarded,
+    }
 
 
 def set_songster_playlist_enabled(station_id: int, enabled: bool) -> bool:
@@ -1892,6 +2191,368 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
     return _track_rows_to_dicts(selected)
 
 
+SONGSTER_MIN_YEAR = 1920
+
+
+def _songster_current_year() -> int:
+    return _datetime.datetime.now().year
+
+
+def _songster_year_is_valid(value) -> bool:
+    try:
+        year = int(value)
+    except (TypeError, ValueError):
+        return False
+    return SONGSTER_MIN_YEAR <= year <= _songster_current_year()
+
+
+def _songster_album_key(row: dict) -> str | None:
+    album = str(row.get("album") or "").strip().casefold()
+    if not album:
+        return None
+    album_artist = str(row.get("album_artist") or "").strip().casefold()
+    if album_artist and album_artist not in {"various artists", "va", "various"}:
+        return f"{album_artist}\x1f{album}"
+    return album
+
+
+def _songster_album_profiles(rows: list[dict]) -> dict[str, dict]:
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        key = _songster_album_key(row)
+        if key:
+            grouped.setdefault(key, []).append(row)
+
+    profiles = {}
+    for key, album_rows in grouped.items():
+        original_years = [
+            int(row["original_year"]) for row in album_rows
+            if _songster_year_is_valid(row.get("original_year"))
+        ]
+        if len(original_years) < 3:
+            continue
+        decade_counts: dict[int, int] = {}
+        for year in original_years:
+            decade = (year // 10) * 10
+            decade_counts[decade] = decade_counts.get(decade, 0) + 1
+        decade, count = max(decade_counts.items(), key=lambda item: item[1])
+        if count < 3 or count / len(original_years) < 0.6:
+            continue
+        profiles[key] = {
+            "dominant_decade": decade,
+            "dominant_count": count,
+            "original_count": len(original_years),
+            "median_year": sorted(original_years)[len(original_years) // 2],
+        }
+    return profiles
+
+
+def _songster_annotate_year_quality(rows: list[dict]) -> list[dict]:
+    profiles = _songster_album_profiles(rows)
+    current_year = _songster_current_year()
+    annotated = []
+    for row in rows:
+        track = dict(row)
+        original_year = track.get("original_year")
+        year = track.get("year")
+        confidence = "missing"
+        effective_year = None
+        reason = "missing_year"
+        if _songster_year_is_valid(original_year):
+            effective_year = int(original_year)
+            confidence = "confirmed"
+            reason = "original_year"
+        elif _songster_year_is_valid(year):
+            effective_year = int(year)
+            confidence = "inferred"
+            reason = "track_year"
+            profile = profiles.get(_songster_album_key(track))
+            if profile:
+                decade = profile["dominant_decade"]
+                outside_dominant_decade = effective_year < decade or effective_year > decade + 9
+                far_from_album_profile = abs(effective_year - int(profile["median_year"])) > 10
+                looks_like_compilation_year = effective_year >= current_year - 2
+                if outside_dominant_decade and (far_from_album_profile or looks_like_compilation_year):
+                    confidence = "suspect"
+                    reason = "album_year_outlier"
+        track["effective_year"] = effective_year
+        track["year_confidence"] = confidence
+        track["year_reason"] = reason
+        annotated.append(track)
+    return annotated
+
+
+def _songster_filter_sql(filter_def: dict) -> tuple[str, list]:
+    return _radio_filter_sql(filter_def, "COALESCE(t.original_year, t.year)")
+
+
+def _songster_track_rows_by_ids(track_ids: list[int]) -> list[dict]:
+    track_ids = _clean_track_ids(track_ids)
+    if not track_ids:
+        return []
+    placeholders = ",".join("?" for _ in track_ids)
+    with db() as conn:
+        rows = conn.execute(f"""
+            SELECT t.id, t.title, t.artist, t.album, t.album_artist, t.genre,
+                   t.year, t.original_year, t.track_no, t.duration, t.bitrate,
+                   t.size, t.mtime, t.cover_hash, t.bpm, t.path
+            FROM tracks t
+            WHERE t.id IN ({placeholders})
+            ORDER BY t.id
+        """, track_ids).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_songster_track_refs(track_ids) -> list[dict]:
+    rows = _songster_annotate_year_quality(_songster_track_rows_by_ids(_clean_track_ids(track_ids)))
+    return [
+        {
+            "id": row["id"],
+            "title": row["title"],
+            "artist": row["artist"],
+            "album": row["album"],
+            "year": row["effective_year"],
+            "year_confidence": row["year_confidence"],
+        }
+        for row in rows
+    ]
+
+
+def _songster_track_rows_by_album_refs(album_refs) -> list[dict]:
+    refs = _clean_album_refs(album_refs)
+    if not refs:
+        return []
+    parts = []
+    params = []
+    for ref in refs:
+        parts.append("(LOWER(COALESCE(t.album, ''))=LOWER(?) AND ALBUM_DIR(t.path)=?)")
+        params.extend([ref["album"], ref["dir"]])
+    with db() as conn:
+        rows = conn.execute(f"""
+            SELECT t.id, t.title, t.artist, t.album, t.album_artist, t.genre,
+                   t.year, t.original_year, t.track_no, t.duration, t.bitrate,
+                   t.size, t.mtime, t.cover_hash, t.bpm, t.path
+            FROM tracks t
+            WHERE {" OR ".join(parts)}
+            ORDER BY t.id
+        """, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_songster_album_refs(album_refs) -> list[dict]:
+    refs = _clean_album_refs(album_refs)
+    if not refs:
+        return []
+    parts = []
+    params = []
+    for ref in refs:
+        parts.append("(LOWER(COALESCE(t.album, ''))=LOWER(?) AND ALBUM_DIR(t.path)=?)")
+        params.extend([ref["album"], ref["dir"]])
+    with db() as conn:
+        rows = conn.execute(f"""
+            SELECT t.album AS album,
+                   ALBUM_DIR(t.path) AS dir,
+                   COUNT(*) AS track_count,
+                   MIN(COALESCE(t.original_year, t.year)) AS year,
+                   MAX(NULLIF(TRIM(t.album_artist), '')) AS tagged_artist,
+                   COUNT(DISTINCT LOWER(COALESCE(t.artist, ''))) AS distinct_artists,
+                   MIN(t.artist) AS fallback_artist
+            FROM tracks t
+            WHERE {" OR ".join(parts)}
+            GROUP BY LOWER(COALESCE(t.album, '')), ALBUM_DIR(t.path)
+            ORDER BY t.album COLLATE NOCASE
+        """, params).fetchall()
+    albums = []
+    for row in rows:
+        d = dict(row)
+        tagged = d.pop("tagged_artist", None)
+        distinct = d.pop("distinct_artists", 1)
+        fallback = d.pop("fallback_artist", None)
+        if tagged:
+            various = tagged.strip().casefold() in _VARIOUS_ARTISTS_TAGS
+            d["artist"] = None if various else tagged
+        else:
+            various = distinct > 1
+            d["artist"] = None if various else fallback
+        d["various"] = various
+        albums.append(d)
+    return albums
+
+
+def _songster_matching_track_rows(
+    filter_def: dict,
+    include_track_ids=None,
+    exclude_track_ids=None,
+    include_album_refs=None,
+    exclude_album_refs=None,
+) -> list[dict]:
+    where_sql, params = _songster_filter_sql(filter_def or {})
+    current_year = _songster_current_year()
+    conditions = [
+        "COALESCE(t.original_year, t.year) >= ?",
+        "COALESCE(t.original_year, t.year) <= ?",
+    ]
+    all_params = [SONGSTER_MIN_YEAR, current_year]
+    if where_sql:
+        conditions.insert(0, f"({where_sql})")
+        all_params = params + all_params
+    where = "WHERE " + " AND ".join(conditions)
+    with db() as conn:
+        rows = conn.execute(f"""
+            SELECT t.id, t.title, t.artist, t.album, t.album_artist, t.genre,
+                   t.year, t.original_year, t.track_no, t.duration, t.bitrate,
+                   t.size, t.mtime, t.cover_hash, t.bpm, t.path
+            FROM tracks t
+            {where}
+            ORDER BY t.id
+        """, all_params).fetchall()
+    by_id = {int(row["id"]): dict(row) for row in rows}
+    for row in _songster_track_rows_by_album_refs(include_album_refs):
+        by_id[int(row["id"])] = row
+    for row in _songster_track_rows_by_ids(_clean_track_ids(include_track_ids)):
+        by_id[int(row["id"])] = row
+    for row in _songster_track_rows_by_album_refs(exclude_album_refs):
+        by_id.pop(int(row["id"]), None)
+    for track_id in _clean_track_ids(exclude_track_ids):
+        by_id.pop(track_id, None)
+    return [by_id[track_id] for track_id in sorted(by_id)]
+
+
+def _songster_track_api_dict(track: dict) -> dict:
+    import os
+
+    def fmt_duration(seconds):
+        if not seconds:
+            return "0:00"
+        minutes, sec = divmod(int(seconds), 60)
+        return f"{minutes}:{sec:02d}"
+
+    d = {
+        "id": track["id"],
+        "title": track["title"],
+        "artist": track["artist"],
+        "album": track["album"],
+        "genre": track["genre"],
+        "year": track["effective_year"],
+        "duration": track["duration"],
+        "duration_fmt": fmt_duration(track.get("duration")),
+        "format": os.path.splitext(track.get("path") or "")[1].lstrip(".").upper() or "MP3",
+        "has_cover": bool(track.get("cover_hash")),
+        "cover_hash": track.get("cover_hash"),
+        "bpm": track.get("bpm"),
+        "year_confidence": track["year_confidence"],
+    }
+    if track.get("mtime") is not None:
+        d["stream_version"] = f"{int(float(track.get('mtime')) * 1_000_000)}-{int(track.get('size') or 0)}"
+    return d
+
+
+def get_songster_playlist_preview(
+    filter_def: dict,
+    limit: int = 50,
+    include_track_ids=None,
+    exclude_track_ids=None,
+    include_album_refs=None,
+    exclude_album_refs=None,
+) -> dict:
+    limit = max(1, min(int(limit or 50), 200))
+    include_ids = _clean_track_ids(include_track_ids)
+    exclude_ids = _clean_track_ids(exclude_track_ids)
+    include_albums = _clean_album_refs(include_album_refs)
+    exclude_albums = _clean_album_refs(exclude_album_refs)
+    annotated = _songster_annotate_year_quality(
+        _songster_matching_track_rows(
+            filter_def or {},
+            include_ids,
+            exclude_ids,
+            include_albums,
+            exclude_albums,
+        )
+    )
+    playable = [
+        track for track in annotated
+        if track["year_confidence"] in {"confirmed", "inferred"} and track["effective_year"] is not None
+    ]
+    counts = {"confirmed": 0, "inferred": 0, "suspect": 0, "missing": 0}
+    for track in annotated:
+        counts[track["year_confidence"]] = counts.get(track["year_confidence"], 0) + 1
+    years: dict[int, int] = {}
+    decades: dict[int, int] = {}
+    for track in playable:
+        year = int(track["effective_year"])
+        years[year] = years.get(year, 0) + 1
+        decade = (year // 10) * 10
+        decades[decade] = decades.get(decade, 0) + 1
+    return {
+        "total": len(annotated),
+        "playable_total": len(playable),
+        "excluded_total": len(annotated) - len(playable),
+        "manual_include_count": len(include_ids),
+        "manual_exclude_count": len(exclude_ids),
+        "manual_album_include_count": len(include_albums),
+        "manual_album_exclude_count": len(exclude_albums),
+        "year_confidence": counts,
+        "year_min": min(years) if years else None,
+        "year_max": max(years) if years else None,
+        "years": [{"year": year, "count": years[year]} for year in sorted(years)],
+        "decades": [{"decade": decade, "count": decades[decade]} for decade in sorted(decades)],
+        "suspect_tracks": [
+            {
+                "id": track["id"],
+                "title": track["title"],
+                "artist": track["artist"],
+                "album": track["album"],
+                "year": track["year"],
+                "original_year": track["original_year"],
+                "reason": track["year_reason"],
+            }
+            for track in annotated if track["year_confidence"] == "suspect"
+        ][:limit],
+        "missing_tracks": [
+            {
+                "id": track["id"],
+                "title": track["title"],
+                "artist": track["artist"],
+                "album": track["album"],
+            }
+            for track in annotated if track["year_confidence"] == "missing"
+        ][:limit],
+        "sample_tracks": [
+            _songster_track_api_dict(track)
+            for track in playable[:limit]
+        ],
+    }
+
+
+def get_songster_playlist_test_tracks(
+    filter_def: dict,
+    limit: int = 50,
+    include_track_ids=None,
+    exclude_track_ids=None,
+    include_album_refs=None,
+    exclude_album_refs=None,
+) -> dict:
+    limit = max(1, min(int(limit or 50), 200))
+    annotated = _songster_annotate_year_quality(
+        _songster_matching_track_rows(
+            filter_def or {},
+            include_track_ids,
+            exclude_track_ids,
+            include_album_refs,
+            exclude_album_refs,
+        )
+    )
+    playable = [
+        track for track in annotated
+        if track["year_confidence"] in {"confirmed", "inferred"} and track["effective_year"] is not None
+    ]
+    return {
+        "results": [_songster_track_api_dict(track) for track in playable[:limit]],
+        "total": len(playable),
+        "excluded_total": len(annotated) - len(playable),
+    }
+
+
 def list_songster_playlist_tracks(station_id: int, limit: int = 200, offset: int = 0) -> dict | None:
     """Return the full, deterministically-ordered track set for a
     songster_enabled radio station, for the /api/songster/* game-client API.
@@ -1907,25 +2568,26 @@ def list_songster_playlist_tracks(station_id: int, limit: int = 200, offset: int
         return None
     limit = max(1, min(int(limit), 500))
     offset = max(0, int(offset))
-    where_sql, params = _radio_filter_sql(station.get("filter") or {})
-    where = f"WHERE {where_sql}" if where_sql else ""
-    with db() as conn:
-        total = conn.execute(
-            f"SELECT COUNT(*) AS n FROM tracks t {where}", params
-        ).fetchone()["n"]
-        rows = conn.execute(f"""
-            SELECT t.id, t.title, t.artist, t.album, t.genre,
-                   COALESCE(t.original_year, t.year) AS year, t.duration
-            FROM tracks t
-            {where}
-            ORDER BY t.id
-            LIMIT ? OFFSET ?
-        """, params + [limit, offset]).fetchall()
+    static_ids = get_songster_playlist_static_track_ids(station_id)
+    static_albums = get_songster_playlist_static_album_refs(station_id)
+    annotated = _songster_annotate_year_quality(_songster_matching_track_rows(
+        station.get("filter") or {},
+        static_ids["include"],
+        static_ids["exclude"],
+        static_albums["include"],
+        static_albums["exclude"],
+    ))
+    playable = [
+        track for track in annotated
+        if track["year_confidence"] in {"confirmed", "inferred"} and track["effective_year"] is not None
+    ]
+    total = len(playable)
+    rows = playable[offset:offset + limit]
     return {
         "total": total,
         "limit": limit,
         "offset": offset,
-        "tracks": [dict(r) for r in rows],
+        "tracks": [_songster_track_api_dict(r) for r in rows],
     }
 
 

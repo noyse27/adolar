@@ -676,9 +676,63 @@
         <div id="songster-smart-rule-interpretation" class="smart-rule-interpretation"></div>
       </div>
 
+      <div class="radio-builder-group songster-curator">
+        <div class="radio-builder-head">
+          <div class="radio-builder-title">Manuelle Kuratierung</div>
+          <input id="songster-track-search" class="radio-input" type="search" placeholder="Track suchen">
+        </div>
+        <div id="songster-track-search-results" class="songster-track-results"></div>
+        <div class="radio-builder-head songster-album-search-head">
+          <div class="radio-builder-title">Alben und Compilations</div>
+          <input id="songster-album-search" class="radio-input" type="search" placeholder="Album suchen">
+        </div>
+        <div id="songster-album-search-results" class="songster-track-results"></div>
+        <div class="songster-static-grid">
+          <div>
+            <div class="radio-builder-title">Tracks einbeziehen</div>
+            <div id="songster-include-tracks" class="songster-static-list"></div>
+          </div>
+          <div>
+            <div class="radio-builder-title">Tracks ausschließen</div>
+            <div id="songster-exclude-tracks" class="songster-static-list"></div>
+          </div>
+          <div>
+            <div class="radio-builder-title">Alben einbeziehen</div>
+            <div id="songster-include-albums" class="songster-static-list"></div>
+          </div>
+          <div>
+            <div class="radio-builder-title">Alben ausschließen</div>
+            <div id="songster-exclude-albums" class="songster-static-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="radio-builder-group songster-queue">
+        <div class="radio-builder-head">
+          <div>
+            <div class="radio-builder-title">Vorauswahl-Stapel</div>
+            <div id="songster-queue-summary" class="radio-station-desc">Noch nicht geladen.</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="radio-secondary-btn" type="button" onclick="loadSongsterQueue()">
+              <i class="ti ti-stack"></i><span>Laden</span>
+            </button>
+            <button class="radio-primary-btn" type="button" onclick="syncSongsterQueue()">
+              <i class="ti ti-refresh"></i><span>Sync</span>
+            </button>
+          </div>
+        </div>
+        <div id="songster-queue-list" class="songster-static-list"></div>
+      </div>
+
+      <div id="songster-quality-preview" class="smart-rule-panel" style="display:none;margin-top:14px"></div>
+
       <div id="songster-error" class="radio-error"></div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap">
         <button class="radio-secondary-btn" onclick="closeSongsterEditor()">Abbrechen</button>
+        <button class="radio-secondary-btn" onclick="previewSongsterPlaylistQuality()">
+          <i class="ti ti-chart-bar"></i><span>Jahre prüfen</span>
+        </button>
         <button class="radio-secondary-btn" onclick="testSongsterPlaylistFilter()">
           <i class="ti ti-list-search"></i><span>Testen</span>
         </button>
