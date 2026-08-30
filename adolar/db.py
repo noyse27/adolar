@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sqlite3
+import time as _time
 from contextlib import contextmanager
 
 from . import adolar4u, errors, library_context, smart_shuffle
@@ -3068,6 +3069,31 @@ def add_track_to_playlist(playlist_id: int, track_id: int):
             "INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id) VALUES (?,?)",
             (playlist_id, track_id)
         )
+
+
+def add_album_to_playlist(playlist_id: int, album: str, dir_: str) -> dict:
+    with db() as conn:
+        rows = conn.execute(
+            """SELECT id FROM tracks
+               WHERE LOWER(COALESCE(album, '')) = LOWER(?)
+                 AND ALBUM_DIR(path) = ?
+               ORDER BY COALESCE(track_no, 999999), title COLLATE NOCASE, id""",
+            (album or "", dir_ or ""),
+        ).fetchall()
+        track_ids = [int(row["id"]) for row in rows]
+        if not track_ids:
+            return {"track_count": 0, "added_count": 0}
+
+        base_added_at = _time.time()
+        added_count = 0
+        for index, track_id in enumerate(track_ids):
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, added_at)
+                   VALUES (?,?,?)""",
+                (int(playlist_id), track_id, base_added_at + (index / 1000.0)),
+            )
+            added_count += cur.rowcount
+    return {"track_count": len(track_ids), "added_count": added_count}
 
 
 def get_playlist_tracks(playlist_id: int, user_id: int) -> list[dict] | None:

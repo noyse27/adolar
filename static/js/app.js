@@ -122,6 +122,10 @@ const LANG = {
     lfm_pc_sync:        "Plays laden",
     lfm_pc_syncing:     (done, total) => `Plays: ${done}/${total}…`,
     bm_add:             "Zu Playlist hinzufügen",
+    bm_album_add:       "Album zu Playlist hinzufügen",
+    bm_album_added:     (n, name) => `${n.toLocaleString("de")} Titel zu „${name}" hinzugefügt.`,
+    bm_album_none_added:(name) => `Alle Titel sind schon in „${name}".`,
+    bm_album_error:     "Album konnte nicht hinzugefügt werden.",
     bm_new_playlist:    "Neue Playlist erstellen",
     bm_new_prompt:      "Name der neuen Playlist:",
     pl_delete_confirm:  (name) => `Playlist „${name}" löschen?`,
@@ -239,6 +243,10 @@ const LANG = {
     lfm_pc_sync:         "Load plays",
     lfm_pc_syncing:      (done, total) => `Plays: ${done}/${total}…`,
     bm_add:              "Add to playlist",
+    bm_album_add:        "Add album to playlist",
+    bm_album_added:      (n, name) => `${n.toLocaleString("en")} tracks added to "${name}".`,
+    bm_album_none_added: (name) => `All tracks are already in "${name}".`,
+    bm_album_error:      "Could not add album.",
     bm_new_playlist:     "New playlist",
     bm_new_prompt:       "New playlist name:",
     pl_delete_confirm:   (name) => `Delete playlist "${name}"?`,
@@ -285,6 +293,7 @@ function applyLang() {
   $("title-search").placeholder = L.title_search_ph;
   $("album-search").placeholder = L.album_search_ph;
   $("album-back-btn-label").textContent = L.back_to_albums;
+  $("album-playlist-btn-label").textContent = L.bm_album_add;
   const mobileFilterBtn = $("btn-mobile-filter");
   if (mobileFilterBtn) mobileFilterBtn.title = L.mobile_filters;
   const mobileFilterTitle = $("mobile-filter-title");
@@ -903,7 +912,14 @@ let _loadAlbumsRequest = 0;
 function updateAlbumBackBar() {
   const bar = $("album-back-bar");
   if (!bar) return;
-  bar.classList.toggle("visible", Boolean(state.albumView.drilled));
+  const drilled = Boolean(state.albumView.drilled);
+  bar.classList.toggle("visible", drilled);
+  const playlistBtn = $("btn-album-playlist");
+  if (playlistBtn) {
+    playlistBtn.style.display = drilled && _me?.allow_playlists ? "inline-flex" : "none";
+    playlistBtn.title = t().bm_album_add;
+    playlistBtn.setAttribute("aria-label", t().bm_album_add);
+  }
 }
 
 function openAlbumTracks(album) {
@@ -979,6 +995,7 @@ async function loadAlbumGrid(page = 1) {
 function renderAlbumGrid() {
   const list = $("track-list");
   list.classList.add("album-grid-mode");
+  list.classList.remove("album-track-mode");
   list.innerHTML = "";
 
   const albums = state.albumView.albums;
@@ -990,7 +1007,6 @@ function renderAlbumGrid() {
   albums.forEach(album => {
     const card = document.createElement("div");
     card.className = "album-card";
-    card.title = t().album_open_hint;
 
     // Various-artists compilations have no single artist to color/initial the
     // placeholder by — fall back to the album title so cards still look distinct.
@@ -1021,6 +1037,8 @@ function renderAlbumGrid() {
     info.className = "album-card-info";
     const artistLabel = album.various ? t().various_artists : album.artist;
     const sub = [artistLabel, t().album_tracks_short(album.track_count)].filter(Boolean).join(" · ");
+    const fullTitle = [album.album || "—", sub, t().album_open_hint].filter(Boolean).join("\n");
+    card.title = fullTitle;
     info.innerHTML = `<div class="album-card-title">${esc(album.album || "—")}</div>
                        <div class="album-card-sub">${esc(sub)}</div>`;
     card.appendChild(info);
@@ -1034,6 +1052,7 @@ function renderAlbumGrid() {
 function renderTracks(overrideTracks) {
   const list = $("track-list");
   list.classList.remove("album-grid-mode");
+  list.classList.toggle("album-track-mode", Boolean(state.albumView.drilled));
   list.innerHTML = "";
 
   const tracks = overrideTracks || state.tracks;
@@ -2389,6 +2408,12 @@ function startCrossfade() {
 // ── Player events ─────────────────────────────────────────
 playBtn.onclick = () => audio.paused ? audio.play() : audio.pause();
 $("btn-play-view-open").onclick = () => openPlayView(false);
+$("btn-album-playlist").onclick = e => {
+  e.stopPropagation();
+  if (state.albumView.drilled) {
+    _openAlbumPlaylistDropdown($("btn-album-playlist"), state.albumView.drilled);
+  }
+};
 $("player-cover-wrap").onclick = () => openPlayView(false);
 $("play-view-close").onclick = closePlayView;
 $("play-view-play").onclick = () => playBtn.click();
@@ -5133,6 +5158,84 @@ function _applyBookmarkState(btn, trackId) {
 let _bmDropdownOpen = null;
 function _closeBookmarkDropdown() {
   if (_bmDropdownOpen) { _bmDropdownOpen.remove(); _bmDropdownOpen = null; }
+}
+
+async function addAlbumToPlaylist(albumRef, playlist) {
+  const response = await fetch(`/api/playlists/${playlist.id}/album`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      album: albumRef?.album || "",
+      dir: albumRef?.dir || "",
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || t().bm_album_error);
+  if (data.added_count > 0) {
+    alert(t().bm_album_added(data.added_count, playlist.name));
+  } else {
+    alert(t().bm_album_none_added(playlist.name));
+  }
+  if (state.albumView.drilled) fetchMemberships(state.tracks);
+}
+
+async function _openAlbumPlaylistDropdown(btn, albumRef) {
+  if (_bmDropdownOpen) { _closeBookmarkDropdown(); return; }
+  if (!_playlists.length) await loadPlaylists();
+  const userPlaylists = _playlists.filter(p => !p.is_system && p.type === "static");
+
+  const dd = document.createElement("div");
+  dd.className = "bm-dropdown";
+  _bmDropdownOpen = dd;
+
+  const newItem = document.createElement("div");
+  newItem.className = "bm-dropdown-item";
+  newItem.innerHTML = `<i class="ti ti-plus"></i><span>${t().bm_new_playlist}</span>`;
+  newItem.addEventListener("click", async e => {
+    e.stopPropagation();
+    _closeBookmarkDropdown();
+    const name = prompt(t().bm_new_prompt);
+    if (!name?.trim()) return;
+    const response = await fetch("/api/playlists", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({name: name.trim(), type: "static"}),
+    });
+    if (!response.ok) return;
+    const playlist = await response.json();
+    await loadPlaylists();
+    try {
+      await addAlbumToPlaylist(albumRef, playlist);
+    } catch (error) {
+      alert(error.message || t().bm_album_error);
+    }
+  });
+  dd.appendChild(newItem);
+
+  if (userPlaylists.length) {
+    const sep = document.createElement("div");
+    sep.className = "bm-dropdown-sep";
+    dd.appendChild(sep);
+
+    userPlaylists.forEach(playlist => {
+      const item = document.createElement("div");
+      item.className = "bm-dropdown-item";
+      item.innerHTML = `<i class="ti ti-playlist"></i><span>${esc(playlist.name)}</span>`;
+      item.addEventListener("click", async e => {
+        e.stopPropagation();
+        _closeBookmarkDropdown();
+        try {
+          await addAlbumToPlaylist(albumRef, playlist);
+        } catch (error) {
+          alert(error.message || t().bm_album_error);
+        }
+      });
+      dd.appendChild(item);
+    });
+  }
+
+  btn.appendChild(dd);
+  setTimeout(() => document.addEventListener("click", _closeBookmarkDropdown, { once: true }), 0);
 }
 
 async function _openBookmarkDropdown(btn, trackId) {
