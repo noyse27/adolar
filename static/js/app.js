@@ -3080,8 +3080,8 @@ async function testRadioStationFilter() {
     jingle_every_tracks: Number($("radio-jingle-every").value || 5),
     has_jingle: _editingRadioStation?.has_jingle || false,
   };
-  const payload = { filter, count: 50 };
-  const r = await fetch(`${API}/api/radio-stations/test`, {
+  const payload = { filter, limit: 50, ..._songsterStaticPayload() };
+  const r = await fetch(`${API}/api/admin/songster/playlists/test`, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(payload),
@@ -3158,6 +3158,13 @@ let _songsterDraftAfterTest = null;
 let _songsterRuleMode = "normal";
 let _songsterSmartFilter = null;
 let _songsterSmartInterpretation = "";
+let _songsterIncludeTracks = [];
+let _songsterExcludeTracks = [];
+let _songsterIncludeAlbums = [];
+let _songsterExcludeAlbums = [];
+let _songsterTrackSearchTimer = null;
+let _songsterAlbumSearchTimer = null;
+let _songsterQueueTracks = [];
 
 function setSongsterRuleMode(mode) {
   _songsterRuleMode = mode === "smart" ? "smart" : "normal";
@@ -3195,6 +3202,16 @@ async function loadSongsterPlaylists() {
   renderSongsterPlaylists();
 }
 
+async function loadSongsterPlaylistsForBookmark() {
+  if (!_me || _me.role !== "admin" || !_songsterStatus?.enabled) return [];
+  try {
+    const r = await fetch(`${API}/api/admin/songster/playlists`);
+    return r.ok ? await r.json() : [];
+  } catch {
+    return [];
+  }
+}
+
 function openSongsterPanel() {
   $("songster-modal").classList.add("open");
   loadSongsterPlaylists();
@@ -3202,6 +3219,294 @@ function openSongsterPanel() {
 
 function closeSongsterPanel() {
   $("songster-modal")?.classList.remove("open");
+}
+
+function _songsterStaticPayload() {
+  return {
+    include_track_ids: _songsterIncludeTracks.map(track => track.id),
+    exclude_track_ids: _songsterExcludeTracks.map(track => track.id),
+    include_album_refs: _songsterIncludeAlbums.map(album => ({album: album.album, dir: album.dir})),
+    exclude_album_refs: _songsterExcludeAlbums.map(album => ({album: album.album, dir: album.dir})),
+  };
+}
+
+function _songsterTrackLabel(track) {
+  const year = track.year ? ` · ${track.year}` : "";
+  const album = track.album ? ` · ${track.album}` : "";
+  return `${track.artist || ""}${album}${year}`;
+}
+
+function _songsterAlbumKey(album) {
+  return `${(album.album || "").toLowerCase()}\u001f${album.dir || ""}`;
+}
+
+function _songsterAlbumLabel(album) {
+  const artist = album.various ? "Various Artists" : (album.artist || "");
+  const year = album.year ? ` · ${album.year}` : "";
+  const count = album.track_count ? ` · ${album.track_count} Tracks` : "";
+  return `${artist}${year}${count}`;
+}
+
+async function loadSongsterTrackRefs(includeIds = [], excludeIds = []) {
+  const ids = [...new Set([...includeIds, ...excludeIds].map(Number).filter(Boolean))];
+  _songsterIncludeTracks = [];
+  _songsterExcludeTracks = [];
+  if (ids.length) {
+    const r = await fetch(`${API}/api/admin/songster/tracks?ids=${ids.join(",")}`);
+    const tracks = r.ok ? await r.json() : [];
+    const byId = new Map(tracks.map(track => [Number(track.id), track]));
+    _songsterIncludeTracks = includeIds.map(Number).map(id => byId.get(id)).filter(Boolean);
+    _songsterExcludeTracks = excludeIds.map(Number).map(id => byId.get(id)).filter(Boolean);
+  }
+  renderSongsterStaticTracks();
+}
+
+async function loadSongsterAlbumRefs(includeRefs = [], excludeRefs = []) {
+  const refs = [...includeRefs, ...excludeRefs];
+  _songsterIncludeAlbums = [];
+  _songsterExcludeAlbums = [];
+  if (refs.length) {
+    const r = await fetch(`${API}/api/admin/songster/albums`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({album_refs: refs}),
+    });
+    const albums = r.ok ? await r.json() : [];
+    const byKey = new Map(albums.map(album => [_songsterAlbumKey(album), album]));
+    _songsterIncludeAlbums = includeRefs.map(ref => byKey.get(_songsterAlbumKey(ref))).filter(Boolean);
+    _songsterExcludeAlbums = excludeRefs.map(ref => byKey.get(_songsterAlbumKey(ref))).filter(Boolean);
+  }
+  renderSongsterStaticAlbums();
+}
+
+function renderSongsterStaticTracks() {
+  const renderList = (el, tracks, mode) => {
+    el.innerHTML = "";
+    if (!tracks.length) {
+      el.innerHTML = `<div class="radio-station-desc">Keine manuellen Tracks.</div>`;
+      return;
+    }
+    tracks.forEach(track => {
+      const row = document.createElement("div");
+      row.className = "songster-static-track";
+      row.innerHTML = `
+        <div>
+          <b>${esc(track.title || "Ohne Titel")}</b>
+          <span>${esc(_songsterTrackLabel(track))}</span>
+        </div>
+        <button class="icon-btn danger" title="Entfernen"><i class="ti ti-minus"></i></button>`;
+      row.querySelector("button").onclick = () => {
+        if (mode === "include") _songsterIncludeTracks = _songsterIncludeTracks.filter(t => t.id !== track.id);
+        else _songsterExcludeTracks = _songsterExcludeTracks.filter(t => t.id !== track.id);
+        renderSongsterStaticTracks();
+      };
+      el.appendChild(row);
+    });
+  };
+  renderList($("songster-include-tracks"), _songsterIncludeTracks, "include");
+  renderList($("songster-exclude-tracks"), _songsterExcludeTracks, "exclude");
+}
+
+function renderSongsterStaticAlbums() {
+  const renderList = (el, albums, mode) => {
+    el.innerHTML = "";
+    if (!albums.length) {
+      el.innerHTML = `<div class="radio-station-desc">Keine manuellen Alben.</div>`;
+      return;
+    }
+    albums.forEach(album => {
+      const row = document.createElement("div");
+      row.className = "songster-static-track";
+      row.innerHTML = `
+        <div>
+          <b>${esc(album.album || "Ohne Album")}</b>
+          <span>${esc(_songsterAlbumLabel(album))}</span>
+        </div>
+        <button class="icon-btn danger" title="Entfernen"><i class="ti ti-minus"></i></button>`;
+      row.querySelector("button").onclick = () => {
+        const key = _songsterAlbumKey(album);
+        if (mode === "include") _songsterIncludeAlbums = _songsterIncludeAlbums.filter(a => _songsterAlbumKey(a) !== key);
+        else _songsterExcludeAlbums = _songsterExcludeAlbums.filter(a => _songsterAlbumKey(a) !== key);
+        renderSongsterStaticAlbums();
+      };
+      el.appendChild(row);
+    });
+  };
+  renderList($("songster-include-albums"), _songsterIncludeAlbums, "include");
+  renderList($("songster-exclude-albums"), _songsterExcludeAlbums, "exclude");
+}
+
+function renderSongsterQueue(summary = null) {
+  const list = $("songster-queue-list");
+  const summaryNode = $("songster-queue-summary");
+  if (!list || !summaryNode) return;
+  list.innerHTML = "";
+  if (summary) {
+    summaryNode.textContent = summary;
+  } else {
+    summaryNode.textContent = `${_songsterQueueTracks.length} Tracks im Stapel`;
+  }
+  if (!_songsterQueueTracks.length) {
+    list.innerHTML = `<div class="radio-station-desc">Der Stapel ist leer.</div>`;
+    return;
+  }
+  _songsterQueueTracks.slice(0, 12).forEach(track => {
+    const row = document.createElement("div");
+    row.className = "songster-static-track";
+    row.innerHTML = `
+      <div>
+        <b>${esc(track.title || "Ohne Titel")}</b>
+        <span>${esc(_songsterTrackLabel(track))}</span>
+      </div>
+      <span class="songster-queue-badge">${esc(track.year_confidence || "")}</span>`;
+    list.appendChild(row);
+  });
+}
+
+async function loadSongsterQueue() {
+  if (!_editingSongsterPlaylist) {
+    renderSongsterQueue("Neue Playlists haben noch keinen Stapel.");
+    return;
+  }
+  const r = await fetch(`${API}/api/admin/songster/playlists/${_editingSongsterPlaylist.id}/queue`);
+  if (!r.ok) {
+    renderSongsterQueue("Stapel konnte nicht geladen werden.");
+    return;
+  }
+  const data = await r.json();
+  _songsterQueueTracks = data.tracks || [];
+  renderSongsterQueue();
+}
+
+async function syncSongsterQueue() {
+  if (!_editingSongsterPlaylist) {
+    renderSongsterQueue("Bitte Playlist zuerst speichern, dann Stapel synchronisieren.");
+    return;
+  }
+  const r = await fetch(`${API}/api/admin/songster/playlists/${_editingSongsterPlaylist.id}/queue/sync`, {
+    method: "POST",
+  });
+  if (!r.ok) {
+    renderSongsterQueue("Sync fehlgeschlagen.");
+    return;
+  }
+  const data = await r.json();
+  _songsterQueueTracks = [];
+  const accepted = data.accepted?.length || 0;
+  const discarded = data.discarded?.length || 0;
+  renderSongsterQueue(`Sync: ${accepted} übernommen, ${discarded} verworfen.`);
+  await loadSongsterPlaylists();
+  const updated = _songsterPlaylists.find(pl => pl.id === _editingSongsterPlaylist.id);
+  if (updated) {
+    _editingSongsterPlaylist = updated;
+    await loadSongsterTrackRefs(updated.include_track_ids || [], updated.exclude_track_ids || []);
+  }
+}
+
+function addSongsterStaticTrack(track, mode) {
+  const id = Number(track.id);
+  if (!id) return;
+  if (mode === "include") {
+    _songsterExcludeTracks = _songsterExcludeTracks.filter(t => Number(t.id) !== id);
+    if (!_songsterIncludeTracks.some(t => Number(t.id) === id)) _songsterIncludeTracks.push(track);
+  } else {
+    _songsterIncludeTracks = _songsterIncludeTracks.filter(t => Number(t.id) !== id);
+    if (!_songsterExcludeTracks.some(t => Number(t.id) === id)) _songsterExcludeTracks.push(track);
+  }
+  renderSongsterStaticTracks();
+}
+
+function addSongsterStaticAlbum(album, mode) {
+  const key = _songsterAlbumKey(album);
+  if (!album.album || !key) return;
+  if (mode === "include") {
+    _songsterExcludeAlbums = _songsterExcludeAlbums.filter(a => _songsterAlbumKey(a) !== key);
+    if (!_songsterIncludeAlbums.some(a => _songsterAlbumKey(a) === key)) _songsterIncludeAlbums.push(album);
+  } else {
+    _songsterIncludeAlbums = _songsterIncludeAlbums.filter(a => _songsterAlbumKey(a) !== key);
+    if (!_songsterExcludeAlbums.some(a => _songsterAlbumKey(a) === key)) _songsterExcludeAlbums.push(album);
+  }
+  renderSongsterStaticAlbums();
+}
+
+function renderSongsterTrackSearchResults(tracks) {
+  const box = $("songster-track-search-results");
+  box.innerHTML = "";
+  if (!tracks.length) return;
+  tracks.slice(0, 8).forEach(track => {
+    const row = document.createElement("div");
+    row.className = "songster-search-row";
+    row.innerHTML = `
+      <div>
+        <b>${esc(track.title || "Ohne Titel")}</b>
+        <span>${esc(_songsterTrackLabel(track))}</span>
+      </div>
+      <button class="icon-btn" title="Einbeziehen"><i class="ti ti-plus"></i></button>
+      <button class="icon-btn danger" title="Ausschließen"><i class="ti ti-ban"></i></button>`;
+    const buttons = row.querySelectorAll("button");
+    buttons[0].onclick = () => addSongsterStaticTrack(track, "include");
+    buttons[1].onclick = () => addSongsterStaticTrack(track, "exclude");
+    box.appendChild(row);
+  });
+}
+
+function renderSongsterAlbumSearchResults(albums) {
+  const box = $("songster-album-search-results");
+  box.innerHTML = "";
+  if (!albums.length) return;
+  albums.slice(0, 8).forEach(album => {
+    const row = document.createElement("div");
+    row.className = "songster-search-row";
+    row.innerHTML = `
+      <div>
+        <b>${esc(album.album || "Ohne Album")}</b>
+        <span>${esc(_songsterAlbumLabel(album))}</span>
+      </div>
+      <button class="icon-btn" title="Album einbeziehen"><i class="ti ti-plus"></i></button>
+      <button class="icon-btn danger" title="Album ausschließen"><i class="ti ti-ban"></i></button>`;
+    const buttons = row.querySelectorAll("button");
+    buttons[0].onclick = () => addSongsterStaticAlbum(album, "include");
+    buttons[1].onclick = () => addSongsterStaticAlbum(album, "exclude");
+    box.appendChild(row);
+  });
+}
+
+function setupSongsterTrackSearch() {
+  const input = $("songster-track-search");
+  if (!input || input.dataset.bound) return;
+  input.dataset.bound = "1";
+  input.addEventListener("input", () => {
+    clearTimeout(_songsterTrackSearchTimer);
+    _songsterTrackSearchTimer = setTimeout(async () => {
+      const q = input.value.trim();
+      if (q.length < 2) {
+        $("songster-track-search-results").innerHTML = "";
+        return;
+      }
+      const r = await fetch(`${API}/api/search?q=${encodeURIComponent(q)}&per_page=8&count=0`);
+      const data = r.ok ? await r.json() : {results: []};
+      renderSongsterTrackSearchResults(data.results || []);
+    }, 220);
+  });
+}
+
+function setupSongsterAlbumSearch() {
+  const input = $("songster-album-search");
+  if (!input || input.dataset.bound) return;
+  input.dataset.bound = "1";
+  input.addEventListener("input", () => {
+    clearTimeout(_songsterAlbumSearchTimer);
+    _songsterAlbumSearchTimer = setTimeout(async () => {
+      const q = input.value.trim();
+      if (q.length < 2) {
+        $("songster-album-search-results").innerHTML = "";
+        return;
+      }
+      const r = await fetch(`${API}/api/albums?q=${encodeURIComponent(q)}&per_page=8&count=0`);
+      const data = r.ok ? await r.json() : {results: []};
+      renderSongsterAlbumSearchResults(data.results || []);
+    }, 220);
+  });
 }
 
 function renderSongsterPlaylists() {
@@ -3218,7 +3523,15 @@ function renderSongsterPlaylists() {
 function renderSongsterPlaylistRow(pl) {
   const row = document.createElement("div");
   row.className = "radio-station-row";
-  const desc = pl.description || (pl.songster_enabled ? "" : t().songster_disabled_badge);
+  const staticBits = [];
+  if (pl.include_track_count) staticBits.push(`+${pl.include_track_count}`);
+  if (pl.exclude_track_count) staticBits.push(`-${pl.exclude_track_count}`);
+  if (pl.include_album_count) staticBits.push(`+${pl.include_album_count} Alben`);
+  if (pl.exclude_album_count) staticBits.push(`-${pl.exclude_album_count} Alben`);
+  if (pl.queue_count) staticBits.push(`${pl.queue_count} im Stapel`);
+  const status = pl.songster_enabled ? "" : t().songster_disabled_badge;
+  const desc = [pl.description, staticBits.length ? `manuell ${staticBits.join("/")}` : "", status]
+    .filter(Boolean).join(" · ");
   row.innerHTML = `
     <div>
       <div class="radio-station-name">${esc(pl.name)}</div>
@@ -3260,6 +3573,18 @@ function openSongsterEditor(playlist = null) {
   $("songster-name").value = playlist?.name || "";
   $("songster-desc").value = playlist?.description || "";
   $("songster-error").style.display = "none";
+  $("songster-quality-preview").style.display = "none";
+  $("songster-quality-preview").innerHTML = "";
+  $("songster-track-search").value = "";
+  $("songster-track-search-results").innerHTML = "";
+  $("songster-album-search").value = "";
+  $("songster-album-search-results").innerHTML = "";
+  _songsterQueueTracks = [];
+  renderSongsterQueue(playlist ? `${playlist.queue_count || 0} Tracks im Stapel` : "Neue Playlists haben noch keinen Stapel.");
+  setupSongsterTrackSearch();
+  setupSongsterAlbumSearch();
+  loadSongsterTrackRefs(playlist?.include_track_ids || [], playlist?.exclude_track_ids || []);
+  loadSongsterAlbumRefs(playlist?.include_album_refs || [], playlist?.exclude_album_refs || []);
   const filter = playlist?.filter || { mode: "all", rules: [] };
   const smartMode = filter.editor_mode === "smart";
   _songsterSmartFilter = smartMode ? {mode: filter.mode, rules: filter.rules || []} : null;
@@ -3293,6 +3618,22 @@ function restoreSongsterEditorDraft(draft) {
   $("songster-name").value = draft.name || "";
   $("songster-desc").value = draft.description || "";
   $("songster-error").style.display = "none";
+  $("songster-quality-preview").style.display = "none";
+  $("songster-quality-preview").innerHTML = "";
+  $("songster-track-search").value = "";
+  $("songster-track-search-results").innerHTML = "";
+  $("songster-album-search").value = "";
+  $("songster-album-search-results").innerHTML = "";
+  _songsterQueueTracks = [];
+  renderSongsterQueue(_editingSongsterPlaylist ? `${_editingSongsterPlaylist.queue_count || 0} Tracks im Stapel` : "Neue Playlists haben noch keinen Stapel.");
+  setupSongsterTrackSearch();
+  setupSongsterAlbumSearch();
+  _songsterIncludeTracks = draft.includeTracks || [];
+  _songsterExcludeTracks = draft.excludeTracks || [];
+  _songsterIncludeAlbums = draft.includeAlbums || [];
+  _songsterExcludeAlbums = draft.excludeAlbums || [];
+  renderSongsterStaticTracks();
+  renderSongsterStaticAlbums();
   const smartMode = draft.filter?.editor_mode === "smart";
   _songsterSmartFilter = smartMode
     ? {mode: draft.filter.mode, rules: draft.filter.rules || []} : null;
@@ -3382,6 +3723,79 @@ function buildSongsterFilterFromEditor() {
   return { mode: "all", rules };
 }
 
+function renderSongsterQualityPreview(data) {
+  const box = $("songster-quality-preview");
+  const counts = data.year_confidence || {};
+  const range = data.year_min && data.year_max ? `${data.year_min} - ${data.year_max}` : "kein Jahrbereich";
+  const decadeMax = (data.decades || []).reduce((max, row) => Math.max(max, row.count || 0), 0) || 1;
+  const decadeBars = (data.decades || []).map(row => {
+    const width = Math.max(4, Math.round((row.count / decadeMax) * 100));
+    return `
+      <div class="songster-year-row">
+        <span>${row.decade}er</span>
+        <div class="songster-year-bar"><i style="width:${width}%"></i></div>
+        <b>${row.count}</b>
+      </div>`;
+  }).join("");
+  const suspectRows = (data.suspect_tracks || []).slice(0, 8).map(track => `
+    <div class="songster-quality-track">
+      <b>${esc(track.title || "Ohne Titel")}</b>
+      <span>${esc(track.artist || "")} · ${esc(track.album || "")} · Jahr ${esc(track.year || "")}</span>
+    </div>`).join("");
+  const missingRows = (data.missing_tracks || []).slice(0, 5).map(track => `
+    <div class="songster-quality-track">
+      <b>${esc(track.title || "Ohne Titel")}</b>
+      <span>${esc(track.artist || "")} · ${esc(track.album || "")}</span>
+    </div>`).join("");
+  box.innerHTML = `
+    <div class="songster-quality-head">
+      <div>
+        <div class="radio-builder-title">Jahresqualität</div>
+        <div class="radio-station-desc">${data.playable_total || 0} spielbare Tracks von ${data.total || 0} · ${range} · Tracks +${data.manual_include_count || 0}/-${data.manual_exclude_count || 0} · Alben +${data.manual_album_include_count || 0}/-${data.manual_album_exclude_count || 0}</div>
+      </div>
+      <div class="songster-quality-counts">
+        <span>Originaljahr ${counts.confirmed || 0}</span>
+        <span>plausibel ${counts.inferred || 0}</span>
+        <span>verdächtig ${counts.suspect || 0}</span>
+        <span>ohne Jahr ${counts.missing || 0}</span>
+      </div>
+    </div>
+    ${decadeBars ? `<div class="songster-year-chart">${decadeBars}</div>` : ""}
+    ${suspectRows ? `<div class="songster-quality-section"><div class="radio-builder-title">Ausgeschlossen: verdächtige Jahr-Ausreißer</div>${suspectRows}</div>` : ""}
+    ${missingRows ? `<div class="songster-quality-section"><div class="radio-builder-title">Ausgeschlossen: ohne verwendbares Jahr</div>${missingRows}</div>` : ""}
+  `;
+  box.style.display = "grid";
+}
+
+async function previewSongsterPlaylistQuality() {
+  const err = $("songster-error");
+  err.style.display = "none";
+  let filter;
+  try {
+    filter = buildSongsterFilterFromEditor();
+  } catch (error) {
+    err.textContent = error.message;
+    err.style.display = "block";
+    return;
+  }
+  const box = $("songster-quality-preview");
+  box.innerHTML = `<div class="radio-station-desc">Jahresqualität wird geprüft...</div>`;
+  box.style.display = "grid";
+  const r = await fetch(`${API}/api/admin/songster/playlists/preview`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({filter, limit: 50, ..._songsterStaticPayload()}),
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    err.textContent = d.error || "Jahresprüfung fehlgeschlagen";
+    err.style.display = "block";
+    box.style.display = "none";
+    return;
+  }
+  renderSongsterQualityPreview(await r.json());
+}
+
 async function saveSongsterPlaylist() {
   const err = $("songster-error");
   err.style.display = "none";
@@ -3399,7 +3813,12 @@ async function saveSongsterPlaylist() {
     err.style.display = "block";
     return;
   }
-  const payload = { name, description: $("songster-desc").value.trim(), filter };
+  const payload = {
+    name,
+    description: $("songster-desc").value.trim(),
+    filter,
+    ..._songsterStaticPayload(),
+  };
   const url = _editingSongsterPlaylist
     ? `${API}/api/admin/songster/playlists/${_editingSongsterPlaylist.id}`
     : `${API}/api/admin/songster/playlists`;
@@ -3434,6 +3853,10 @@ async function testSongsterPlaylistFilter() {
     name: $("songster-name").value.trim(),
     description: $("songster-desc").value.trim(),
     filter,
+    includeTracks: _songsterIncludeTracks,
+    excludeTracks: _songsterExcludeTracks,
+    includeAlbums: _songsterIncludeAlbums,
+    excludeAlbums: _songsterExcludeAlbums,
   };
   const payload = { filter, count: 50 };
   const r = await fetch(`${API}/api/radio-stations/test`, {
@@ -3456,7 +3879,7 @@ async function testSongsterPlaylistFilter() {
   renderTracks();
   renderPagination();
   $("result-count").textContent = `Test – ${state.tracks.length} Tracks`;
-  $("radio-test-label").textContent = `Testansicht: ${_songsterDraftAfterTest.name || t().songster_new} – ${state.tracks.length} Tracks`;
+  $("radio-test-label").textContent = `Songster-Test: ${_songsterDraftAfterTest.name || t().songster_new} – ${state.tracks.length} von ${data.total || state.tracks.length} Tracks`;
   $("radio-test-banner").querySelector("button").setAttribute("onclick", "returnToSongsterDraft()");
   $("radio-test-banner").classList.add("visible");
   closeSongsterPanel();
@@ -4712,9 +5135,10 @@ function _closeBookmarkDropdown() {
   if (_bmDropdownOpen) { _bmDropdownOpen.remove(); _bmDropdownOpen = null; }
 }
 
-function _openBookmarkDropdown(btn, trackId) {
+async function _openBookmarkDropdown(btn, trackId) {
   if (_bmDropdownOpen) { _closeBookmarkDropdown(); return; }
   const userPlaylists = _playlists.filter(p => !p.is_system && p.type === "static");
+  const songsterPlaylists = await loadSongsterPlaylistsForBookmark();
 
   const dd = document.createElement("div");
   dd.className = "bm-dropdown";
@@ -4770,6 +5194,38 @@ function _openBookmarkDropdown(btn, trackId) {
           document.querySelectorAll(`.btn-bookmark[data-track-id="${trackId}"], #play-view-bookmark[data-track-id="${trackId}"]`).forEach(b => _applyBookmarkState(b, trackId));
         });
       }
+      dd.appendChild(item);
+    });
+  }
+
+  if (songsterPlaylists.length) {
+    const sep = document.createElement("div");
+    sep.className = "bm-dropdown-sep";
+    dd.appendChild(sep);
+
+    const head = document.createElement("div");
+    head.className = "bm-dropdown-label";
+    head.textContent = "Songster vormerken";
+    dd.appendChild(head);
+
+    songsterPlaylists.forEach(pl => {
+      const item = document.createElement("div");
+      item.className = "bm-dropdown-item";
+      item.innerHTML = `<i class="ti ti-stack-push"></i><span>${esc(pl.name)}</span>`;
+      item.addEventListener("click", async e => {
+        e.stopPropagation();
+        _closeBookmarkDropdown();
+        const r = await fetch(`${API}/api/admin/songster/playlists/${pl.id}/queue`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ track_id: trackId }),
+        });
+        if (r.ok) {
+          const data = await r.json().catch(() => ({}));
+          const count = data.queue_count != null ? ` (${data.queue_count})` : "";
+          btn.title = `Für Songster vorgemerkt${count}`;
+        }
+      });
       dd.appendChild(item);
     });
   }

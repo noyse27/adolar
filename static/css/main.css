@@ -745,6 +745,150 @@
     .icon-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
     .icon-btn.danger:hover { color: #e03e3e; }
     .songster-toggle.active { color: var(--accent); border-color: var(--accent); }
+    .songster-quality-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .songster-quality-counts {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .songster-quality-counts span {
+      border: 0.5px solid var(--border-subtle);
+      border-radius: 8px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      padding: 5px 8px;
+    }
+    .songster-year-chart {
+      display: grid;
+      gap: 7px;
+      margin-top: 10px;
+    }
+    .songster-year-row {
+      display: grid;
+      grid-template-columns: 48px 1fr 36px;
+      gap: 8px;
+      align-items: center;
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+    .songster-year-bar {
+      height: 8px;
+      overflow: hidden;
+      border-radius: 8px;
+      background: var(--bg-secondary);
+    }
+    .songster-year-bar i {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--accent);
+    }
+    .songster-quality-section {
+      display: grid;
+      gap: 7px;
+      margin-top: 12px;
+    }
+    .songster-quality-track {
+      display: grid;
+      gap: 2px;
+      border-top: 0.5px solid var(--border-subtle);
+      padding-top: 7px;
+      font-size: 12px;
+    }
+    .songster-quality-track span {
+      color: var(--text-tertiary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .songster-curator {
+      margin-top: 14px;
+    }
+    .songster-curator .radio-builder-head {
+      align-items: center;
+    }
+    #songster-track-search,
+    #songster-album-search {
+      max-width: 260px;
+      margin-bottom: 0;
+    }
+    .songster-album-search-head {
+      margin-top: 12px;
+    }
+    .songster-track-results,
+    .songster-static-list {
+      display: grid;
+      gap: 7px;
+    }
+    .songster-track-results {
+      margin-top: 8px;
+    }
+    .songster-static-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .songster-search-row,
+    .songster-static-track {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 8px;
+      align-items: center;
+      border: 0.5px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 7px;
+      font-size: 12px;
+    }
+    .songster-static-track {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .songster-search-row b,
+    .songster-static-track b {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .songster-search-row span,
+    .songster-static-track span {
+      display: block;
+      color: var(--text-tertiary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .songster-queue-badge {
+      border: 0.5px solid var(--border-subtle);
+      border-radius: 8px;
+      color: var(--text-tertiary);
+      font-size: 11px;
+      padding: 4px 7px;
+    }
+    .bm-dropdown-label {
+      color: var(--text-tertiary);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 7px 10px 3px;
+      text-transform: uppercase;
+    }
+    @media (max-width: 760px) {
+      .songster-static-grid {
+        grid-template-columns: 1fr;
+      }
+      #songster-track-search,
+      #songster-album-search {
+        max-width: none;
+        width: 100%;
+      }
+    }
     .radio-primary-btn {
       display: inline-flex;
       align-items: center;

@@ -231,6 +231,167 @@ class SongsterPlaylistTrackListingTests(SongsterTestBase):
         self.assertEqual(len(page2["tracks"]), 1)
         self.assertEqual(page2["tracks"][0]["title"], "Track 2")
 
+    def test_original_year_is_used_for_songster_year(self):
+        user_id = auth.create_user("admin", "password123", role="admin")
+        station_id = db.create_songster_playlist("Querbeet", "", {"mode": "all", "rules": []}, user_id)
+        db.set_songster_playlist_enabled(station_id, True)
+        with db.db() as conn:
+            conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, year, original_year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/best-of-2026.mp3", "Original aus 1975", "Artist", "Best of", 2026, 1975, 180),
+            )
+        result = db.list_songster_playlist_tracks(station_id)
+        self.assertEqual(result["tracks"][0]["year"], 1975)
+        self.assertEqual(result["tracks"][0]["year_confidence"], "confirmed")
+
+    def test_compilation_year_outliers_are_excluded_from_songster_tracks(self):
+        user_id = auth.create_user("admin", "password123", role="admin")
+        station_id = db.create_songster_playlist("70er", "", {"mode": "all", "rules": []}, user_id)
+        db.set_songster_playlist_enabled(station_id, True)
+        current_year = db._songster_current_year()
+        with db.db() as conn:
+            for i in range(13):
+                conn.execute(
+                    """INSERT INTO tracks (path, title, artist, album, year, original_year, duration)
+                       VALUES (?,?,?,?,?,?,?)""",
+                    (f"/music/70s-{i}.mp3", f"70s {i}", f"Artist {i}", "Best of 70s", current_year, 1970 + (i % 10), 180),
+                )
+            for i in range(2):
+                conn.execute(
+                    """INSERT INTO tracks (path, title, artist, album, year, duration)
+                       VALUES (?,?,?,?,?,?)""",
+                    (f"/music/outlier-{i}.mp3", f"Outlier {i}", f"Artist X{i}", "Best of 70s", current_year, 180),
+                )
+        result = db.list_songster_playlist_tracks(station_id)
+        self.assertEqual(result["total"], 13)
+        self.assertNotIn("Outlier 0", [track["title"] for track in result["tracks"]])
+
+        preview = db.get_songster_playlist_preview({"mode": "all", "rules": []})
+        self.assertEqual(preview["year_confidence"]["suspect"], 2)
+        self.assertEqual(preview["excluded_total"], 2)
+
+    def test_consistent_annual_compilation_years_are_kept(self):
+        user_id = auth.create_user("admin", "password123", role="admin")
+        station_id = db.create_songster_playlist("Bravo", "", {"mode": "all", "rules": []}, user_id)
+        db.set_songster_playlist_enabled(station_id, True)
+        with db.db() as conn:
+            for i in range(5):
+                conn.execute(
+                    """INSERT INTO tracks (path, title, artist, album, year, duration)
+                       VALUES (?,?,?,?,?,?)""",
+                    (f"/music/bravo-{i}.mp3", f"Bravo {i}", f"Artist {i}", "Bravo Hits 1999", 1999, 180),
+                )
+        result = db.list_songster_playlist_tracks(station_id)
+        self.assertEqual(result["total"], 5)
+        self.assertEqual({track["year_confidence"] for track in result["tracks"]}, {"inferred"})
+
+    def test_static_includes_extend_and_excludes_remove_songster_pool(self):
+        user_id = auth.create_user("admin", "password123", role="admin")
+        station_id = db.create_songster_playlist(
+            "Rock", "", {"mode": "all", "rules": [{"field": "genre", "op": "contains", "value": "Rock"}]}, user_id,
+        )
+        db.set_songster_playlist_enabled(station_id, True)
+        with db.db() as conn:
+            rock_id = conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/rock.mp3", "Rock", "Artist", "Album", "Rock", 1980, 180),
+            ).lastrowid
+            pop_id = conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/pop.mp3", "Pop", "Artist", "Album", "Pop", 1981, 180),
+            ).lastrowid
+        db.set_songster_playlist_static_tracks(station_id, include_track_ids=[pop_id], exclude_track_ids=[rock_id])
+        result = db.list_songster_playlist_tracks(station_id)
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["tracks"][0]["id"], pop_id)
+
+        preview = db.get_songster_playlist_preview(
+            {"mode": "all", "rules": [{"field": "genre", "op": "contains", "value": "Rock"}]},
+            include_track_ids=[pop_id],
+            exclude_track_ids=[rock_id],
+        )
+        self.assertEqual(preview["manual_include_count"], 1)
+        self.assertEqual(preview["manual_exclude_count"], 1)
+        self.assertEqual(preview["playable_total"], 1)
+
+    def test_static_album_includes_extend_and_excludes_remove_songster_pool(self):
+        user_id = auth.create_user("admin", "password123", role="admin")
+        station_id = db.create_songster_playlist(
+            "Rock", "", {"mode": "all", "rules": [{"field": "genre", "op": "contains", "value": "Rock"}]}, user_id,
+        )
+        db.set_songster_playlist_enabled(station_id, True)
+        with db.db() as conn:
+            conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/Rock Album/01.mp3", "Rock", "Artist", "Rock Album", "Rock", 1980, 180),
+            )
+            conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/Pop Album/01.mp3", "Pop 1", "Artist", "Pop Album", "Pop", 1981, 180),
+            )
+            conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/Pop Album/02.mp3", "Pop 2", "Artist", "Pop Album", "Pop", 1982, 180),
+            )
+        db.set_songster_playlist_static_albums(
+            station_id,
+            include_album_refs=[{"album": "Pop Album", "dir": "/music/Pop Album"}],
+            exclude_album_refs=[{"album": "Rock Album", "dir": "/music/Rock Album"}],
+        )
+        result = db.list_songster_playlist_tracks(station_id)
+        self.assertEqual(result["total"], 2)
+        self.assertEqual([track["title"] for track in result["tracks"]], ["Pop 1", "Pop 2"])
+
+        preview = db.get_songster_playlist_preview(
+            {"mode": "all", "rules": [{"field": "genre", "op": "contains", "value": "Rock"}]},
+            include_album_refs=[{"album": "Pop Album", "dir": "/music/Pop Album"}],
+            exclude_album_refs=[{"album": "Rock Album", "dir": "/music/Rock Album"}],
+        )
+        self.assertEqual(preview["manual_album_include_count"], 1)
+        self.assertEqual(preview["manual_album_exclude_count"], 1)
+        self.assertEqual(preview["playable_total"], 2)
+
+    def test_queue_sync_accepts_new_tracks_and_discards_duplicate_year_conflicts(self):
+        user_id = auth.create_user("admin", "password123", role="admin")
+        station_id = db.create_songster_playlist(
+            "Synth", "", {"mode": "all", "rules": [{"field": "genre", "op": "contains", "value": "Synth"}]}, user_id,
+        )
+        db.set_songster_playlist_enabled(station_id, True)
+        with db.db() as conn:
+            existing_id = conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, original_year, duration)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                ("/music/existing.mp3", "Same Song", "Artist", "Album", "Synth", 2026, 1984, 180),
+            ).lastrowid
+            duplicate_id = conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/duplicate.mp3", "Same Song", "Artist", "Compilation", "Pop", 2026, 180),
+            ).lastrowid
+            new_id = conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/new.mp3", "New Song", "Artist", "Compilation", "Pop", 1999, 180),
+            ).lastrowid
+        self.assertTrue(db.queue_songster_playlist_track(station_id, duplicate_id, user_id))
+        self.assertTrue(db.queue_songster_playlist_track(station_id, new_id, user_id))
+        self.assertEqual(db.get_songster_playlist_queue_count(station_id), 2)
+
+        result = db.sync_songster_playlist_queue(station_id)
+        self.assertEqual([track["id"] for track in result["accepted"]], [new_id])
+        self.assertEqual([track["id"] for track in result["discarded"]], [duplicate_id])
+        self.assertEqual(result["discarded"][0]["reason"], "duplicate_different_year")
+        self.assertEqual(db.get_songster_playlist_queue_count(station_id), 0)
+
+        tracks = db.list_songster_playlist_tracks(station_id)["tracks"]
+        self.assertEqual([track["id"] for track in tracks], [existing_id, new_id])
+
 
 class SongsterGameClientRouteTests(SongsterTestBase):
     def setUp(self):
@@ -413,6 +574,162 @@ class SongsterAdminPlaylistRouteTests(SongsterTestBase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["name"], "Renamed")
+
+    def test_create_update_and_preview_round_trip_static_track_curation(self):
+        with db.db() as conn:
+            include_id = conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/include.mp3", "Include", "Artist", "Album", "Pop", 1990, 180),
+            ).lastrowid
+            exclude_id = conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/exclude.mp3", "Exclude", "Artist", "Album", "Rock", 1991, 180),
+            ).lastrowid
+        with self._login(self.admin_id):
+            response = self.client.post(
+                "/api/admin/songster/playlists",
+                json={
+                    "name": "Hybrid",
+                    "filter": {"mode": "all", "rules": [{"field": "genre", "op": "contains", "value": "Rock"}]},
+                    "include_track_ids": [include_id],
+                    "exclude_track_ids": [exclude_id],
+                },
+            )
+            self.assertEqual(response.status_code, 201)
+            playlist_id = response.get_json()["id"]
+            db.set_songster_playlist_enabled(playlist_id, True)
+
+            listing = self.client.get("/api/admin/songster/playlists").get_json()
+            hybrid = next(item for item in listing if item["id"] == playlist_id)
+            self.assertEqual(hybrid["include_track_ids"], [include_id])
+            self.assertEqual(hybrid["exclude_track_ids"], [exclude_id])
+
+            preview = self.client.post(
+                "/api/admin/songster/playlists/preview",
+                json={
+                    "filter": {"mode": "all", "rules": [{"field": "genre", "op": "contains", "value": "Rock"}]},
+                    "include_track_ids": [include_id],
+                    "exclude_track_ids": [exclude_id],
+                },
+            )
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.get_json()["playable_total"], 1)
+        self.assertEqual(db.list_songster_playlist_tracks(playlist_id)["tracks"][0]["id"], include_id)
+
+    def test_create_and_preview_round_trip_static_album_curation(self):
+        with db.db() as conn:
+            conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/Pop Album/01.mp3", "Pop 1", "Artist", "Pop Album", "Pop", 1990, 180),
+            )
+            conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/Pop Album/02.mp3", "Pop 2", "Artist", "Pop Album", "Pop", 1991, 180),
+            )
+            conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/Rock Album/01.mp3", "Rock", "Artist", "Rock Album", "Rock", 1992, 180),
+            )
+        with self._login(self.admin_id):
+            response = self.client.post(
+                "/api/admin/songster/playlists",
+                json={
+                    "name": "Album Hybrid",
+                    "filter": {"mode": "all", "rules": [{"field": "genre", "op": "contains", "value": "Rock"}]},
+                    "include_album_refs": [{"album": "Pop Album", "dir": "/music/Pop Album"}],
+                    "exclude_album_refs": [{"album": "Rock Album", "dir": "/music/Rock Album"}],
+                },
+            )
+            self.assertEqual(response.status_code, 201)
+            playlist_id = response.get_json()["id"]
+            db.set_songster_playlist_enabled(playlist_id, True)
+
+            listing = self.client.get("/api/admin/songster/playlists").get_json()
+            hybrid = next(item for item in listing if item["id"] == playlist_id)
+            self.assertEqual(hybrid["include_album_refs"], [{"album": "Pop Album", "dir": "/music/Pop Album"}])
+            self.assertEqual(hybrid["exclude_album_refs"], [{"album": "Rock Album", "dir": "/music/Rock Album"}])
+
+            preview = self.client.post(
+                "/api/admin/songster/playlists/preview",
+                json={
+                    "filter": {"mode": "all", "rules": [{"field": "genre", "op": "contains", "value": "Rock"}]},
+                    "include_album_refs": [{"album": "Pop Album", "dir": "/music/Pop Album"}],
+                    "exclude_album_refs": [{"album": "Rock Album", "dir": "/music/Rock Album"}],
+                },
+            )
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.get_json()["playable_total"], 2)
+        self.assertEqual(
+            [track["title"] for track in db.list_songster_playlist_tracks(playlist_id)["tracks"]],
+            ["Pop 1", "Pop 2"],
+        )
+
+    def test_songster_test_route_uses_curated_pool(self):
+        with db.db() as conn:
+            include_id = conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/include.mp3", "Include", "Artist", "Album", "Pop", 1990, 180),
+            ).lastrowid
+            exclude_id = conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/exclude.mp3", "Exclude", "Artist", "Album", "Rock", 1991, 181),
+            ).lastrowid
+        with self._login(self.admin_id):
+            response = self.client.post(
+                "/api/admin/songster/playlists/test",
+                json={
+                    "filter": {"mode": "all", "rules": [{"field": "genre", "op": "contains", "value": "Rock"}]},
+                    "include_track_ids": [include_id],
+                    "exclude_track_ids": [exclude_id],
+                    "limit": 50,
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["results"][0]["id"], include_id)
+        self.assertEqual(body["results"][0]["duration_fmt"], "3:00")
+        self.assertEqual(body["results"][0]["format"], "MP3")
+
+    def test_queue_routes_round_trip_and_sync(self):
+        with db.db() as conn:
+            track_id = conn.execute(
+                """INSERT INTO tracks (path, title, artist, album, genre, year, duration)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("/music/queued.mp3", "Queued", "Artist", "Album", "Pop", 1990, 180),
+            ).lastrowid
+        with self._login(self.admin_id):
+            playlist_id = self.client.post(
+                "/api/admin/songster/playlists",
+                json={"name": "Queue", "filter": {"mode": "all", "rules": []}},
+            ).get_json()["id"]
+            add = self.client.post(
+                f"/api/admin/songster/playlists/{playlist_id}/queue",
+                json={"track_id": track_id},
+            )
+            self.assertEqual(add.status_code, 200)
+            self.assertEqual(add.get_json()["queue_count"], 1)
+
+            listing = self.client.get("/api/admin/songster/playlists").get_json()
+            queued = next(item for item in listing if item["id"] == playlist_id)
+            self.assertEqual(queued["queue_count"], 1)
+
+            queue = self.client.get(f"/api/admin/songster/playlists/{playlist_id}/queue")
+            self.assertEqual(queue.status_code, 200)
+            self.assertEqual([track["id"] for track in queue.get_json()["tracks"]], [track_id])
+
+            sync = self.client.post(f"/api/admin/songster/playlists/{playlist_id}/queue/sync")
+        self.assertEqual(sync.status_code, 200)
+        self.assertEqual([track["id"] for track in sync.get_json()["discarded"]], [track_id])
+        self.assertEqual(sync.get_json()["discarded"][0]["reason"], "already_in_pool")
+        self.assertEqual(db.get_songster_playlist_queue_count(playlist_id), 0)
 
     def test_update_rejects_non_songster_station(self):
         with self._login(self.admin_id):

@@ -20,6 +20,8 @@ involved, so these routes are gated on g.token_product rather than
 login_required/admin_required.
 """
 
+import json
+
 from flask import Blueprint, g, jsonify, request
 
 from .. import auth as _auth
@@ -129,6 +131,104 @@ def api_admin_songster_playlists_list():
     return jsonify(db.list_songster_admin_playlists())
 
 
+@blueprint.get("/api/admin/songster/tracks")
+@_auth.admin_required
+def api_admin_songster_tracks_lookup():
+    ids_raw = request.args.get("ids", "")
+    track_ids = [int(value) for value in ids_raw.split(",") if value.strip().isdigit()]
+    return jsonify(db.list_songster_track_refs(track_ids))
+
+
+@blueprint.post("/api/admin/songster/albums")
+@_auth.admin_required
+def api_admin_songster_albums_lookup():
+    data = request.get_json(silent=True) or {}
+    return jsonify(db.list_songster_album_refs(data.get("album_refs") or []))
+
+
+@blueprint.post("/api/admin/songster/playlists/preview")
+@_auth.admin_required
+def api_admin_songster_playlists_preview():
+    data = request.get_json(silent=True) or {}
+    try:
+        limit = int(data.get("limit", 50))
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit must be integer"}), 400
+    try:
+        return jsonify(db.get_songster_playlist_preview(
+            data.get("filter") or {},
+            limit=limit,
+            include_track_ids=data.get("include_track_ids") or [],
+            exclude_track_ids=data.get("exclude_track_ids") or [],
+            include_album_refs=data.get("include_album_refs") or [],
+            exclude_album_refs=data.get("exclude_album_refs") or [],
+        ))
+    except errors.ValidationError as e:
+        return _client_error(e.user_message, e)
+    except ValueError as e:
+        return _client_error("Ungültige Playlist-Definition.", e)
+
+
+@blueprint.post("/api/admin/songster/playlists/test")
+@_auth.admin_required
+def api_admin_songster_playlists_test():
+    data = request.get_json(silent=True) or {}
+    try:
+        limit = int(data.get("limit", 50))
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit must be integer"}), 400
+    try:
+        return jsonify(db.get_songster_playlist_test_tracks(
+            data.get("filter") or {},
+            limit=limit,
+            include_track_ids=data.get("include_track_ids") or [],
+            exclude_track_ids=data.get("exclude_track_ids") or [],
+            include_album_refs=data.get("include_album_refs") or [],
+            exclude_album_refs=data.get("exclude_album_refs") or [],
+        ))
+    except errors.ValidationError as e:
+        return _client_error(e.user_message, e)
+    except ValueError as e:
+        return _client_error("Ungültige Playlist-Definition.", e)
+
+
+@blueprint.post("/api/admin/songster/playlists/<int:playlist_id>/queue")
+@_auth.admin_required
+def api_admin_songster_playlists_queue_add(playlist_id):
+    data = request.get_json(silent=True) or {}
+    track_id = data.get("track_id")
+    if not isinstance(track_id, int):
+        return jsonify({"error": "track_id required"}), 400
+    if not db.queue_songster_playlist_track(playlist_id, track_id, g.user["id"]):
+        return jsonify({"error": "not_found"}), 404
+    db.log_audit(g.user["id"], "songster.playlist_track_queued", str(playlist_id), str(track_id))
+    return jsonify({"ok": True, "queue_count": db.get_songster_playlist_queue_count(playlist_id)})
+
+
+@blueprint.get("/api/admin/songster/playlists/<int:playlist_id>/queue")
+@_auth.admin_required
+def api_admin_songster_playlists_queue_list(playlist_id):
+    if not _songster_playlist_or_404(playlist_id):
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({
+        "tracks": db.list_songster_playlist_queue(playlist_id),
+        "queue_count": db.get_songster_playlist_queue_count(playlist_id),
+    })
+
+
+@blueprint.post("/api/admin/songster/playlists/<int:playlist_id>/queue/sync")
+@_auth.admin_required
+def api_admin_songster_playlists_queue_sync(playlist_id):
+    result = db.sync_songster_playlist_queue(playlist_id)
+    if result is None:
+        return jsonify({"error": "not_found"}), 404
+    db.log_audit(g.user["id"], "songster.playlist_queue_synced", str(playlist_id), json.dumps({
+        "accepted": len(result["accepted"]),
+        "discarded": len(result["discarded"]),
+    }))
+    return jsonify(result)
+
+
 @blueprint.post("/api/admin/songster/playlists")
 @_auth.admin_required
 def api_admin_songster_playlists_create():
@@ -142,6 +242,16 @@ def api_admin_songster_playlists_create():
             description=data.get("description") or "",
             filter_def=data.get("filter") or {"mode": "all", "rules": []},
             user_id=g.user["id"],
+        )
+        db.set_songster_playlist_static_tracks(
+            playlist_id,
+            include_track_ids=data.get("include_track_ids") or [],
+            exclude_track_ids=data.get("exclude_track_ids") or [],
+        )
+        db.set_songster_playlist_static_albums(
+            playlist_id,
+            include_album_refs=data.get("include_album_refs") or [],
+            exclude_album_refs=data.get("exclude_album_refs") or [],
         )
     except errors.ValidationError as e:
         return _client_error(e.user_message, e)
@@ -180,6 +290,18 @@ def api_admin_songster_playlists_update(playlist_id):
             user_id=g.user["id"],
             is_admin=True,
         )
+        if ok and ("include_track_ids" in data or "exclude_track_ids" in data):
+            db.set_songster_playlist_static_tracks(
+                playlist_id,
+                include_track_ids=data.get("include_track_ids") or [],
+                exclude_track_ids=data.get("exclude_track_ids") or [],
+            )
+        if ok and ("include_album_refs" in data or "exclude_album_refs" in data):
+            db.set_songster_playlist_static_albums(
+                playlist_id,
+                include_album_refs=data.get("include_album_refs") or [],
+                exclude_album_refs=data.get("exclude_album_refs") or [],
+            )
     except errors.ValidationError as e:
         return _client_error(e.user_message, e)
     except ValueError as e:
