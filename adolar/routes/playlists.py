@@ -76,6 +76,30 @@ def api_playlist_add_track(playlist_id):
     return jsonify({"ok": True})
 
 
+@blueprint.post("/api/playlists/<int:playlist_id>/album")
+def api_playlist_add_album(playlist_id):
+    if not _auth.can(g.user, "create_playlists"):
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    album = str(data.get("album") or "").strip()
+    dir_ = str(data.get("dir") or "").strip()
+    if not album:
+        return jsonify({"error": "album fehlt."}), 400
+    with db.db() as conn:
+        row = conn.execute(
+            "SELECT id, type FROM playlists WHERE id=? AND owner_id=?",
+            (playlist_id, g.user["id"])
+        ).fetchone()
+    if not row:
+        return jsonify({"error": "Playlist nicht gefunden."}), 404
+    if row["type"] != "static":
+        return jsonify({"error": "Tracks können nur statischen Playlists hinzugefügt werden."}), 409
+    result = db.add_album_to_playlist(playlist_id, album, dir_)
+    if result["track_count"] == 0:
+        return jsonify({"error": "Album nicht gefunden."}), 404
+    return jsonify({"ok": True, **result})
+
+
 @blueprint.get("/api/playlists/<int:playlist_id>/tracks")
 def api_playlist_tracks(playlist_id):
     tracks = db.get_playlist_tracks(playlist_id, g.user["id"] if g.user else 0)

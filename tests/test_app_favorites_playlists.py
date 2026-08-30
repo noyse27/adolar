@@ -172,6 +172,39 @@ class PlaylistAddTrackRouteTests(FavoritesPlaylistsTestBase):
         tracks = db.get_playlist_tracks(playlist_id, self.USER_ID)
         self.assertEqual([t["id"] for t in tracks], [901])
 
+    def test_adds_exact_album_folder_to_a_static_playlist(self):
+        with db.db() as conn:
+            conn.executemany(
+                """INSERT INTO tracks (id, path, title, artist, album, track_no)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                [
+                    (902, "/music/Bravo/CD1/02.mp3", "Second", "A", "Bravo Hits", 2),
+                    (903, "/music/Bravo/CD1/01.mp3", "First", "A", "Bravo Hits", 1),
+                    (904, "/music/Bravo/CD2/01.mp3", "Other Disc", "A", "Bravo Hits", 1),
+                ],
+            )
+        playlist_id = db.save_personal_playlist(self.USER_ID, "Mix", "static", "{}", "artist", [])
+        login, setting = self._login()
+        with login, setting:
+            response = self.client.post(
+                f"/api/playlists/{playlist_id}/album",
+                json={"album": "Bravo Hits", "dir": "/music/Bravo/CD1"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["added_count"], 2)
+        tracks = db.get_playlist_tracks(playlist_id, self.USER_ID)
+        self.assertEqual([t["id"] for t in tracks], [903, 902])
+
+    def test_cannot_add_album_to_a_smart_playlist(self):
+        playlist_id = db.create_playlist(self.USER_ID, "Smart", "{}", "artist", type_="smart")
+        login, setting = self._login()
+        with login, setting:
+            response = self.client.post(
+                f"/api/playlists/{playlist_id}/album",
+                json={"album": "Anything", "dir": ""},
+            )
+        self.assertEqual(response.status_code, 409)
+
 
 class PlaylistTracksRouteTests(FavoritesPlaylistsTestBase):
     def test_unknown_playlist_returns_404(self):
