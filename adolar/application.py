@@ -33,7 +33,7 @@ app = Flask(
     static_folder=os.path.join(PROJECT_ROOT, "static"),
     template_folder=os.path.join(PROJECT_ROOT, "templates"),
 )
-app.secret_key = os.environ.get("SECRET_KEY", os.urandom(32))
+app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
 APP_VERSION = "1.9.0"
 
 # Restrict CORS to origins defined via env var (space-separated).

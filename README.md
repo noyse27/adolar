@@ -250,12 +250,23 @@ seven snapshots are retained. The host location and policy can be changed in
 `.env`:
 
 ```dotenv
+SECRET_KEY=change_me_to_a_long_random_hex_value
 BACKUP_HOST_PATH=/volumeUSB1/usbshare/adolarDBbackup
 BACKUP_AUTO_ENABLED=true
 BACKUP_HOUR=3
 BACKUP_RETENTION=7
 TZ=Europe/Berlin
 ```
+
+`SECRET_KEY` should be set to one stable random value on long-running servers;
+otherwise Flask creates a new secret on every container start and existing
+browser sessions can be invalidated. On Synology installs that use this repo
+directly, keep the Compose project name stable as well. The known production
+layout on `Vault_II` uses project name `musicapp`, so updates should run through
+[`scripts/update-syno.sh`](scripts/update-syno.sh) or explicitly use
+`docker compose -p musicapp up -d --build adolar`. See
+[`docs/synology-git-deploy.md`](docs/synology-git-deploy.md) for the first-time
+conversion from copied deploys to a real Git checkout.
 
 The backup contains personal accounts, Last.fm sessions, favorites, and
 Adolar4U learning data. Protect the directory accordingly and copy it to a
