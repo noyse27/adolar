@@ -23,13 +23,9 @@
 /static/js/app.js                  @noyse27
 /templates/index.html              @noyse27
 
-# --- Produkt: Adolar Android / Android Next ---
-/adolar-android/                   @noyse27
-
-# --- Produkt: Adolar Radio Companion ---
-# Companion hat keinen eigenen Client-Code (pywebview-Huelle) - "sein"
-# eigentlicher Code sind diese Server-Templates/Routen.
-/companion/                        @noyse27
+# --- Produkt: Adolar Radio Companion (Server-seitiger Anteil) ---
+# Der Companion-Client liegt in github.com/noyse27/adolar-companion.
+# "Sein" Server-Code sind diese Templates/Routen.
 /templates/radio_settings.html     @noyse27
 /adolar/routes/radio.py            @noyse27
 

@@ -1,7 +1,7 @@
 # Adolar Produktfamilie - Integrations-Ledger
 
 Version: 1.0
-Stand: 2026-08-21
+Stand: 2026-08-31
 Status: Ist-Stand-Dokumentation (aus Code recherchiert), lebendes Dokument
 
 ## Zweck
@@ -22,8 +22,8 @@ Repo-Uebersicht:
 | Produkt | Repo | Beziehung zu `musicapp` |
 |---|---|---|
 | Adolar (Server) | `musicapp` | ist der Server |
-| Adolar Android / Android Next | `musicapp/adolar-android` | selbes Repo, Unterverzeichnis |
-| Adolar Radio Companion | `musicapp/companion` | selbes Repo, Unterverzeichnis (siehe 2., Sonderfall) |
+| Adolar Android / Android Next | `adolar-android` | eigenes Repo: <https://github.com/noyse27/adolar-android> |
+| Adolar Radio Companion | `adolar-companion` | eigenes Repo: <https://github.com/noyse27/adolar-companion> |
 | Adolar Disco | `adolar-disco` | eigenes, autarkes Repo |
 | Adolar Taggster | `tagmegently` | eigenes, autarkes Repo |
 | Adolar Songster | `adolar-songster` | eigenes, autarkes Repo |
@@ -32,9 +32,9 @@ Repo-Uebersicht:
 
 ## 1. Adolar Android / Android Next
 
-**Repo**: `musicapp/adolar-android` (selbes Repo wie Server - jede
-Server-Aenderung ist im selben Commit/PR sichtbar, kein Sync-Risiko im
-klassischen Sinn, aber Coupling-Risiko bei geteilten Routen, siehe unten).
+**Repo**: `adolar-android` (<https://github.com/noyse27/adolar-android>).
+Der Android-Code liegt nicht mehr im Server-Repo; Aenderungen an geteilten
+Server-Routen muessen bewusst gegen die Android-Clients mitgedacht werden.
 
 - **Auth/Identifikation**: Header `X-Adolar-Product: android`
   (`AdolarMediaService.java:833,1228`). Login ueber `POST /api/radio/login`
@@ -62,10 +62,10 @@ klassischen Sinn, aber Coupling-Risiko bei geteilten Routen, siehe unten).
 
 ## 2. Adolar Radio Companion
 
-**Repo**: `musicapp/companion` (selbes Repo wie Server).
+**Repo**: `adolar-companion` (<https://github.com/noyse27/adolar-companion>).
 
 **Sonderfall**: Companion hat de facto keinen eigenen Client-Code. Die
-`.exe` (`companion/adolar_radio.py`) ist eine pywebview-Huelle, die
+`.exe` (`adolar_radio.py`) ist eine pywebview-Huelle, die
 lediglich `<server-url>/radio` und `<server-url>/radio/settings` laedt
 (`adolar_radio.py:171-172,195-197,238-242`). Die eigentliche API-Nutzung
 (Login, `/api/me-optional`, Logout) passiert im server-seitigen Template

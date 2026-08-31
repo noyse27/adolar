@@ -1,14 +1,19 @@
 # Repo-Split: Android und Companion
 
-Ziel: `adolar-android` und `companion` werden als eigenstaendige Repositories
-gefuehrt, behalten aber ihren bisherigen Git-Verlauf aus dem Monorepo.
+Ziel: `adolar-android` und `companion` wurden als eigenstaendige Repositories
+aus dem Monorepo herausgeloest und behalten ihren bisherigen Git-Verlauf.
+
+Neue Repositories:
+
+- <https://github.com/noyse27/adolar-android>
+- <https://github.com/noyse27/adolar-companion>
 
 ## Vorbereitung im Monorepo
 
-- Beide Unterprojekte enthalten eigene CI-Workflows unter `.github/workflows/ci.yml`.
-- Beide Unterprojekte enthalten eigene Hygiene-/Agent-Dateien (`AGENTS.md`, `CLAUDE.md`).
+- Beide Unterprojekte erhielten eigene CI-Workflows unter `.github/workflows/ci.yml`.
+- Beide Unterprojekte erhielten eigene Hygiene-/Agent-Dateien (`AGENTS.md`, `CLAUDE.md`).
 - `adolar-android/gradle/wrapper/gradle-wrapper.jar` muss beim Split versioniert
-  werden. Der Wrapper-JAR ist fuer frische CI-Checkouts erforderlich.
+  sein. Der Wrapper-JAR ist fuer frische CI-Checkouts erforderlich.
 
 ## History-preserving Split
 
@@ -33,9 +38,16 @@ Falls die Ziel-Repositories bereits initialisiert wurden, vorher sicherstellen,
 dass keine abweichende `main`-History existiert, oder bewusst per PR/import
 zusammenfuehren.
 
-## Nach dem Push
+## Durchgefuehrt
+
+- `split/adolar-android` wurde als `main` nach `noyse27/adolar-android` gepusht.
+- `split/adolar-companion` wurde als `main` nach `noyse27/adolar-companion` gepusht.
+- Historische Release-Assets wurden in die neuen Repos uebertragen.
+- Die Unterordner `adolar-android/` und `companion/` wurden anschliessend aus
+  dem Server-Repo entfernt.
+
+## Nach dem Push / Pflege
 
 - In `adolar-android` pruefen: `./gradlew testDebugUnitTest lintDebug assembleDebug`.
 - In `adolar-companion` pruefen: `python -m ruff check .`, `python -m py_compile adolar_radio.py make_icon.py`, `python -m PyInstaller adolar_radio.spec --clean --noconfirm`.
-- GitHub Actions in beiden neuen Repositories einmal manuell durch einen PR oder Push ausloesen.
-- Danach im Monorepo entscheiden, ob die Unterordner entfernt oder als Submodule/Subtrees ersetzt werden sollen.
+- GitHub Actions in beiden neuen Repositories durch PRs oder Pushes pruefen.

@@ -38,3 +38,7 @@ Thumbs.db
 .coverage
 .ruff_cache/
 .codex-release-assets/
+
+# Split-out repositories (kept separate from this server repo)
+/adolar-android/
+/companion/

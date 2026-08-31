@@ -3,8 +3,8 @@
 Stand: 25. August 2026  
 Arbeitsbranch: `main` (Priorität 1–3 wurden am 25.08.2026 über PR #42 gemergt;
 Release `android-next-0.1.0-beta`)  
-Repository: `noyse27/adolar`  
-Android-Projekt: `adolar-android`
+Repository: `noyse27/adolar-android`  
+Frueherer Monorepo-Pfad: `noyse27/adolar` / `adolar-android`
 
 Dieses Dokument ist der Einstiegspunkt für eine spätere Weiterarbeit – auch
 von einem anderen Rechner oder durch Claude/Codex. Es enthält bewusst keine
@@ -134,7 +134,8 @@ Folgende Prüfungen waren im aktuellen Entwicklungsstand erfolgreich:
 
 - `python -m pytest tests/test_android_next_source.py tests/test_android_playback_source.py -q`
   – 22 Tests bestanden.
-- `adolar-android\\gradlew.bat :app:assembleDebug` – Debug-APK erfolgreich gebaut.
+- `gradlew.bat :app:assembleDebug` im separaten `noyse27/adolar-android`
+  Checkout – Debug-APK erfolgreich gebaut.
 - `git diff --check` – keine Whitespace-Fehler.
 - Debug-APK auf einem echten Android-Gerät aktualisiert.
 - Bibliothek mit 18.452 lokalen Titeln geladen.
@@ -319,36 +320,34 @@ zurückgestellte direkte-Last.fm-ohne-Adolar-Pfad aus Priorität 3.
 Projekt bauen:
 
 ```powershell
-Set-Location F:\claude\musicapp\adolar-android
+git clone https://github.com/noyse27/adolar-android.git F:\claude\adolar-android
+Set-Location F:\claude\adolar-android
 .\gradlew.bat :app:assembleDebug
 ```
 
-Relevante Source-Tests:
+Relevante Server-Tests im Adolar-Hauptrepo:
 
 ```powershell
 Set-Location F:\claude\musicapp
-python -m pytest tests/test_android_next_source.py tests/test_android_playback_source.py tests/test_android_sync_outbox_source.py tests/test_android_http_sync_source.py tests/test_android_api.py tests/test_adolar4u.py -q
+python -m pytest tests/test_android_api.py tests/test_adolar4u.py -q
 ```
 
 APK ohne Löschen der App-Daten aktualisieren:
 
 ```powershell
-& "C:\Users\noyse\AppData\Local\Android\Sdk\platform-tools\adb.exe" install -r "F:\claude\musicapp\adolar-android\app\build\outputs\apk\debug\app-debug.apk"
+& "C:\Users\noyse\AppData\Local\Android\Sdk\platform-tools\adb.exe" install -r "F:\claude\adolar-android\app\build\outputs\apk\debug\app-debug.apk"
 ```
 
 ## Relevante Dateien
 
-- `adolar-android/app/src/main/java/net/polze/adolarradio/NextActivity.java`
+- `app/src/main/java/net/polze/adolarradio/NextActivity.java`
   – Next-Navigation, Bibliotheksansichten, Listen und großer Player.
-- `adolar-android/app/src/main/java/net/polze/adolarradio/AdolarMediaService.java`
+- `app/src/main/java/net/polze/adolarradio/AdolarMediaService.java`
   – MediaSession, lokale/Remote-Wiedergabe, Queue, Persistenz, Shuffle und
   MediaBrowser/Android Auto.
-- `adolar-android/app/src/main/java/net/polze/adolarradio/local/`
+- `app/src/main/java/net/polze/adolarradio/local/`
   – Room-Datenmodell, Repository, Scanner, Cover-Cache und Worker.
-- `tests/test_android_next_source.py`
-  – Source-Verträge für Next-UI, Queue, Shuffle, Cover und Android Auto.
-- `tests/test_android_playback_source.py`
-  – bestehende Playback-/Service-Verträge.
+- Android-Quelltests liegen seit dem Repo-Split im Android-Repo.
 - `docs/adolar-next-implementation-plan.md`
   – Phasenplan und Produktgrenzen.
 - `docs/android-local-library.md`

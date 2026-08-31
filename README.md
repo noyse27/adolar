@@ -25,10 +25,9 @@ A self-hosted music archive web app for Synology NAS (or any Docker host). Brows
 - **Radio playback** — equal-power crossfade (12s out / 8s in), next track pre-buffered; crossfade skipped for short tracks and station jingles
 - **Optional library crossfade** — persistent crossfade switch for normal playback, playlists, and shuffled queues; kept separate from Radio playback
 - **Atomic playback handoff** — the Web player keeps the already-buffered incoming audio slot, refills radio queues off the critical path, and validates buffered duration before fading
-- **Native Android crossfade** — dual Media3 ExoPlayers provide an eight-second equal-power transition backed by a shared version-safe 384 MB disk cache and a five-track local queue
-- **Adolar Next (beta)** — offline-first Android player with its own local library, playlists, and favorites; syncs local plays, favorites, and Last.fm love/unlove back to Adolar once a device is connected
+- **Android clients** — the separate [Adolar Android repository](https://github.com/noyse27/adolar-android) provides Adolar Radio and Adolar Next, including native Media3 playback and optional mobile sync back to this server
 - **Clear Radio exit** — stop the active station and return directly to the library from the Radio button or Now Playing view
-- **AdolarRadio** — Windows companion app: native window, auto-starts radio, About dialog, buildable to `.exe`
+- **AdolarRadio** — separate [Windows companion app](https://github.com/noyse27/adolar-companion): native window, auto-starts radio, About dialog, buildable to `.exe`
 - **Mini-player** — popup window with cover art, controls, progress bar, Last.fm love button
 - **Download basket** — select tracks, export as ZIP
 - **BPM support** — reads TBPM tag (Mixmeister-compatible), background librosa analysis for untagged tracks, writes result back to file tag; BPM shown in search results and filter
@@ -172,9 +171,9 @@ The Python server lives in the `adolar/` package. `adolar/application.py` owns
 configuration, request context, and schedulers; HTTP endpoints are grouped by
 feature in `adolar/routes/` Flask blueprints. `wsgi.py` is the production entry
 point, while `run.py` starts a local installation. Maintenance commands that
-are not part of the server package live in `scripts/`; the Windows companion
-and Android client remain independent projects in `companion/` and
-`adolar-android/`.
+are not part of the server package live in `scripts/`. Client applications are
+maintained separately in [noyse27/adolar-android](https://github.com/noyse27/adolar-android)
+and [noyse27/adolar-companion](https://github.com/noyse27/adolar-companion).
 
 ## Quick Start (Docker)
 
@@ -299,17 +298,19 @@ Cover images failing with `--verbose` are corrupt embedded tags — normal, they
 
 ## AdolarRadio (Windows Companion)
 
-Download the latest `.exe` from [Releases](https://github.com/noyse27/adolar/releases).
+Source and releases now live in [noyse27/adolar-companion](https://github.com/noyse27/adolar-companion).
+Download the latest `.exe` from its [Releases](https://github.com/noyse27/adolar-companion/releases).
 Connect it to your Adolar server in the settings dialog. An optional Adolar login unlocks personal stations and radio bookmarks; connection and login state are restored on the next start.
 
 ## Adolar Android
 
+Source and releases now live in [noyse27/adolar-android](https://github.com/noyse27/adolar-android).
 Two independent Android apps, installable side by side (different application IDs, no shared data):
 
 - **Adolar Radio** (`net.polze.adolarradio`) — the original Android companion: native station picker and playback controls, Android Auto support, connected to your Adolar server.
-- **Adolar Next** (`net.polze.adolarnext`, currently beta) — an offline-first local music player with its own library, playlists, and favorites (Room-backed, works without a server), plus optional background sync: local play history, favorites, and Last.fm love/unlove mirror to your Adolar account once connected. See [`adolar-android/README.md`](adolar-android/README.md) and [`docs/android-local-library.md`](docs/android-local-library.md) for the architecture.
+- **Adolar Next** (`net.polze.adolarnext`, currently beta) — an offline-first local music player with its own library, playlists, and favorites (Room-backed, works without a server), plus optional background sync: local play history, favorites, and Last.fm love/unlove mirror to your Adolar account once connected. See [the Android README](https://github.com/noyse27/adolar-android#readme) and [`docs/android-local-library.md`](docs/android-local-library.md) for the architecture.
 
-Download the latest APKs from [Releases](https://github.com/noyse27/adolar/releases) and sideload (enable "Install unknown apps" for your file manager/browser). Both are debug-signed builds for sideloading, not Play Store releases.
+Download the latest APKs from the Android repo's [Releases](https://github.com/noyse27/adolar-android/releases) and sideload (enable "Install unknown apps" for your file manager/browser). Both are debug-signed builds for sideloading, not Play Store releases.
 
 ## First Run
 
