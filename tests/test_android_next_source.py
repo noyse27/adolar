@@ -94,7 +94,8 @@ def test_next_respects_system_bars_and_software_keyboard():
 
 def test_library_exposes_navigation_and_complete_mini_player_controls():
     activity = read("app/src/main/java/net/polze/adolarradio/NextActivity.java")
-    assert "drawerLayout.openDrawer(Gravity.START)" in activity
+    assert "drawerLayout.openDrawer(DRAWER_GRAVITY)" in activity
+    assert "GravityCompat.START" in activity
     assert "toolbarBack.setVisibility(View.VISIBLE)" in activity
     assert "skipPlayback(-1)" in activity
     assert "skipPlayback(1)" in activity
