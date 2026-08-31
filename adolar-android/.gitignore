@@ -7,8 +7,9 @@ app/build/
 
 # Gradle
 .gradle/
-gradle-wrapper.jar
 local.properties
+!gradle/wrapper/gradle-wrapper.jar
+beta-out/
 
 # Android Studio / IntelliJ
 .idea/

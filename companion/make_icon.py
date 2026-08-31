@@ -25,7 +25,8 @@ def draw_icon(size=256):
     angle = math.radians(45)
 
     def rot(x, y, a=angle, ox=cx, oy=cy):
-        x -= ox; y -= oy
+        x -= ox
+        y -= oy
         rx = x * math.cos(a) - y * math.sin(a)
         ry = x * math.sin(a) + y * math.cos(a)
         return rx + ox, ry + oy

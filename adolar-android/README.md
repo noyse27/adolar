@@ -28,6 +28,14 @@ The phone app and Android Auto control the same MediaSession. Playback never liv
    http://192.168.1.100:15002
    ```
 
+## CI / local checks
+
+The standalone repository runs the same checks locally and in GitHub Actions:
+
+```bash
+./gradlew testDebugUnitTest lintDebug assembleDebug
+```
+
 ## Android Auto developer test
 
 1. Open Android Auto settings on the phone.

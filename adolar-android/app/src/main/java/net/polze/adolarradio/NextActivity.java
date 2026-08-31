@@ -40,6 +40,7 @@ import android.text.TextWatcher;
 
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
+import androidx.core.view.GravityCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -67,6 +68,7 @@ public class NextActivity extends Activity {
     private static final int REQUEST_MUSIC_TREE = 2001;
     private static final int REQUEST_MEDIA_PERMISSION = 2002;
     private static final String LOCAL_TRACK_PREFIX = "local:";
+    private static final int DRAWER_GRAVITY = GravityCompat.START;
 
     private DrawerLayout drawerLayout;
     private LinearLayout contentContainer;
@@ -338,7 +340,7 @@ public class NextActivity extends Activity {
                 Math.min(dp(320), getResources().getDisplayMetrics().widthPixels - dp(48)),
                 ViewGroup.LayoutParams.MATCH_PARENT
         );
-        drawerParams.gravity = Gravity.START;
+        drawerParams.gravity = DRAWER_GRAVITY;
         drawerLayout.addView(drawer, drawerParams);
         setContentView(drawerLayout);
         applyWindowInsets();
@@ -383,7 +385,7 @@ public class NextActivity extends Activity {
         rocket.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
         rocket.setBackgroundColor(Color.TRANSPARENT);
         rocket.setContentDescription(getString(R.string.navigation_open));
-        rocket.setOnClickListener(view -> drawerLayout.openDrawer(Gravity.START));
+        rocket.setOnClickListener(view -> drawerLayout.openDrawer(DRAWER_GRAVITY));
         toolbar.addView(rocket, new LinearLayout.LayoutParams(dp(52), dp(52)));
 
         toolbarBack = text("‹", 36, R.color.text_primary);
@@ -449,7 +451,7 @@ public class NextActivity extends Activity {
         rocket.setImageResource(R.drawable.ic_launcher_foreground);
         rocket.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
         rocket.setBackgroundColor(Color.TRANSPARENT);
-        rocket.setOnClickListener(view -> drawerLayout.closeDrawer(Gravity.START));
+        rocket.setOnClickListener(view -> drawerLayout.closeDrawer(DRAWER_GRAVITY));
         header.addView(rocket, new LinearLayout.LayoutParams(dp(62), dp(62)));
         TextView brand = text(getString(R.string.app_name), 23, R.color.accent_light);
         brand.setTypeface(Typeface.DEFAULT_BOLD);
@@ -470,38 +472,38 @@ public class NextActivity extends Activity {
 
         addDrawerHeading(drawer, "BIBLIOTHEK");
         addDrawerItem(drawer, getString(R.string.library_drawer_search), view -> {
-            drawerLayout.closeDrawer(Gravity.START);
+            drawerLayout.closeDrawer(DRAWER_GRAVITY);
             showSearch();
         });
         addDrawerItem(drawer, getString(R.string.library_drawer_albums), view -> {
-            drawerLayout.closeDrawer(Gravity.START);
+            drawerLayout.closeDrawer(DRAWER_GRAVITY);
             showFacets(FacetType.ALBUM);
         });
         addDrawerItem(drawer, getString(R.string.library_drawer_artists), view -> {
-            drawerLayout.closeDrawer(Gravity.START);
+            drawerLayout.closeDrawer(DRAWER_GRAVITY);
             showFacets(FacetType.ARTIST);
         });
         addDrawerItem(drawer, getString(R.string.library_drawer_genres), view -> {
-            drawerLayout.closeDrawer(Gravity.START);
+            drawerLayout.closeDrawer(DRAWER_GRAVITY);
             showFacets(FacetType.GENRE);
         });
         addDrawerItem(drawer, getString(R.string.library_drawer_playlists), view -> {
-            drawerLayout.closeDrawer(Gravity.START);
+            drawerLayout.closeDrawer(DRAWER_GRAVITY);
             showPlaylists();
         });
         addDrawerItem(drawer, getString(R.string.library_drawer_folders), view -> {
-            drawerLayout.closeDrawer(Gravity.START);
+            drawerLayout.closeDrawer(DRAWER_GRAVITY);
             chooseMusicFolder();
         });
         addDrawerItem(drawer, getString(R.string.library_tracks), view -> {
-            drawerLayout.closeDrawer(Gravity.START);
+            drawerLayout.closeDrawer(DRAWER_GRAVITY);
             showAllTracks();
         });
         addDrawerItem(drawer, getString(R.string.library_open_radios), view -> openRadios());
         addPendingDrawerItem(drawer, R.string.library_drawer_sync);
         addDrawerHeading(drawer, "APP");
         addDrawerItem(drawer, getString(R.string.local_settings), view -> {
-            drawerLayout.closeDrawer(Gravity.START);
+            drawerLayout.closeDrawer(DRAWER_GRAVITY);
             showLocalSettings();
         });
         return scroll;
@@ -816,14 +818,14 @@ public class NextActivity extends Activity {
 
     private void addPendingDrawerItem(LinearLayout drawer, int label) {
         addDrawerItem(drawer, getString(label), view -> {
-            drawerLayout.closeDrawer(Gravity.START);
+            drawerLayout.closeDrawer(DRAWER_GRAVITY);
             Toast.makeText(this, R.string.library_feature_pending, Toast.LENGTH_SHORT).show();
         });
     }
 
     private void addSystemDrawerItem(LinearLayout drawer, int label, String systemKey) {
         addDrawerItem(drawer, getString(label), view -> {
-            drawerLayout.closeDrawer(Gravity.START);
+            drawerLayout.closeDrawer(DRAWER_GRAVITY);
             openSystemPlaylist(systemKey);
         });
     }
@@ -1209,9 +1211,10 @@ public class NextActivity extends Activity {
             return;
         }
         Uri treeUri = data.getData();
-        int flags = data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
         try {
-            getContentResolver().takePersistableUriPermission(treeUri, flags);
+            getContentResolver().takePersistableUriPermission(
+                    treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+            );
         } catch (SecurityException error) {
             Toast.makeText(this, R.string.library_scan_failed, Toast.LENGTH_LONG).show();
             return;
@@ -1698,7 +1701,7 @@ public class NextActivity extends Activity {
     }
 
     private void openRadios() {
-        drawerLayout.closeDrawer(Gravity.START);
+        drawerLayout.closeDrawer(DRAWER_GRAVITY);
         startActivity(new Intent(this, MainActivity.class));
     }
 
@@ -1712,8 +1715,8 @@ public class NextActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (drawerLayout != null && drawerLayout.isDrawerOpen(Gravity.START)) {
-            drawerLayout.closeDrawer(Gravity.START);
+        if (drawerLayout != null && drawerLayout.isDrawerOpen(DRAWER_GRAVITY)) {
+            drawerLayout.closeDrawer(DRAWER_GRAVITY);
             return;
         }
         if (screen == Screen.NOW_PLAYING) {

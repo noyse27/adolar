@@ -11,8 +11,16 @@
 ## Starten (ohne Build)
 
 ```bat
-pip install pywebview
+pip install -r requirements.txt
 python adolar_radio.py --host 192.168.1.X --port 15002
+```
+
+## CI / lokale Checks
+
+```bat
+python -m ruff check .
+python -m py_compile adolar_radio.py make_icon.py
+python -m PyInstaller adolar_radio.spec --clean --noconfirm
 ```
 
 ## Als .exe bauen

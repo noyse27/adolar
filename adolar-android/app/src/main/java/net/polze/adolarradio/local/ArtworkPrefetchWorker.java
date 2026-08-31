@@ -52,9 +52,12 @@ public final class ArtworkPrefetchWorker extends Worker {
                 .libraryDao().getActiveTracks();
         Map<String, List<LocalTrack>> albums = new LinkedHashMap<>();
         for (LocalTrack track : tracks) {
-            List<LocalTrack> candidates = albums.computeIfAbsent(
-                    cache.keyFor(track), ignored -> new ArrayList<>(3)
-            );
+            String albumKey = cache.keyFor(track);
+            List<LocalTrack> candidates = albums.get(albumKey);
+            if (candidates == null) {
+                candidates = new ArrayList<>(3);
+                albums.put(albumKey, candidates);
+            }
             // A minority of collections embeds art only in some tracks. Trying a
             // few files keeps preparation reliable without opening every song.
             if (candidates.size() < 3) candidates.add(track);

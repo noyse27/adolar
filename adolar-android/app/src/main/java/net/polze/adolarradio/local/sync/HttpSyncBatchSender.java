@@ -147,7 +147,9 @@ public final class HttpSyncBatchSender implements SyncBatchSender {
             SyncBatchResult fallback
     ) {
         for (SyncOutboxEntry entry : batch) {
-            results.putIfAbsent(entry.eventId, fallback);
+            if (!results.containsKey(entry.eventId)) {
+                results.put(entry.eventId, fallback);
+            }
         }
     }
 
