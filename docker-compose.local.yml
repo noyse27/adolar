@@ -1,0 +1,32 @@
+services:
+  adolar:
+    build: .
+    container_name: adolar-local
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      - "15002:5000"
+    volumes:
+      - adolar-local-music:/music:ro
+      - adolar-local-data:/data
+      - ./data/docker-backups:/backups
+    environment:
+      MUSIC_ROOT: /music
+      DB_PATH: /data/adolar.db
+      BACKUP_PATH: /backups
+      BACKUP_AUTO_ENABLED: "true"
+      BACKUP_HOUR: "3"
+      BACKUP_RETENTION: "7"
+      TZ: Europe/Berlin
+      LASTFM_API_KEY: ${LASTFM_API_KEY:-}
+      LASTFM_API_SECRET: ${LASTFM_API_SECRET:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  adolar-local-music:
+    external: true
+  adolar-local-data:
