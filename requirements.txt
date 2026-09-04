@@ -4,5 +4,5 @@ mutagen>=1.48.1
 gunicorn>=21.0
 requests>=2.34.2
 Pillow>=10.0
-psutil>=6.0
+psutil>=7.2.2
 tzdata>=2026.3
