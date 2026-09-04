@@ -75,6 +75,33 @@ class ScanStartRouteTests(ScanRouteTestBase):
         self.assertEqual(response.status_code, 200)
         run_scan.assert_called_once_with(self.music_root, force=True)
 
+    def test_folder_scan_accepts_existing_path_inside_library(self):
+        album_dir = os.path.join(self.music_root, "Artist", "Album")
+        os.makedirs(album_dir)
+        with self._login(role="admin"), mock.patch.object(scanner_routes.scanner, "run_scan") as run_scan:
+            response = self.client.post("/api/scan/start", json={"path": album_dir})
+        self.assertEqual(response.status_code, 200)
+        run_scan.assert_called_once_with(album_dir, run_followups=False, force=False)
+
+    def test_folder_scan_rejects_path_outside_library(self):
+        os.makedirs(self.music_root)
+        outside = os.path.join(self.temp.name, "outside")
+        os.makedirs(outside)
+        with self._login(role="admin"), mock.patch.object(scanner_routes.scanner, "run_scan") as run_scan:
+            response = self.client.post("/api/scan/start", json={"path": outside})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("innerhalb", response.get_json()["error"])
+        run_scan.assert_not_called()
+
+    def test_folder_scan_rejects_missing_path_inside_library(self):
+        os.makedirs(self.music_root)
+        missing = os.path.join(self.music_root, "missing")
+        with self._login(role="admin"), mock.patch.object(scanner_routes.scanner, "run_scan") as run_scan:
+            response = self.client.post("/api/scan/start", json={"path": missing})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Pfad nicht gefunden", response.get_json()["error"])
+        run_scan.assert_not_called()
+
 
 class BpmTagsRouteTests(ScanRouteTestBase):
     def test_requires_admin(self):

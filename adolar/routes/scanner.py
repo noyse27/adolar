@@ -2,6 +2,7 @@
 
 import logging
 import os
+from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 
@@ -10,6 +11,26 @@ from .. import db, scanner, tasks
 from ..application import _current_music_root, _start_library_thread
 
 blueprint = Blueprint("scanner", __name__)
+
+
+def _library_scoped_directory(path_input: str, music_root: str) -> tuple[str | None, str | None]:
+    try:
+        root = Path(music_root).resolve(strict=True)
+    except OSError:
+        return None, "missing"
+    try:
+        raw = Path(path_input)
+        candidate = raw.resolve(strict=True) if raw.is_absolute() else (root / raw).resolve(strict=True)
+    except OSError:
+        return None, "missing"
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None, "outside"
+    if not candidate.is_dir():
+        return None, "missing"
+    return os.fspath(candidate), None
+
 
 # ── Scanner ───────────────────────────────────────────────────────────────────
 
@@ -23,11 +44,11 @@ def api_scan_start():
     if path_input:
         # Folder-scoped scan (e.g. triggered by Adolar Taggster after an
         # edit) — skips the full-library BPM/thumbnail follow-up sweeps.
-        candidate = os.path.realpath(path_input)
-        if candidate != music_root and not candidate.startswith(music_root + os.sep):
+        candidate, path_error = _library_scoped_directory(path_input, music_root)
+        if candidate is None:
+            if path_error == "missing":
+                return jsonify({"error": f"Pfad nicht gefunden: {path_input}"}), 400
             return jsonify({"error": "path liegt nicht innerhalb der aktiven Bibliothek."}), 400
-        if not os.path.isdir(candidate):
-            return jsonify({"error": f"Pfad nicht gefunden: {candidate}"}), 400
         scanner.run_scan(candidate, run_followups=False, force=force)
         return jsonify({"status": "started", "path": candidate})
     if not os.path.isdir(music_root):
