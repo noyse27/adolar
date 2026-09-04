@@ -5,4 +5,4 @@ gunicorn>=21.0
 requests>=2.34.2
 Pillow>=10.0
 psutil>=6.0
-tzdata>=2025.2
+tzdata>=2026.3
