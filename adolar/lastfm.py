@@ -13,8 +13,9 @@ def _sig(params: dict) -> str:
     """Last.fm API signature: sorted key+value string, no 'format', + secret, md5."""
     s = "".join(f"{k}{params[k]}" for k in sorted(params) if k != "format")
     s += API_SECRET
-    # MD5 is mandated by the Last.fm API signing protocol — not a choice
-    return hashlib.md5(s.encode("utf-8")).hexdigest()  # noqa: S324
+    # MD5 is mandated by the Last.fm API signing protocol; this is not used as
+    # a security hash selected by the application.
+    return hashlib.md5(s.encode("utf-8"), usedforsecurity=False).hexdigest()  # noqa: S324
 
 
 def _post(params: dict) -> dict:

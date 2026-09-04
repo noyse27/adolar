@@ -90,6 +90,8 @@ class BackupServiceTests(unittest.TestCase):
         )
         with self.assertRaises(FileNotFoundError):
             backup_service.get_backup_file(str(self.backups), "../outside")
+        with self.assertRaises(FileNotFoundError):
+            backup_service.get_backup_file(str(self.backups), backup_id, "../manifest")
         backup_service.delete_backup(str(self.backups), backup_id)
         self.assertEqual(backup_service.list_backups(str(self.backups)), [])
 
