@@ -34,7 +34,7 @@ app = Flask(
     template_folder=os.path.join(PROJECT_ROOT, "templates"),
 )
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
-APP_VERSION = "1.9.0"
+APP_VERSION = "1.11.0"
 
 # Restrict CORS to origins defined via env var (space-separated).
 # Default: deny all cross-origin requests (safe for local NAS use).
