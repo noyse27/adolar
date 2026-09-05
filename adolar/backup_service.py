@@ -72,7 +72,7 @@ def _safe_backup_dir(root: Path, backup_id: str) -> Path:
 def ensure_backup_root(root: str) -> Path:
     # The backup directory is an admin-configured host path by design. Resolve
     # it before creation, then probe writability below.
-    path = Path(root).expanduser().resolve()  # codeql[py/path-injection]
+    path = Path(root).expanduser().resolve()
     path.mkdir(parents=True, exist_ok=True)
     probe = path / ".adolar-write-test"
     try:
