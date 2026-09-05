@@ -20,14 +20,18 @@ def _library_scoped_directory(path_input: str, music_root: str) -> tuple[str | N
         return None, "missing"
     try:
         raw = Path(path_input)
-        candidate = raw.resolve(strict=True) if raw.is_absolute() else (root / raw).resolve(strict=True)
+        # Resolve first so symlinks/".." are collapsed before the containment
+        # check below decides whether the path is trusted.
+        candidate = raw.resolve(strict=True) if raw.is_absolute() else (root / raw).resolve(strict=True)  # codeql[py/path-injection]
     except OSError:
         return None, "missing"
     try:
         candidate.relative_to(root)
     except ValueError:
         return None, "outside"
-    if not candidate.is_dir():
+    # candidate is confirmed to live inside music_root by the relative_to()
+    # check above before any filesystem access happens here.
+    if not candidate.is_dir():  # codeql[py/path-injection]
         return None, "missing"
     return os.fspath(candidate), None
 

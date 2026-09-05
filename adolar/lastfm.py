@@ -15,7 +15,7 @@ def _sig(params: dict) -> str:
     s += API_SECRET
     # MD5 is mandated by the Last.fm API signing protocol; this is not used as
     # a security hash selected by the application.
-    return hashlib.md5(s.encode("utf-8"), usedforsecurity=False).hexdigest()  # noqa: S324
+    return hashlib.md5(s.encode("utf-8"), usedforsecurity=False).hexdigest()  # noqa: S324  # codeql[py/weak-sensitive-data-hashing]
 
 
 def _post(params: dict) -> dict:
