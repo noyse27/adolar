@@ -20,16 +20,22 @@ def _library_scoped_directory(path_input: str, music_root: str) -> tuple[str | N
         return None, "missing"
     try:
         raw = Path(path_input)
+        # Resolve first so symlinks/".." are collapsed before the containment
+        # check below decides whether the path is trusted.
         candidate = raw.resolve(strict=True) if raw.is_absolute() else (root / raw).resolve(strict=True)
     except OSError:
         return None, "missing"
-    try:
-        candidate.relative_to(root)
-    except ValueError:
+    # Normalize both sides to strings and confirm containment with a prefix
+    # check (the pattern CodeQL's own path-injection guidance recommends)
+    # instead of relying on Path.relative_to(), whose ValueError branch its
+    # taint tracker does not recognize as a sanitizing barrier.
+    root_str = os.path.normpath(str(root)) + os.sep
+    candidate_str = os.path.normpath(str(candidate))
+    if not (candidate_str + os.sep).startswith(root_str):
         return None, "outside"
-    if not candidate.is_dir():
+    if not os.path.isdir(candidate_str):
         return None, "missing"
-    return os.fspath(candidate), None
+    return candidate_str, None
 
 
 # ── Scanner ───────────────────────────────────────────────────────────────────

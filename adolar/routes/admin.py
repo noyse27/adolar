@@ -30,11 +30,10 @@ blueprint = Blueprint("admin", __name__)
 
 def _trusted_admin_directory(raw_path: str) -> str:
     """Resolve an admin-configured host directory before it is persisted."""
-    resolved = Path(raw_path).expanduser().resolve(strict=True)
     # Admin users are allowed to choose arbitrary host directories for library
     # roots; this validates that the chosen target already exists and is a
     # directory before storing the canonical path.
-    # codeql[py/path-injection]
+    resolved = Path(raw_path).expanduser().resolve(strict=True)
     if not resolved.is_dir():
         raise errors.ValidationError("Der angegebene Pfad existiert nicht oder ist kein Verzeichnis.")
     return os.fspath(resolved)
