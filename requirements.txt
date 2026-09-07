@@ -3,6 +3,6 @@ flask-cors>=4.0
 mutagen>=1.48.1
 gunicorn>=26.2.0
 requests>=2.34.2
-Pillow>=10.0
+Pillow>=12.3.0
 psutil>=7.2.2
 tzdata>=2026.3
