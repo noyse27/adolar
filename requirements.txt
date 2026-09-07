@@ -1,5 +1,5 @@
 flask>=3.0
-flask-cors>=4.0
+flask-cors>=6.0.5
 mutagen>=1.48.1
 gunicorn>=26.2.0
 requests>=2.34.2
