@@ -1273,6 +1273,9 @@ _RADIO_NUM_FIELDS = {
     "decade": "t.year",
     "playcount": "COALESCE(upc.count, 0)",
 }
+_RADIO_BOOL_FIELDS = {
+    "loved": "CASE WHEN l.artist_norm IS NULL THEN 0 ELSE 1 END",
+}
 
 
 def _track_rows_to_dicts(rows) -> list[dict]:
@@ -1368,6 +1371,13 @@ def validate_radio_filter(filter_def) -> dict:
                 if field == "decade":
                     num = (num // 10) * 10
                 out["rules"].append({"field": field, "op": op, "value": num})
+            elif field in _RADIO_BOOL_FIELDS:
+                if op not in ("eq", "ne"):
+                    raise errors.ValidationError(
+                        f"UngÃ¼ltiger Operator fÃ¼r Ja/Nein-Feld '{field}'.")
+                out["rules"].append({
+                    "field": field, "op": op, "value": 1 if bool(value) else 0,
+                })
             else:
                 raise errors.ValidationError("Unbekanntes Filterfeld.")
         return out
@@ -1421,6 +1431,11 @@ def _radio_filter_sql(filter_def) -> tuple[str, list]:
                 elif op == "lt":
                     parts.append("t.year < ?")
                     params.append(start)
+            elif field in _RADIO_BOOL_FIELDS:
+                col = _RADIO_BOOL_FIELDS[field]
+                sql_op = "=" if op == "eq" else "!="
+                parts.append(f"{col} {sql_op} ?")
+                params.append(int(value))
             else:
                 col = _RADIO_NUM_FIELDS[field]
                 sql_op = {"eq": "=", "ne": "!=", "gt": ">", "lt": "<"}[op]
@@ -1513,6 +1528,41 @@ def create_radio_station(name: str, description: str, filter_def: dict,
         """, (name.strip(), (description or "").strip(), json.dumps(clean, ensure_ascii=False),
               scope, owner_id, user_id))
         return cur.lastrowid
+
+
+def get_or_create_lastfm_loved_radio_station(user_id: int) -> int:
+    """Return the user's private Last.fm-loved station, creating it if needed."""
+    name = "Loved on Last.fm"
+    filter_def = {
+        "mode": "all",
+        "rules": [{"field": "loved", "op": "eq", "value": 1}],
+    }
+    clean = validate_radio_filter(filter_def)
+    with db() as conn:
+        row = conn.execute("""
+            SELECT id FROM radio_stations
+            WHERE scope='private' AND owner_id=? AND LOWER(name)=LOWER(?)
+        """, (int(user_id), name)).fetchone()
+        if row:
+            conn.execute("""
+                UPDATE radio_stations
+                SET filter_json=?, updated_at=datetime('now')
+                WHERE id=?
+            """, (json.dumps(clean, ensure_ascii=False), int(row["id"])))
+            return int(row["id"])
+        cur = conn.execute("""
+            INSERT INTO radio_stations
+                (name, description, filter_json, scope, owner_id, is_system, created_by,
+                 updated_at)
+            VALUES (?, ?, ?, 'private', ?, 0, ?, datetime('now'))
+        """, (
+            name,
+            "Deine geliebten Tracks aus Last.fm",
+            json.dumps(clean, ensure_ascii=False),
+            int(user_id),
+            int(user_id),
+        ))
+        return int(cur.lastrowid)
 
 
 def update_radio_station(station_id: int, name: str, description: str, filter_def: dict,
@@ -1648,8 +1698,12 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
                            LOWER(TRIM(t.genre)) END) AS genres
                 FROM tracks t
                 LEFT JOIN user_play_counts upc ON upc.track_id=t.id AND upc.user_id=?
+                LEFT JOIN lastfm_loved_tracks l
+                       ON l.artist_norm=LOWER(COALESCE(t.artist, ''))
+                      AND l.title_norm=LOWER(COALESCE(t.title, ''))
+                      AND l.user_id=?
                 {where}
-            """, [uid] + params).fetchone()
+            """, [uid, uid] + params).fetchone()
             shuffle_state.total_tracks = stats["total"]
             shuffle_state.unique_artists = stats["artists"]
             shuffle_state.unique_albums = stats["albums"]

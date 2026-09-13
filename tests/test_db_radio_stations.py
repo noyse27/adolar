@@ -70,6 +70,16 @@ class ValidateRadioFilterTests(unittest.TestCase):
         })
         self.assertEqual(clean["rules"][0]["value"], 1980)
 
+    def test_loved_rule_is_kept_as_bool_filter(self):
+        clean = db.validate_radio_filter({
+            "mode": "all", "rules": [
+                {"field": "loved", "op": "eq", "value": True},
+            ],
+        })
+        self.assertEqual(clean["rules"], [
+            {"field": "loved", "op": "eq", "value": 1},
+        ])
+
     def test_unknown_field_raises(self):
         with self.assertRaises(errors.ValidationError):
             db.validate_radio_filter({
@@ -269,6 +279,54 @@ class RadioStationCrudTests(RadioTestBase):
         self.assertFalse(db.can_manage_radio_station(private_id, user_id=2, is_admin=False))
         self.assertTrue(db.can_manage_radio_station(private_id, user_id=2, is_admin=True))
         self.assertFalse(db.can_manage_radio_station(999999, user_id=1, is_admin=True))
+
+    def test_lastfm_loved_station_is_private_idempotent_and_filters_loved_tracks(self):
+        with db.db() as conn:
+            conn.execute("""
+                INSERT INTO users (id, username, password_hash, role, must_change_password)
+                VALUES (42, 'listener', 'unused', 'user', 0)
+            """)
+        db.upsert_track({
+            "path": "/music/loved.mp3",
+            "title": "Signal",
+            "artist": "Listener",
+            "album": "Album",
+            "genre": "Synth",
+            "year": 2024,
+            "track_no": 1,
+            "duration": 180,
+            "bitrate": 320,
+            "size": 123,
+            "cover_hash": None,
+            "mtime": 1,
+        })
+        db.upsert_track({
+            "path": "/music/other.mp3",
+            "title": "Noise",
+            "artist": "Listener",
+            "album": "Album",
+            "genre": "Synth",
+            "year": 2024,
+            "track_no": 2,
+            "duration": 180,
+            "bitrate": 320,
+            "size": 123,
+            "cover_hash": None,
+            "mtime": 1,
+        })
+        db.set_lastfm_loved(42, "Listener", "Signal", True)
+
+        station_id = db.get_or_create_lastfm_loved_radio_station(42)
+        self.assertEqual(station_id, db.get_or_create_lastfm_loved_radio_station(42))
+
+        station = db.get_radio_station(station_id)
+        self.assertEqual(station["name"], "Loved on Last.fm")
+        self.assertEqual(station["scope"], "private")
+        self.assertEqual(station["owner_id"], 42)
+        self.assertEqual(station["filter"]["rules"][0]["field"], "loved")
+
+        tracks = db.get_radio_station_tracks(station_id, count=10, user_id=42)
+        self.assertEqual([track["title"] for track in tracks], ["Signal"])
 
 
 class RadioStationJingleTests(RadioTestBase):
