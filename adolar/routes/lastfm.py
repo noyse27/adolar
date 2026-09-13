@@ -59,6 +59,7 @@ def api_lastfm_callback():
     try:
         session = lastfm.get_session(token)
         db.set_lastfm_account(g.user["id"], session["name"], session["key"])
+        db.get_or_create_lastfm_loved_radio_station(g.user["id"])
     except Exception as e:
         logging.getLogger(__name__).warning("Last.fm Auth fehlgeschlagen (%s)", e)
         return "Last.fm Auth fehlgeschlagen. Bitte erneut verbinden.", 500
@@ -85,6 +86,7 @@ def _sync_lastfm_loved_tracks(user_id: int):
     try:
         items = lastfm.get_loved_tracks(account["username"])
         count = db.replace_lastfm_loved_tracks(user_id, items)
+        db.get_or_create_lastfm_loved_radio_station(user_id)
         _update_lastfm_sync_state(
             user_id, "loved", running=False, error=None, count=count,
             finished_at=_time.time(),
