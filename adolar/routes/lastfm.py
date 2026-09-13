@@ -30,9 +30,17 @@ def _update_lastfm_sync_state(user_id: int, job_type: str, **values) -> dict:
         values["updated_count"] = values.pop("updated")
     return db.update_lastfm_sync_state(user_id, job_type, **values)
 
+
+def _ensure_lastfm_loved_radio_station(user_id: int, account) -> None:
+    if account:
+        db.get_or_create_lastfm_loved_radio_station(user_id)
+
+
 @blueprint.get("/api/lastfm/status")
 def api_lastfm_status():
     account = _lastfm_account()
+    if g.user:
+        _ensure_lastfm_loved_radio_station(g.user["id"], account)
     return jsonify({
         "connected": bool(account),
         "username": account["username"] if account else None,
@@ -102,7 +110,9 @@ def _sync_lastfm_loved_tracks(user_id: int):
 def api_lastfm_loved_status():
     status = db.get_lastfm_loved_status(g.user["id"])
     status.update(_lastfm_sync_state(g.user["id"], "loved"))
-    status["connected"] = bool(_lastfm_account())
+    account = _lastfm_account()
+    _ensure_lastfm_loved_radio_station(g.user["id"], account)
+    status["connected"] = bool(account)
     return jsonify(status)
 
 

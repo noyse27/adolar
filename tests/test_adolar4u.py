@@ -753,7 +753,20 @@ class Adolar4UTests(unittest.TestCase):
                 SELECT user_id FROM lastfm_loved_tracks
                 WHERE artist_norm='listener' AND title_norm='signal'
             """).fetchall()
+            stations = conn.execute("""
+                SELECT owner_id, name, scope
+                FROM radio_stations
+                WHERE name='Loved on Last.fm'
+                ORDER BY owner_id
+            """).fetchall()
         self.assertEqual([row["user_id"] for row in users], [22])
+        self.assertEqual(
+            [(row["owner_id"], row["name"], row["scope"]) for row in stations],
+            [
+                (self.USER_ID, "Loved on Last.fm", "private"),
+                (22, "Loved on Last.fm", "private"),
+            ],
+        )
 
     def test_lastfm_playback_telemetry_is_queued_without_blocking_request(self):
         app_module.db.set_lastfm_account(self.USER_ID, "listener", "session-key")
