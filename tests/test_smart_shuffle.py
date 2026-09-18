@@ -1,4 +1,6 @@
+import os
 import random
+import tempfile
 import unittest
 from itertools import groupby
 
@@ -16,6 +18,38 @@ def track(track_id, artist, album, bpm=120, genre=""):
 
 
 class SmartShuffleTests(unittest.TestCase):
+    def test_full_500_song_cycle_across_batches_and_duplicate_files(self):
+        rows = [{**track(i, f"Artist {i}", "Album"), "title": f"Song {i}"}
+                for i in range(1, 501)]
+        rows.append({**rows[0], "id": 501, "album": "Compilation"})
+        state = smart_shuffle.ShuffleState(context="radio")
+        selected = []
+        for _ in range(20):
+            selected.extend(smart_shuffle.select_tracks(rows, 25, state, 501, 500, 500))
+        self.assertEqual(len(selected), 500)
+        self.assertEqual(len({row['title'] for row in selected}), 500)
+        next_batch = smart_shuffle.select_tracks(rows, 25, state, 501, 500, 500)
+        self.assertEqual(len(next_batch), 25)
+        self.assertEqual(state.cycle, 2)
+
+    def test_exhausted_sample_does_not_reset_cycle(self):
+        state = smart_shuffle.ShuffleState(context="radio", track_history=[1])
+        self.assertEqual(smart_shuffle.select_tracks([track(1, "A", "B")], 1,
+                                                    state, 500, 50, 50), [])
+        self.assertEqual(state.track_history, [1])
+
+    def test_persisted_session_survives_process_cache_loss(self):
+        rows = [track(i, f"A{i}", "B") for i in range(1, 11)]
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "shuffle.db")
+            with smart_shuffle.session_scope(None, "radio", path, "library") as (token, state):
+                first = smart_shuffle.select_tracks(rows, 5, state, 10, 10, 10)
+            smart_shuffle._sessions.clear()
+            with smart_shuffle.session_scope(token, "radio", path, "library") as (next_token, state):
+                second = smart_shuffle.select_tracks(rows, 5, state, 10, 10, 10)
+            self.assertEqual(token, next_token)
+            self.assertFalse({row['id'] for row in first} & {row['id'] for row in second})
+
     def test_cooldown_windows_follow_specification(self):
         self.assertEqual(smart_shuffle.cooldown_windows(100, 20, 10), (80, 15, 7))
         self.assertEqual(smart_shuffle.cooldown_windows(3, 1, 1), (2, 0, 0))

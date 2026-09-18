@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import math
+import os
 import random
 import secrets
+import sqlite3
 import threading
 import time
 from collections import Counter
-from dataclasses import dataclass, field
+from contextlib import contextmanager
+from dataclasses import dataclass, field, fields
 
 SESSION_TTL_SECONDS = 12 * 60 * 60
 MAX_SESSIONS = 256
@@ -45,6 +50,8 @@ def _bpm(value) -> float | None:
 class ShuffleState:
     context: str
     track_history: list[int] = field(default_factory=list)
+    song_history: set[str] = field(default_factory=set)
+    cycle: int = 1
     artist_last_seen: dict[str, int] = field(default_factory=dict)
     album_last_seen: dict[str, int] = field(default_factory=dict)
     last_genre: str = ""
@@ -62,6 +69,8 @@ class ShuffleState:
     def reset(self, context: str) -> None:
         self.context = context
         self.track_history.clear()
+        self.song_history.clear()
+        self.cycle = 1
         self.artist_last_seen.clear()
         self.album_last_seen.clear()
         self.last_genre = ""
@@ -77,6 +86,44 @@ class ShuffleState:
 
 _sessions: dict[str, ShuffleState] = {}
 _sessions_lock = threading.Lock()
+
+
+@contextmanager
+def session_scope(token, context, storage_path, library_path):
+    """Serialize queue planning across workers and persist complete cycles."""
+    os.makedirs(os.path.dirname(storage_path) or ".", exist_ok=True)
+    conn = sqlite3.connect(storage_path, timeout=60)
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS shuffle_sessions "
+                     "(token TEXT PRIMARY KEY, context TEXT, state TEXT, touched REAL)")
+        conn.execute("BEGIN IMMEDIATE")
+        now = time.time()
+        conn.execute("DELETE FROM shuffle_sessions WHERE touched<?", (now - SESSION_TTL_SECONDS,))
+        context = f"{library_path}:{context}"
+        row = conn.execute("SELECT context, state FROM shuffle_sessions WHERE token=?",
+                           (token or "",)).fetchone()
+        state = ShuffleState(context=context)
+        if row and row[0] == context:
+            values = json.loads(row[1])
+            for name, value in values.items():
+                setattr(state, name, set(value) if name == "song_history" else value)
+        elif not row:
+            token = secrets.token_urlsafe(18)
+        yield token, state
+        values = {item.name: getattr(state, item.name) for item in fields(state)
+                  if item.name != "lock"}
+        values["song_history"] = sorted(state.song_history)
+        conn.execute("INSERT OR REPLACE INTO shuffle_sessions VALUES (?, ?, ?, ?)",
+                     (token, context, json.dumps(values), time.time()))
+        conn.execute("DELETE FROM shuffle_sessions WHERE token IN "
+                     "(SELECT token FROM shuffle_sessions ORDER BY touched DESC LIMIT -1 OFFSET ?)",
+                     (MAX_SESSIONS,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def get_session(token: str | None, context: str) -> tuple[str, ShuffleState]:
@@ -160,6 +207,7 @@ def select_tracks(
     unique_genres: int = 0,
     use_genre_spacing: bool = True,
     candidate_penalties: dict[int, float] | None = None,
+    full_cycle: bool = True,
 ) -> list:
     """Order up to count candidates and update state for the planned play order."""
     count = max(0, int(count))
@@ -169,7 +217,10 @@ def select_tracks(
         total_tracks, unique_artists, unique_albums
     )
     spread_genres = use_genre_spacing and unique_genres > 1
-    state.track_history = state.track_history[-w_track:]
+    if not full_cycle:
+        # Recommendation shortlists do not represent a complete playable pool.
+        state.track_history = state.track_history[-w_track:]
+        state.song_history.clear()
     if w_artist:
         artist_cutoff = state.sequence_index - w_artist + 1
         state.artist_last_seen = {
@@ -193,14 +244,24 @@ def select_tracks(
     blocked = set(state.track_history)
     explicit_excludes = {int(value) for value in (exclude_ids or [])}
     blocked.update(explicit_excludes)
-    remaining = [row for row in candidates if int(row["id"]) not in blocked]
-    if not remaining and candidates:
-        state.track_history.clear()
-        remaining = [
-            row for row in candidates
-            if int(row["id"]) not in explicit_excludes
-        ]
+    def song_key(row):
+        title = _key(_row_value(row, "title"))
+        return f"{_key(row['artist'])}\x1f{title}" if title else f"id:{row['id']}"
 
+    candidates = list(candidates)
+    remaining = [row for row in candidates if int(row["id"]) not in blocked
+                 and song_key(row) not in state.song_history]
+    if not remaining and candidates:
+        # A sampled pool is not proof that the complete cycle is exhausted.
+        complete_pool = len({int(row['id']) for row in candidates}) >= total_tracks
+        if complete_pool or not full_cycle:
+            state.track_history.clear()
+            state.song_history.clear()
+            state.cycle += 1
+            remaining = [row for row in candidates if int(row["id"]) not in explicit_excludes]
+
+    if len(remaining) > max(2500, count * 100):
+        remaining = rng.sample(remaining, max(2500, count * 100))
     selected = []
     while remaining and len(selected) < count:
         preferred_genres = None
@@ -251,6 +312,8 @@ def select_tracks(
         chosen = remaining.pop(best_index)
         selected.append(chosen)
         state.track_history.append(int(chosen["id"]))
+        state.song_history.add(song_key(chosen))
+        remaining = [row for row in remaining if song_key(row) != song_key(chosen)]
         artist = _key(chosen["artist"])
         album = _album_key(chosen)
         genre = _key(_row_value(chosen, "genre"))
@@ -270,8 +333,14 @@ def select_tracks(
             state.genre_run = 0
         chosen_bpm = _bpm(chosen["bpm"])
         state.last_bpm = chosen_bpm
+        if not full_cycle:
+            state.track_history = state.track_history[-w_track:]
 
-        state.track_history = state.track_history[-w_track:]
 
     state.touched_at = time.time()
+    logging.getLogger(__name__).info(
+        "shuffle context=%s cycle=%s pool=%s total=%s seen=%s selected=%s",
+        state.context, state.cycle, len(candidates), total_tracks,
+        len(state.song_history), [int(row['id']) for row in selected],
+    )
     return selected

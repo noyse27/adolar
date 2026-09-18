@@ -219,6 +219,32 @@ class TestRadioStationFilterRouteTests(RadioStationsRouteTestBase):
 
 
 class RadioStationJingleRouteTests(RadioStationsRouteTestBase):
+    def test_track_batch_advertises_enabled_jingle_interval(self):
+        db.set_radio_station_jingle(self.station_id, "/some/jingle.mp3", 5, True)
+        login, setting = self._login()
+        with login, setting:
+            response = self.client.get(f"/api/radio-stations/{self.station_id}/tracks")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-Radio-Jingle-Every"], "5")
+
+    def test_loved_radio_only_accepts_owner_activation(self):
+        station_id = db.get_or_create_lastfm_loved_radio_station(1)
+        login, setting = self._login()
+        with login, setting, mock.patch.object(db, "set_setting") as save:
+            response = self.client.patch(f"/api/radio-stations/{station_id}/enabled",
+                                         json={"enabled": False})
+            self.assertEqual(response.status_code, 200)
+            save.assert_called_once_with("lastfm_loved_radio_enabled:1", "0")
+            response = self.client.patch(f"/api/radio-stations/{station_id}/enabled",
+                                         json={"enabled": True, "filter": {}})
+            self.assertEqual(response.status_code, 400)
+            with mock.patch.object(db, "get_radio_station", return_value={
+                "configuration_locked": True, "owner_id": 2,
+            }):
+                response = self.client.patch(f"/api/radio-stations/{station_id}/enabled",
+                                             json={"enabled": False})
+                self.assertEqual(response.status_code, 404)
+
     def setUp(self):
         super().setUp()
         self.station_id = db.create_radio_station("Mine", "", {}, user_id=1, scope="private")

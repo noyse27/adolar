@@ -604,6 +604,10 @@ def init_db():
             ON connection_log(client_key) WHERE client_key IS NOT NULL
         """)
         _migrate_lastfm_schema(conn)
+        conn.execute("""
+            UPDATE radio_stations SET engine='lastfm_loved', filter_json=?
+            WHERE scope='private' AND songster_managed=0 AND LOWER(name)='loved on last.fm'
+        """, (json.dumps({"mode": "all", "rules": [{"field": "loved", "op": "eq", "value": 1}]}),))
 
         violations = conn.execute("PRAGMA foreign_key_check").fetchall()
         if violations:
@@ -1373,17 +1377,13 @@ def get_random_tracks(count=25, exclude_ids=None, shuffle_state=None):
             shuffle_state.unique_artists = stats["artists"]
             shuffle_state.unique_albums = stats["albums"]
             shuffle_state.unique_genres = stats["genres"]
-        pool_size = min(
-            shuffle_state.total_tracks,
-            max(2500, count * 100),
-        )
         rows = conn.execute(
             """SELECT id, path, title, artist, album, genre, year, track_no,
                        duration, bitrate, size, mtime, cover_hash, bpm
                 FROM tracks
-                ORDER BY RANDOM() LIMIT ?""",
-            (pool_size,),
+                ORDER BY RANDOM()""",
         ).fetchall()
+        shuffle_state.total_tracks = len(rows)
     selected = smart_shuffle.select_tracks(
         rows, count, shuffle_state,
         shuffle_state.total_tracks,
@@ -1650,6 +1650,9 @@ def _radio_station_from_row(row) -> dict:
     d["has_jingle"] = bool(d.pop("jingle_path", None))
     d["scope"] = d.get("scope") or "global"
     d["engine"] = d.get("engine") or "smart_shuffle"
+    d["configuration_locked"] = d["engine"] == "lastfm_loved"
+    d["enabled"] = (get_setting(f"lastfm_loved_radio_enabled:{d.get('owner_id')}", "1") == "1"
+                    if d["configuration_locked"] else True)
     try:
         d["filter"] = json.loads(d.pop("filter_json") or "{}")
     except Exception:
@@ -2053,15 +2056,15 @@ def get_or_create_lastfm_loved_radio_station(user_id: int) -> int:
         if row:
             conn.execute("""
                 UPDATE radio_stations
-                SET filter_json=?, updated_at=datetime('now')
+                SET filter_json=?, engine='lastfm_loved', updated_at=datetime('now')
                 WHERE id=?
             """, (json.dumps(clean, ensure_ascii=False), int(row["id"])))
             return int(row["id"])
         cur = conn.execute("""
             INSERT INTO radio_stations
                 (name, description, filter_json, scope, owner_id, is_system, created_by,
-                 songster_managed, updated_at)
-            VALUES (?, ?, ?, 'private', ?, 0, ?, 0, datetime('now'))
+                 songster_managed, engine, updated_at)
+            VALUES (?, ?, ?, 'private', ?, 0, ?, 0, 'lastfm_loved', datetime('now'))
         """, (
             name,
             "Deine geliebten Tracks aus Last.fm",
@@ -2076,7 +2079,7 @@ def update_radio_station(station_id: int, name: str, description: str, filter_de
                          user_id: int, is_admin: bool, scope: str | None = None) -> bool:
     clean = validate_radio_filter(filter_def)
     station = get_radio_station(station_id)
-    if not station or station["is_system"]:
+    if not station or station["is_system"] or station.get("configuration_locked"):
         return False
     if not is_admin and station.get("owner_id") != user_id:
         return False
@@ -2107,7 +2110,7 @@ def update_radio_station(station_id: int, name: str, description: str, filter_de
 
 def delete_radio_station(station_id: int, user_id: int, is_admin: bool) -> bool:
     station = get_radio_station(station_id)
-    if not station or station["is_system"]:
+    if not station or station["is_system"] or station.get("configuration_locked"):
         return False
     if not is_admin and station.get("owner_id") != user_id:
         return False
@@ -2119,6 +2122,8 @@ def delete_radio_station(station_id: int, user_id: int, is_admin: bool) -> bool:
 def can_manage_radio_station(station_id: int, user_id: int, is_admin: bool) -> bool:
     station = get_radio_station(station_id)
     if not station:
+        return False
+    if station.get("configuration_locked"):
         return False
     if station["is_system"]:
         return bool(is_admin)
@@ -2166,6 +2171,8 @@ def get_radio_station_tracks(station_id: int, count=25, exclude_ids=None, user_i
     station = get_radio_station(station_id)
     if not station:
         return None
+    if not station.get("enabled", True):
+        return []
     if station.get("engine") == "adolar4u":
         if not user_id:
             return None
@@ -2216,10 +2223,6 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
             shuffle_state.unique_artists = stats["artists"]
             shuffle_state.unique_albums = stats["albums"]
             shuffle_state.unique_genres = stats["genres"]
-        pool_size = min(
-            shuffle_state.total_tracks,
-            max(2500, count * 100),
-        )
         rows = conn.execute(f"""
             SELECT t.id, t.path, t.title, t.artist, t.album, t.genre, t.year, t.track_no,
                    t.duration, t.bitrate, t.size, t.mtime, t.cover_hash, t.bpm,
@@ -2233,8 +2236,8 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
                   AND l.user_id=?
             {where}
             ORDER BY RANDOM()
-            LIMIT ?
-        """, [uid, uid] + params + [pool_size]).fetchall()
+        """, [uid, uid] + params).fetchall()
+        shuffle_state.total_tracks = len(rows)
     selected = smart_shuffle.select_tracks(
         rows, count, shuffle_state,
         shuffle_state.total_tracks,

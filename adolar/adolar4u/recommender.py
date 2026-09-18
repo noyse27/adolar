@@ -874,6 +874,7 @@ def recommend_tracks(user_id: int, count=25, exclude_ids=None, shuffle_state=Non
             rng=rng,
             unique_genres=shuffle_state.unique_genres or 0,
             candidate_penalties=penalties,
+            full_cycle=False,
         ))
     remaining = [
         row for row in shortlist
@@ -889,6 +890,7 @@ def recommend_tracks(user_id: int, count=25, exclude_ids=None, shuffle_state=Non
             rng=rng,
             unique_genres=shuffle_state.unique_genres or 0,
             candidate_penalties=penalties,
+            full_cycle=False,
         ))
     if not user_settings["learning_paused"]:
         _record_recommendation_batch(

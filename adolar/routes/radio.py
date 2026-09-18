@@ -25,10 +25,10 @@ def api_random():
     _touch_disco()
     count   = min(int(request.args.get("count", 25)), 100)
     exclude = [int(x) for x in request.args.getlist("exclude") if x.isdigit()]
-    token, shuffle_state = smart_shuffle.get_session(
-        request.args.get("shuffle_session"), "random"
-    )
-    with shuffle_state.lock:
+    with smart_shuffle.session_scope(
+        request.args.get("shuffle_session"), "random",
+        db.CONTROL_DB_PATH + ".shuffle.db", db.current_db_path(),
+    ) as (token, shuffle_state):
         tracks = db.get_random_tracks(count, exclude, shuffle_state=shuffle_state)
     response = jsonify(tracks)
     response.headers["X-Shuffle-Session"] = token
@@ -78,11 +78,10 @@ def api_shuffle():
     context_hash = hashlib.sha256(
         json.dumps(context_data, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    token, shuffle_state = smart_shuffle.get_session(
-        request.args.get("shuffle_session"), f"search:{context_hash}"
-    )
-
-    with shuffle_state.lock:
+    with smart_shuffle.session_scope(
+        request.args.get("shuffle_session"), f"search:{context_hash}",
+        db.CONTROL_DB_PATH + ".shuffle.db", db.current_db_path(),
+    ) as (token, shuffle_state):
         if playlist_id:
             try:
                 playlist_id = int(playlist_id)
@@ -103,7 +102,7 @@ def api_shuffle():
                 min_bitrate=parsed["min_bitrate"],
                 year_min=parsed["year_min"], year_max=parsed["year_max"],
                 bpm_min=parsed["bpm_min"], bpm_max=parsed["bpm_max"],
-                page=1, per_page=2500, sort=raw["sort"], count=need_stats,
+                page=1, per_page=2147483647, sort=raw["sort"], count=need_stats,
                 loved_only=raw["loved"],
                 include_loved=bool(user_id and db.get_lastfm_account(user_id)),
                 user_id=user_id, random_order=True,
@@ -236,6 +235,19 @@ def api_radio_stations_delete(station_id):
     return jsonify({"ok": True})
 
 
+@blueprint.patch("/api/radio-stations/<int:station_id>/enabled")
+def api_radio_station_enabled(station_id):
+    station = db.get_radio_station(station_id)
+    if (not station or not station.get("configuration_locked") or not g.user
+            or station.get("owner_id") != g.user["id"]):
+        abort(404)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data.get("enabled"), bool) or set(data) != {"enabled"}:
+        return jsonify({"error": "enabled must be boolean"}), 400
+    db.set_setting(f"lastfm_loved_radio_enabled:{g.user['id']}", "1" if data["enabled"] else "0")
+    return jsonify(db.get_radio_station(station_id))
+
+
 @blueprint.post("/api/radio-stations/test")
 @_auth.admin_required
 def api_radio_stations_test():
@@ -344,11 +356,11 @@ def api_radio_station_tracks(station_id):
     if (station and station.get("engine") == "adolar4u" and user_id
             and adolar4u.get_onboarding_state(user_id)["required"]):
         return jsonify({"error": "onboarding_required"}), 428
-    token, shuffle_state = smart_shuffle.get_session(
+    with smart_shuffle.session_scope(
         request.args.get("shuffle_session"),
         f"radio:{station_id}:user:{user_id or 0}",
-    )
-    with shuffle_state.lock:
+        db.CONTROL_DB_PATH + ".shuffle.db", db.current_db_path(),
+    ) as (token, shuffle_state):
         tracks = db.get_radio_station_tracks(
             station_id, count, exclude, user_id=user_id, shuffle_state=shuffle_state,
             recommendation_session_id=token,
@@ -357,8 +369,13 @@ def api_radio_station_tracks(station_id):
         return jsonify({"error": "station not found"}), 404
     response = jsonify(tracks)
     response.headers["X-Shuffle-Session"] = token
+    if station:
+        response.headers["X-Radio-Jingle-Every"] = str(
+            station.get("jingle_every_tracks", 0)
+            if station.get("has_jingle") and station.get("jingle_enabled") else 0
+        )
     logging.getLogger(__name__).info(
-        "radio queue station=%s count=%s duration_ms=%.1f",
-        station_id, len(tracks), (_time.perf_counter() - started) * 1000,
+        "radio queue station=%s session=%s cycle=%s count=%s duration_ms=%.1f",
+        station_id, token, shuffle_state.cycle, len(tracks), (_time.perf_counter() - started) * 1000,
     )
     return response

@@ -397,9 +397,17 @@ class RadioStationCrudTests(RadioTestBase):
         self.assertEqual(station["owner_id"], 42)
         self.assertEqual(station["filter"]["rules"][0]["field"], "loved")
         self.assertFalse(station["songster_managed"])
+        self.assertTrue(station["configuration_locked"])
+        self.assertFalse(db.update_radio_station(station_id, "Changed", "", {}, 42, True))
+        self.assertFalse(db.delete_radio_station(station_id, 42, True))
+        self.assertFalse(db.can_manage_radio_station(station_id, 42, True))
 
         tracks = db.get_radio_station_tracks(station_id, count=10, user_id=42)
         self.assertEqual([track["title"] for track in tracks], ["Signal"])
+        db.set_setting("lastfm_loved_radio_enabled:42", "0")
+        db.get_or_create_lastfm_loved_radio_station(42)
+        self.assertFalse(db.get_radio_station(station_id)["enabled"])
+        self.assertEqual(db.get_radio_station_tracks(station_id, user_id=42), [])
 
 
 class RadioStationJingleTests(RadioTestBase):
