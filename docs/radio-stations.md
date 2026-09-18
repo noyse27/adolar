@@ -38,6 +38,7 @@ Admins can still upload, configure, and remove a jingle for the default station.
 - `PUT /api/radio-stations/<id>`
 - `DELETE /api/radio-stations/<id>`
 - `GET /api/radio-stations/<id>/tracks?count=25&shuffle_session=...`
+- `PATCH /api/radio-stations/<id>/enabled` with `{"enabled": true|false}`
 - `POST /api/radio-stations/<id>/jingle`
 - `PATCH /api/radio-stations/<id>/jingle`
 - `DELETE /api/radio-stations/<id>/jingle`
@@ -85,8 +86,12 @@ the background. The server returns an `X-Shuffle-Session` header; passing that
 value back as `shuffle_session` preserves the planned track, artist, album,
 genre-run, and BPM history across queue refills.
 
-Smart Shuffle blocks an exact track for 80 percent of the available station
-pool. Artist and album cooldowns adapt to the number of tracks and distinct
+Normal radios and library shuffle finish a complete song cycle before allowing
+repeats. Artist/title variants on different albums count as one song. Skipping
+a queued song advances the cycle. Sessions are persisted in
+`CONTROL_DB_PATH + ".shuffle.db"` and shared across Gunicorn workers; the active
+library is part of the session context. Adolar4U retains its adaptive shortlist
+cooldown behavior. Artist and album cooldowns adapt to the number of tracks and distinct
 values. Genres are distributed proportionally to their occurrence in the
 candidate pool, so a dominant genre can still occur more often without forming
 avoidable long runs. This genre distribution is disabled when the station has
@@ -97,3 +102,14 @@ track, and a small random tie-breaker.
 Jingles are represented as non-track queue items. An enabled station jingle is
 played once when the station starts and then again every N tracks. Jingles do
 not affect play counts, scrobbling, bookmarks, or recently played history.
+The tracks endpoint advertises `X-Radio-Jingle-Every` (zero when disabled) so
+Adolar Next can insert jingles at startup and across batch boundaries.
+
+`Loved on Last.fm` is a private managed station with engine `lastfm_loved` and
+`configuration_locked=true`. Its definition and jingle configuration cannot be
+edited or deleted, including by admins. The owner can only toggle `enabled`;
+the preference survives Last.fm syncs and status refreshes. Disabled stations
+return no tracks. Existing Loved stations are upgraded during database startup.
+
+INFO logs include shuffle context, cycle, candidate count, history size and
+selected track IDs; radio queue logs also include the session and load duration.

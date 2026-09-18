@@ -61,18 +61,17 @@ class GetRandomTracksTests(unittest.TestCase):
         self.assertEqual(state.total_tracks, 10)
         self.assertEqual(state.unique_artists, 3)
 
-    def test_reusing_a_shuffle_state_does_not_repeat_stats_query(self):
+    def test_reusing_state_refreshes_pool_size_without_repeating_diversity_stats(self):
         from adolar import smart_shuffle
         state = smart_shuffle.ShuffleState(
             context="random", total_tracks=999, unique_artists=999,
             unique_albums=999, unique_genres=999,
         )
-        # If get_random_tracks trusted a pre-populated total_tracks, the pool
-        # sizing would be based on 999, not the real 10-row table — but the
-        # result set should still just be bounded by what actually exists.
+        # Refresh the cycle size when tracks disappear, retaining diversity stats.
         tracks = db.get_random_tracks(count=5, shuffle_state=state)
         self.assertLessEqual(len(tracks), 10)
-        self.assertEqual(state.total_tracks, 999)  # left untouched, as documented
+        self.assertEqual(state.total_tracks, 10)
+        self.assertEqual(state.unique_artists, 999)
 
 
 if __name__ == "__main__":

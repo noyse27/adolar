@@ -2013,7 +2013,7 @@ function refillRadioQueue() {
   if (!radio.active) return Promise.resolve([]);
   if (radio.refillPromise) return radio.refillPromise;
   const session = radio.session;
-  const excluded = radio.playedIds.slice(-100).concat(radio.queue.map(track => track.id));
+  const excluded = radio.queue.map(track => track.id);
   radio.refillPromise = loadRadioQueue(RADIO_REFILL_BATCH, excluded).then(fresh => {
     if (!radio.active || radio.session !== session) return [];
     const known = new Set(radio.queue.map(track => Number(track.id)));
@@ -2799,7 +2799,7 @@ function renderRadioStationRow(st) {
   const row = document.createElement("div");
   row.className = "radio-station-row";
   const isOwner = _me && st.owner_id === _me.id;
-  const canEdit = _me?.allow_radio_stations && (
+  const canEdit = !st.configuration_locked && _me?.allow_radio_stations && (
     (_me.role === "admin" && st.is_system) ||
     (!st.is_system && (st.scope === "private" ? (isOwner || _me.role === "admin") : _me.role === "admin"))
   );
@@ -2811,11 +2811,26 @@ function renderRadioStationRow(st) {
     </div>
     <div class="radio-row-actions">
       ${st.has_jingle ? `<span class="station-jingle-indicator" title="Jingle vorhanden"><i class="ti ti-volume"></i></span>` : ""}
-      <button class="icon-btn station-play" title="${t().radio_start}"><i class="ti ti-player-play"></i></button>
+      ${st.configuration_locked && isOwner ? `<input class="station-enabled" type="checkbox" aria-label="${esc(st.name)} aktiv" ${st.enabled ? "checked" : ""}>` : ""}
+      <button class="icon-btn station-play" title="${t().radio_start}" ${st.enabled === false ? "disabled" : ""}><i class="ti ti-player-play"></i></button>
       ${canEdit ? `<button class="icon-btn station-edit" title="${t().radio_edit}"><i class="ti ti-settings"></i></button>` : ""}
       ${canDelete ? `<button class="icon-btn danger station-delete" title="${t().radio_delete}"><i class="ti ti-trash"></i></button>` : ""}
     </div>`;
   row.querySelector(".station-play").onclick = () => startRadio(st);
+  const enabled = row.querySelector(".station-enabled");
+  if (enabled) enabled.onchange = async () => {
+    enabled.disabled = true;
+    try {
+      const response = await fetch(`${API}/api/radio-stations/${st.id}/enabled`, {
+        method: "PATCH", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({enabled: enabled.checked}),
+      });
+      if (!response.ok) throw new Error("station toggle failed");
+      if (!enabled.checked && radio.active && radio.stationId === st.id) stopRadio();
+    } catch (error) {
+      console.warn("Radio activation failed", error);
+    } finally { await loadRadioStations(); }
+  };
   const edit = row.querySelector(".station-edit");
   if (edit) edit.onclick = () => openRadioEditor(st);
   const del = row.querySelector(".station-delete");
