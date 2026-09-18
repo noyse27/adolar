@@ -1380,8 +1380,7 @@ def get_random_tracks(count=25, exclude_ids=None, shuffle_state=None):
         rows = conn.execute(
             """SELECT id, path, title, artist, album, genre, year, track_no,
                        duration, bitrate, size, mtime, cover_hash, bpm
-                FROM tracks
-                ORDER BY RANDOM()""",
+                FROM tracks""",
         ).fetchall()
         shuffle_state.total_tracks = len(rows)
     selected = smart_shuffle.select_tracks(
@@ -2235,7 +2234,6 @@ def get_radio_filter_tracks(filter_def: dict, count=25, exclude_ids=None, user_i
                   AND l.title_norm=LOWER(COALESCE(t.title, ''))
                   AND l.user_id=?
             {where}
-            ORDER BY RANDOM()
         """, [uid, uid] + params).fetchall()
         shuffle_state.total_tracks = len(rows)
     selected = smart_shuffle.select_tracks(

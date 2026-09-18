@@ -2827,6 +2827,8 @@ function renderRadioStationRow(st) {
       });
       if (!response.ok) throw new Error("station toggle failed");
       if (!enabled.checked && radio.active && radio.stationId === st.id) stopRadio();
+    } catch (error) {
+      console.warn("Radio activation failed", error);
     } finally { await loadRadioStations(); }
   };
   const edit = row.querySelector(".station-edit");

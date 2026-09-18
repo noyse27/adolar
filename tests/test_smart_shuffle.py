@@ -2,6 +2,7 @@ import os
 import random
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from itertools import groupby
 
 from adolar import smart_shuffle
@@ -18,6 +19,22 @@ def track(track_id, artist, album, bpm=120, genre=""):
 
 
 class SmartShuffleTests(unittest.TestCase):
+    def test_concurrent_refills_share_one_cycle(self):
+        rows = [track(i, f"Artist {i}", "Album") for i in range(1, 101)]
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "shuffle.db")
+            with smart_shuffle.session_scope(None, "radio", path, "library") as (token, _):
+                pass
+
+            def refill():
+                with smart_shuffle.session_scope(token, "radio", path, "library") as (_, state):
+                    return smart_shuffle.select_tracks(rows, 50, state, 100, 100, 100)
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                first, second = list(executor.map(lambda _: refill(), range(2)))
+            self.assertEqual(len(first) + len(second), 100)
+            self.assertFalse({row['id'] for row in first} & {row['id'] for row in second})
+
     def test_full_500_song_cycle_across_batches_and_duplicate_files(self):
         rows = [{**track(i, f"Artist {i}", "Album"), "title": f"Song {i}"}
                 for i in range(1, 501)]
