@@ -36,12 +36,26 @@ Rein über die Umgebungsvariable `ADOLAR_DEMO_MODE=1`
 (`adolar/demo_mode.py`), gesetzt für eine komplett separate
 Compose-Installation – **niemals** gegen eine bestehende, echte Datenbank.
 
+Am einfachsten über das mitgelieferte Setup-Skript, das `.env.demo` bei
+Bedarf mit einem zufälligen `SECRET_KEY` anlegt und den Stack startet:
+
+```bash
+./setup.sh demo
+```
+
+Entspricht von Hand ausgeführt:
+
 ```bash
 cp .env.demo.example .env.demo
 # SECRET_KEY in .env.demo setzen (openssl rand -hex 32)
 
 docker compose -p adolar-demo --env-file .env.demo -f docker-compose.demo.yml up -d --build
 ```
+
+`./setup.sh` (ohne Argument oder mit `production`) macht dasselbe für die
+normale Installation (`.env` statt `.env.demo`). Beide Aufrufe sind sicher
+mehrfach ausführbar - eine bereits vorhandene Env-Datei bzw. ein bereits
+gesetztes Secret wird nie überschrieben.
 
 `docker-compose.demo.yml` ist bewusst eine eigenständige Compose-Datei, kein
 Override der normalen `docker-compose.yml` – sie hat einen eigenen

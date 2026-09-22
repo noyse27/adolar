@@ -190,6 +190,12 @@ and [noyse27/adolar-companion](https://github.com/noyse27/adolar-companion).
 
 ## Quick Start (Docker)
 
+Using this repo's own `docker-compose.yml` as-is (adjust the `/your/music`
+etc. bind mounts in it first)? `./setup.sh` creates `.env` with a random
+`SECRET_KEY` if one isn't set yet and starts the stack in one step. For a
+custom compose file like the one below, or a manual `.env`, see the steps
+underneath it.
+
 ```yaml
 # docker-compose.yml
 services:
