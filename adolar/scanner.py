@@ -506,11 +506,16 @@ def run_scan(music_root: str, trigger: str = "manual", run_followups: bool = Tru
             log.error("Scanner error: %s", e)
         finally:
             finished_at = time.time()
-            _update(running=False, finished_at=finished_at, current_file="")
+            # Persist before flipping running=False: callers that poll
+            # status()["running"] to know when the scan (including its
+            # completion timestamp) has fully landed would otherwise see
+            # running go False while db.get_scanner_status()["finished_at"]
+            # can still briefly read the previous value or None.
             try:
                 db.set_last_scan_finished_at(finished_at)
             except Exception as e:
                 log.error("Could not persist scan completion time: %s", e)
+            _update(running=False, finished_at=finished_at, current_file="")
             detail = f"{_status['progress']} von {_status['total']} Dateien" \
                 if _status["total"] else None
             tasks.finish(task_id, status="failed" if failed else "completed", detail=detail)
