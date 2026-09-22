@@ -241,6 +241,12 @@ subsequent runs won't ask again. `DB_PATH` and `BACKUP_PATH` fall back to
 `~/.cache/adolar/...` if left unset, so they don't need to be configured
 before the first run.
 
+## Demo mode
+
+For a publicly accessible, isolated showcase deployment with
+self-resetting test data (a small synthetic music library, no real
+accounts) see [docs/demo.md](docs/demo.md).
+
 ## Database backups
 
 The live SQLite database stays in the Docker-managed `adolar-data` volume. A

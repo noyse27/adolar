@@ -13,7 +13,7 @@ from flask import Blueprint, abort, g, jsonify, request, send_file
 
 from .. import application as core
 from .. import auth as _auth
-from .. import backup_service, db, errors, libraries, library_context, scanner, tasks
+from .. import backup_service, db, demo_mode, errors, libraries, library_context, scanner, tasks
 from ..application import (
     _backup_auto_enabled,
     _backup_hour,
@@ -312,6 +312,7 @@ def api_backups_list():
 
 @blueprint.put("/api/admin/backups/config")
 @_auth.admin_required
+@demo_mode.block_when_demo("Ändern der Sicherungs-Einstellungen")
 def api_backups_config_update():
     data = request.get_json(silent=True) or {}
     try:
@@ -353,6 +354,7 @@ def api_backups_config_update():
 
 @blueprint.post("/api/admin/backups")
 @_auth.admin_required
+@demo_mode.block_when_demo("Erstellen von Sicherungen")
 def api_backups_create():
     try:
         backup_service.ensure_backup_root(_backup_root())
@@ -384,6 +386,7 @@ def api_backups_download(backup_id, kind):
 
 @blueprint.delete("/api/admin/backups/<backup_id>")
 @_auth.admin_required
+@demo_mode.block_when_demo("Löschen von Sicherungen")
 def api_backups_delete(backup_id):
     try:
         backup_service.delete_backup(_backup_root(), backup_id)
@@ -406,6 +409,7 @@ def api_libraries_list():
 
 @blueprint.post("/api/admin/libraries")
 @_auth.admin_required
+@demo_mode.block_when_demo("Anlegen weiterer Bibliotheken")
 def api_libraries_create():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
@@ -432,6 +436,7 @@ def api_libraries_create():
 
 @blueprint.post("/api/admin/libraries/<library_id>/activate")
 @_auth.admin_required
+@demo_mode.block_when_demo("Wechseln der aktiven Bibliothek")
 def api_libraries_activate(library_id):
     try:
         lib = libraries.set_active(core.LIBRARY_REGISTRY_PATH, core.MUSIC_ROOT, db.DB_PATH, library_id)
@@ -445,6 +450,7 @@ def api_libraries_activate(library_id):
 
 @blueprint.put("/api/admin/libraries/<library_id>/move")
 @_auth.admin_required
+@demo_mode.block_when_demo("Verschieben einer Bibliothek")
 def api_libraries_move(library_id):
     _libs, active_id = libraries.list_libraries(core.LIBRARY_REGISTRY_PATH, core.MUSIC_ROOT, db.DB_PATH)
     data = request.get_json(silent=True) or {}
@@ -473,6 +479,7 @@ def api_libraries_move(library_id):
 
 @blueprint.post("/api/admin/libraries/<library_id>/rename-path")
 @_auth.admin_required
+@demo_mode.block_when_demo("Ändern eines Bibliothekspfads")
 def api_libraries_rename_path(library_id):
     """Rewrite tracks.path for a subfolder rename/move within the active
     library. Unlike /move above, this does NOT touch the library's
@@ -520,6 +527,7 @@ def api_library_covers():
 
 @blueprint.post("/api/admin/database/optimize")
 @_auth.admin_required
+@demo_mode.block_when_demo("Datenbank-Optimierung")
 def api_database_optimize():
     """Integrity-check, VACUUM, and refresh planner stats for both databases.
 

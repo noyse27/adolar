@@ -1,0 +1,65 @@
+# Self-contained compose file for an isolated Adolar demo deployment - not
+# an override merged with docker-compose.yml. Every account/track/playlist
+# it holds is demo data, generated on first startup and reset periodically
+# (see ADOLAR_DEMO_MODE and ADOLAR_DEMO_RESET_MINUTES below, and
+# adolar/demo_mode.py).
+#
+# Run with its own compose project name so it never collides with a real
+# Adolar deployment on the same host, and its own env file for the port and
+# demo credentials (copy .env.demo.example to .env.demo first):
+#
+#   docker compose -p adolar-demo --env-file .env.demo -f docker-compose.demo.yml up -d --build
+#
+# See docs/demo.md for the full write-up.
+services:
+  demo-library:
+    build:
+      context: ./demo
+    environment:
+      TRACK_DEMO_CLIP_SECONDS: ${TRACK_DEMO_CLIP_SECONDS:-8}
+    volumes:
+      - demo-music:/music
+
+  adolar:
+    build: .
+    container_name: adolar-demo
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # Different from docker-compose.yml's 15002 default, so a demo stack can
+    # run alongside a real Adolar deployment on the same host.
+    ports:
+      - "${DEMO_HOST_PORT:-15012}:5000"
+    volumes:
+      - demo-music:/music:ro
+      - demo-data:/data
+    environment:
+      MUSIC_ROOT: /music
+      DB_PATH: /data/adolar.db
+      CONTROL_DB_PATH: /data/control.db
+      # No insecure default: the app doesn't strictly require this to boot,
+      # but an unset secret_key falls back to os.urandom() per process,
+      # which would invalidate every session on a restart. Set it in .env.demo.
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env.demo - see .env.demo.example (openssl rand -hex 32)}
+      TZ: ${TZ:-Europe/Berlin}
+      ADOLAR_DEMO_MODE: "1"
+      ADOLAR_DEMO_RESET_MINUTES: ${ADOLAR_DEMO_RESET_MINUTES:-60}
+      ADOLAR_DEMO_ADMIN_USERNAME: ${ADOLAR_DEMO_ADMIN_USERNAME:-demo-admin}
+      ADOLAR_DEMO_ADMIN_PASSWORD: ${ADOLAR_DEMO_ADMIN_PASSWORD:-adolar-demo}
+      ADOLAR_DEMO_USER_USERNAME: ${ADOLAR_DEMO_USER_USERNAME:-demo-hoerer}
+      ADOLAR_DEMO_USER_PASSWORD: ${ADOLAR_DEMO_USER_PASSWORD:-adolar-demo}
+      # Deliberately no LASTFM_API_KEY/SECRET, no BACKUP_AUTO_ENABLED: a
+      # public demo should never relay real Last.fm scrobbles through the
+      # operator's app key, and backups are blocked in demo mode anyway
+      # (see adolar/demo_mode.py's block_when_demo use in routes/admin.py).
+    depends_on:
+      demo-library:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  demo-music:
+  demo-data:
