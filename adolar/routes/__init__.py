@@ -8,6 +8,7 @@ def register_blueprints(app) -> None:
     from .android import blueprint as android_blueprint
     from .auth import blueprint as auth_blueprint
     from .catalog import blueprint as catalog_blueprint
+    from .demo import blueprint as demo_blueprint
     from .lastfm import blueprint as lastfm_blueprint
     from .lyrics import blueprint as lyrics_blueprint
     from .media import blueprint as media_blueprint
@@ -21,6 +22,7 @@ def register_blueprints(app) -> None:
     app.register_blueprint(android_blueprint)
     app.register_blueprint(auth_blueprint)
     app.register_blueprint(catalog_blueprint)
+    app.register_blueprint(demo_blueprint)
     app.register_blueprint(lyrics_blueprint)
     app.register_blueprint(lastfm_blueprint)
     app.register_blueprint(media_blueprint)

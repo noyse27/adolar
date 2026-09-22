@@ -13,6 +13,7 @@ from flask_cors import CORS
 from . import auth as _auth
 from . import (
     db,
+    demo_mode,
     libraries,
     library_context,
     lyrics,
@@ -46,6 +47,18 @@ if _auth.DEV_ADMIN_ENABLED:
         "ADOLAR_DEV_ADMIN is active: every request runs as 'dev-admin' without "
         "authentication. Never enable this in production."
     )
+
+if demo_mode.DEMO_MODE:
+    logging.getLogger(__name__).warning(
+        "ADOLAR_DEMO_MODE is active: the database resets every %d minute(s) and "
+        "several destructive admin actions are blocked. Never enable this against "
+        "a real music library.", demo_mode.DEMO_RESET_MINUTES,
+    )
+
+    @app.after_request
+    def _demo_mode_robots_header(response):
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+        return response
 
 MUSIC_ROOT = os.environ.get("MUSIC_ROOT", "/music")
 MAX_DOWNLOAD_IDS = int(os.environ.get("MAX_DOWNLOAD_IDS", 500))
@@ -292,6 +305,15 @@ db.init_db()
 _auth.load_persisted_blocks()
 if lyrics.enabled():
     start_lyrics_startup_scan()
+
+if demo_mode.DEMO_MODE:
+    # Fail closed: refuse to finish starting rather than risk periodically
+    # wiping a database that turns out not to be a fresh demo instance (see
+    # assert_demo_safe_to_manage's own docstring).
+    demo_mode.assert_demo_safe_to_manage()
+    threading.Thread(
+        target=demo_mode.demo_reset_scheduler_loop, daemon=True, name="adolar-demo-reset",
+    ).start()
 
 
 def _play_count_tag_scheduler():
