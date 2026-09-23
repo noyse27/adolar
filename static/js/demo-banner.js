@@ -15,12 +15,19 @@
     var banner = document.createElement("div");
     banner.id = "demo-mode-banner";
     banner.setAttribute("role", "status");
+    // position:fixed - not "relative" - so this never becomes a layout
+    // participant on the page it's injected into. Every standalone template
+    // centers its content differently (login/setup/change_password's <body>
+    // is display:flex; align-items:center; justify-content:center, so a
+    // plain sibling div renders as a second flex item next to the card
+    // instead of a banner above it); fixed positioning takes it out of flow
+    // entirely regardless of the host page's own layout.
     banner.style.cssText = [
-      "position:relative", "z-index:9999",
+      "position:fixed", "top:0", "left:0", "right:0", "z-index:9999",
       "background:#4a3d33", "color:#e8dcc8",
       "border-bottom:1px solid #8a6d3b",
       "font:12px/1.5 sans-serif",
-      "text-align:center", "padding:8px 16px",
+      "text-align:center", "padding:8px 16px", "box-sizing:border-box",
     ].join(";");
 
     var line1 = document.createElement("div");
@@ -40,6 +47,21 @@
 
     banner.append(line1, line2);
     document.body.insertBefore(banner, document.body.firstChild);
+
+    // Reserve space for the fixed banner so it never overlaps real page
+    // content. index.html's <body> is a fixed 100vh flex column with
+    // overflow:hidden (its own scroll areas live further down the tree),
+    // so pushing it down via margin alone would clip its bottom by the
+    // same amount the banner adds at the top - shrink its height to match
+    // instead. Every other template just grows a little, which is safe
+    // since none of them set overflow:hidden on <body>.
+    requestAnimationFrame(function () {
+      var height = banner.offsetHeight + "px";
+      document.body.style.marginTop = height;
+      if (getComputedStyle(document.body).overflow === "hidden") {
+        document.body.style.height = "calc(100vh - " + height + ")";
+      }
+    });
   }
 
   document.addEventListener("DOMContentLoaded", function () {
