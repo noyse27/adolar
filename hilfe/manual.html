@@ -112,7 +112,7 @@
 <body>
 <div class="shell">
   <aside class="sidebar">
-    <div class="brand"><img src="../static/logo.svg" alt=""><div><div class="brand-name">ADOLAR</div><div class="brand-sub">Manual 1.10</div></div></div>
+    <div class="brand"><img src="../static/logo.svg" alt=""><div><div class="brand-name">ADOLAR</div><div class="brand-sub">Manual 1.11</div></div></div>
     <div class="search"><input id="help-search" type="search" placeholder="Hilfe durchsuchen …" aria-label="Handbuch durchsuchen"></div>
     <nav aria-label="Kapitel">
       <div class="nav-label">Start</div>
@@ -124,7 +124,7 @@
       <div class="nav-label">Verwaltung</div>
       <a href="#benutzer">Benutzer & Rechte</a><a href="#wartung">Wartung</a><a href="#probleme">Problemlösung</a>
     </nav>
-    <div class="side-foot">Adolar v1.7.0<br>Same rocket. Different mission.</div>
+    <div class="side-foot">Adolar v1.11.0<br>Same rocket. Different mission.</div>
   </aside>
 
   <main class="main">
@@ -175,10 +175,11 @@
         <div class="callout"><strong>Neu: Album-Raster</strong>Der Filter „Album“ zeigt jetzt ein Raster passender Alben statt einzelner Titel. Ein Doppelklick – oder das Öffnen-Symbol – öffnet die Titelliste des gewählten Albums in der richtigen Reihenfolge; „Zurück“ führt zum Raster zurück. Sampler mit mehreren Interpreten werden anhand eines echten Album-Interpret-Tags als eine einzige Karte gruppiert; ältere Bibliotheken nutzen bis zum nächsten Scan eine Ordner-basierte Heuristik.</div>
       </section>
 
-      <section id="playlists" data-search="playlist smart statisch bookmark favoriten löschen persönlich global editor dragdrop drag drop import export adolarplaylist wertelisten hinzugefügt datum">
+      <section id="playlists" data-search="playlist smart statisch bookmark favoriten löschen persönlich global editor dragdrop drag drop import export adolarplaylist wertelisten hinzugefügt datum album alben webplayer songster">
         <div class="kicker">05 · Sammeln</div><h2>Playlists</h2>
         <h3>System- und globale Playlists</h3><p>Vordefinierte Listen wie „Zuletzt gespielt“, „Meistgespielt“, „Neueste 100“ und „Disco Hits“ stehen allen berechtigten Besuchern zur Verfügung. „Neueste 100“ sortiert nach dem Hinzufügedatum eines Titels zur Bibliothek, nicht nach dem letzten Scan – ein erneutes Einlesen unveränderter Dateien verschiebt einen Titel also nicht mehr nach oben.</p>
         <h3>Persönliche Playlists</h3><p>Wenn der Admin diese Fähigkeit freigegeben hat, erscheint an Tracks das Bookmark-Symbol. Dort eine vorhandene statische Playlist wählen oder direkt eine neue anlegen. Persönliche Smart-Playlists speichern eine Filter- und Sortierkombination.</p>
+        <h3>Alben zu Playlists hinzufügen</h3><p>Beim Durchsuchen und Abspielen von Alben lässt sich ein komplettes Album direkt in eine Playlist senden, ohne den Player-Kontext zu verlassen.</p>
         <h3>Playlist-Editor</h3><p>Der visuelle Editor öffnet sich beim Bearbeiten einer statischen oder Smart-Playlist: Titel per Suche hinzufügen, Reihenfolge per Drag-and-drop ändern, „Zufällig auffüllen“ für schnelle Mixes und ein Regel-Editor für Smart-Filter. Im Regelbereich stehen einfache Zeilenregeln und separat die „Smarte Eingabe“ zur Verfügung. Dort erzeugt Adolar aus Formulierungen wie „Album enthält Bravo und Ronny und als Jahrzehnt 1980, 1990 oder 2000“ einen verschachtelten Filter und zeigt seine Interpretation vor der Anwendung an – Wertelisten verstehen dabei Kommas, „oder“ und ein kontextabhängiges „und“. Zeilenregeln können außerdem nach Hinzufügedatum filtern: älter als ein Zeitraum oder erst innerhalb der letzten Tage, Wochen, Monate oder Jahre hinzugefügt. Über Export/Import lässt sich eine Playlist als portable <code>.adolarplaylist</code>-Datei sichern oder auf einem anderen Adolar-Server wieder einspielen.</p>
         <div class="callout warning"><strong>Recht deaktiviert?</strong>Vorhandene persönliche Inhalte bleiben erhalten und lesbar. Erstellung und Bearbeitung sind gesperrt, bis der Admin das Recht erneut aktiviert.</div>
       </section>
@@ -215,11 +216,12 @@
         <h3>API-Zugriff</h3><p>Im Bereich „API-Zugriff“ der Einstellungen erzeugt ein Admin Tokens für externe Werkzeuge (z.B. Adolar Taggster), die sich per <code>Authorization: Bearer &lt;token&gt;</code> statt über die Web-Sitzung anmelden. Der Token wird nur einmal beim Erzeugen angezeigt; danach lässt er sich nur noch widerrufen.</p>
       </section>
 
-      <section id="wartung" data-search="wartung admin scan bpm tags lastfm playcount archiv backup datensicherung usb verbindungen clients ip system monitor jobs hintergrund">
+      <section id="wartung" data-search="wartung admin scan bpm tags lastfm playcount archiv backup datensicherung usb verbindungen clients ip system monitor jobs hintergrund songster playlist token spiel-client">
         <div class="kicker">11 · Administration</div><h2>Bibliothekswartung</h2>
         <div class="ui-map"><div class="ui-item"><b>Schnellscan</b>Neue und geänderte Dateien einlesen; unveränderte Titel werden per Änderungsdatum übersprungen.</div><div class="ui-item"><b>Vollständiger Scan</b>Liest wirklich jede Datei neu ein, auch unveränderte – nötig, wenn eine neue Tag-Auswertung (z.B. Original-Jahr) auch bei längst gescannten Dateien nachgezogen werden soll. Mit Warnhinweis zu den Mehrkosten.</div><div class="ui-item"><b>BPM-Tags einlesen</b>Vorhandene TBPM-Werte schnell aus den Musikdateien übernehmen.</div><div class="ui-item"><b>BPM berechnen</b>Fehlende Werte im Hintergrund analysieren und in die Tags schreiben.</div><div class="ui-item"><b>Globale Playcounts</b>Autorisierte Plays erhöhen das Archiv; persönliche Zähler bleiben davon unabhängig.</div><div class="ui-item"><b>Datensicherung</b>Admins können konsistente Datenbank-Snapshots starten, prüfen, herunterladen und löschen. Automatische Sicherungen laufen standardmäßig täglich ab 03:00 Uhr; die neuesten sieben bleiben erhalten.</div><div class="ui-item"><b>Verbindungen</b>Übersicht verbundener Clients mit Heartbeat-Zeit und maskierter IP-Adresse – hilfreich, um vergessene Radiogeräte oder hängende Sessions zu erkennen.</div><div class="ui-item"><b>System Monitor</b>Zeigt laufende und zuletzt abgeschlossene Hintergrundjobs – Bibliotheksscan, BPM-Tags/-Berechnung, Thumbnail-Erzeugung, Datenbank-Optimierung und Datensicherung – jeweils mit Fortschritt, Startzeit und ob der Job manuell oder automatisch ausgelöst wurde.</div></div>
         <p>Eine Sicherung wird erst angezeigt, nachdem SQLite sie geprüft und Adolar eine SHA-256-Prüfsumme erzeugt hat. Sie enthält Konten, Favoriten, Last.fm-Zuordnungen und Adolar4U-Lerndaten und ist deshalb vertraulich. Das externe Backup-Ziel sollte zusätzlich mit Hyper Backup auf ein zweites Medium gesichert werden.</p>
         <p>In der persönlichen Adolar4U-Lernhistorie lädt <b>Analyse-Export</b> den gewählten Zeitraum als ZIP herunter. Empfehlungen, Hörereignisse und Profil-Snapshots liegen als auswertbare CSV-Dateien bei; <code>summary.json</code> enthält die aggregierten Gruppenanteile und Profiländerungen. Der Export gehört ausschließlich zum angemeldeten Benutzer und enthält keine Passwörter, Last.fm-Sitzungsschlüssel oder Musikdateipfade.</p>
+        <h3>Songster-Playlists</h3><p>Admins legen eigene Playlists für den angebundenen <a href="adolar-songster.html">Adolar Songster</a>-Spiel-Client an und pflegen sie. Der Zugriff aus Songster ist über einen Produkt-Token abgesichert; wird eine für Songster freigegebene Playlist entfernt, zeigt der Spiel-Client dafür einen klaren Status statt eines stillen Fehlers.</p>
       </section>
 
       <section id="probleme" data-search="probleme fehler langsam kein cover kein download login gesperrt ton">
@@ -231,7 +233,7 @@
         <details><summary>Der Companion zeigt keine privaten Sender</summary><p>Im Companion anmelden und prüfen lassen, ob das Recht „Eigene Radiosender“ aktiv ist. Private Sender anderer Benutzer bleiben unsichtbar.</p></details>
       </section>
     </div>
-    <footer>Adolar v1.10.0 · © PolzeSoft 2026 · polze.net · Same rocket. Different mission.</footer>
+    <footer>Adolar v1.11.0 · © PolzeSoft 2026 · polze.net · Same rocket. Different mission.</footer>
   </main>
 </div>
 <script>
