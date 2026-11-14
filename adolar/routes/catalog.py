@@ -19,7 +19,9 @@ def index_head():
 
 @blueprint.get("/")
 def index():
-    if _auth.user_count() == 0:
+    # Authenticated requests already proved that a user exists. Avoid another
+    # database connection on the latency-sensitive first HTML response.
+    if not g.user and _auth.user_count() == 0:
         return redirect("/setup")
     return render_template("index.html", app_version=core.APP_VERSION)
 

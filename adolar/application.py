@@ -90,6 +90,13 @@ def _active_library_snapshot() -> dict:
 
 @app.before_request
 def _bind_request_library():
+    # Static assets and the liveness probe never touch library data.  Keeping
+    # them out of the library/auth pipeline matters on a NAS: the browser asks
+    # for several assets in parallel on first load and each authenticated
+    # request would otherwise open both SQLite files (and update the session),
+    # amplifying a cold-disk wake-up into a burst of database I/O.
+    if request.endpoint == "static" or request.path == "/health":
+        return
     # Take one stable snapshot before auth or route code opens a database.
     # Other Gunicorn workers observe a switch through the shared registry on
     # their next request, while requests already in flight stay on their
