@@ -62,6 +62,14 @@ PUBLIC_TRACK_SUFFIXES = ("/bpm",)
 _bf_lock  = threading.Lock()
 _bf_state: dict[str, dict] = {}   # ip -> {attempts: [...timestamps], blocked_until: float}
 
+# A page load fans out into several authenticated API requests. Recording
+# every one as a separate SQLite write only creates WAL contention and cold
+# disk I/O; connection presence is minute-scale information, so one update
+# per process and token in this short window is sufficient.
+_session_touch_lock = threading.Lock()
+_session_last_touch: dict[str, float] = {}
+SESSION_TOUCH_INTERVAL = 30.0
+
 def _get_client_ip() -> str:
     return request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
 
@@ -164,14 +172,27 @@ def create_session(user_id: int, remember: bool, product: str = "adolar_web",
 def touch_session(token: str) -> None:
     """Mark an authenticated client as active without extending its login."""
     now = time.time()
-    with db.db() as conn:
-        conn.execute(
-            """UPDATE connection_log SET last_seen_at=?
-               WHERE id=(SELECT connection_id FROM sessions WHERE token=?)""",
-            (now, token),
-        )
+    with _session_touch_lock:
+        if now - _session_last_touch.get(token, 0) < SESSION_TOUCH_INTERVAL:
+            return
+        _session_last_touch[token] = now
+    try:
+        with db.db() as conn:
+            conn.execute(
+                """UPDATE connection_log SET last_seen_at=?
+                   WHERE id=(SELECT connection_id FROM sessions WHERE token=?)""",
+                (now, token),
+            )
+    except Exception:
+        # Let a transient lock/I/O failure (including commit) be retried by
+        # the next request instead of suppressing updates for the window.
+        with _session_touch_lock:
+            _session_last_touch.pop(token, None)
+        raise
 
 def delete_session(token: str):
+    with _session_touch_lock:
+        _session_last_touch.pop(token, None)
     with db.db() as conn:
         conn.execute("DELETE FROM sessions WHERE token=?", (token,))
 
@@ -511,6 +532,13 @@ def before_request():
     """Attach current user to g; redirect unauthenticated requests."""
     g.user = None
     g.token_product = None
+    # Flask's static endpoint and the healthcheck cannot benefit from user
+    # context.  In particular, do this before inspecting a session cookie:
+    # otherwise every CSS/JS/image request performs a user lookup and a write
+    # to connection_log, which is especially expensive while NAS disks and the
+    # SQLite page cache are cold.
+    if request.endpoint == "static" or request.path == "/health":
+        return
     if request.method == "HEAD":
         return
     if DEV_ADMIN_ENABLED:

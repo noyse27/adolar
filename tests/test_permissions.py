@@ -68,6 +68,28 @@ class PermissionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"status": "ok"})
 
+    def test_static_assets_bypass_database_authentication(self):
+        with mock.patch.object(app_module.db, "get_connection") as get_connection:
+            response = self.client.get("/static/logo.svg", headers={
+                "Cookie": f"{app_module._auth.SESSION_COOKIE}=not-a-real-session",
+            })
+        self.assertEqual(response.status_code, 200)
+        get_connection.assert_not_called()
+
+    def test_session_activity_write_is_throttled_during_page_load(self):
+        token = "page-load-token"
+        app_module._auth._session_last_touch.pop(token, None)
+        connection = mock.MagicMock()
+        context = mock.MagicMock()
+        context.__enter__.return_value = connection
+        with mock.patch.object(app_module._auth.db, "db", return_value=context) as open_db, \
+             mock.patch.object(app_module._auth.time, "time", side_effect=[1000.0, 1001.0]):
+            app_module._auth.touch_session(token)
+            app_module._auth.touch_session(token)
+        self.assertEqual(open_db.call_count, 1)
+        self.assertEqual(connection.execute.call_count, 1)
+        app_module._auth._session_last_touch.pop(token, None)
+
     def test_user_playlist_capability_is_enforced_server_side(self):
         self.user["allow_playlists"] = 0
         with self._login(), mock.patch.object(
