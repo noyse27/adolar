@@ -392,6 +392,9 @@ Disabling playlist or radio creation does not delete existing personal content. 
 | `SECRET_KEY` | random | Flask session secret — set a fixed value to survive restarts |
 | `LASTFM_API_KEY` | — | Last.fm API key (optional) |
 | `LASTFM_API_SECRET` | — | Last.fm API secret (optional) |
+| `ADOLAR_SCROBBLER_API_ROOT` | — | A self-hosted [Adolar Scrobbler](https://github.com/noyse27/adolar-scrobbler) instance's 2.0 Web Service URL, e.g. `https://scrobbler.example.com/2.0/` (optional second scrobble destination, next to Last.fm) |
+| `ADOLAR_SCROBBLER_API_KEY` | — | That instance's app API key (Settings → App-Zugangsdaten, admin-only) |
+| `ADOLAR_SCROBBLER_API_SECRET` | — | That instance's app secret (same place) |
 | `CORS_ORIGINS` | `` | Allowed CORS origins (space-separated) |
 
 ## API Endpoints (selection)

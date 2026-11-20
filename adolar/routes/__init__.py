@@ -5,6 +5,7 @@ def register_blueprints(app) -> None:
     """Register route groups after the application module is initialized."""
     from .admin import blueprint as admin_blueprint
     from .adolar4u import blueprint as adolar4u_blueprint
+    from .adolar_scrobbler import blueprint as adolar_scrobbler_blueprint
     from .android import blueprint as android_blueprint
     from .auth import blueprint as auth_blueprint
     from .catalog import blueprint as catalog_blueprint
@@ -18,6 +19,7 @@ def register_blueprints(app) -> None:
     from .songster import blueprint as songster_blueprint
 
     app.register_blueprint(adolar4u_blueprint)
+    app.register_blueprint(adolar_scrobbler_blueprint)
     app.register_blueprint(admin_blueprint)
     app.register_blueprint(android_blueprint)
     app.register_blueprint(auth_blueprint)

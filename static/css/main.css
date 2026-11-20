@@ -1374,7 +1374,8 @@
     @media (max-width: 620px) {
       #lyrics-search-params { grid-template-columns: 1fr; }
     }
-    #lastfm-connect {
+    #lastfm-connect,
+    #asb-connect {
       background: none;
       border: 0.5px solid var(--border-subtle);
       border-radius: 8px;
@@ -1386,7 +1387,8 @@
       align-items: center;
       gap: 5px;
     }
-    #lastfm-connect:hover { background: var(--bg-secondary); }
+    #lastfm-connect:hover,
+    #asb-connect:hover { background: var(--bg-secondary); }
 
     /* ── Results Header ───────────────────────────────── */
     #results-header {
@@ -2240,6 +2242,7 @@
       #btn-help,
       #topbar-meta,
       #lastfm-status,
+      #asb-status,
       #lang-switch,
       #btn-miniplayer,
       #basket-label {

@@ -121,6 +121,8 @@ const LANG = {
     lfm_loved_syncing:  "Wird geladen…",
     lfm_pc_sync:        "Plays laden",
     lfm_pc_syncing:     (done, total) => `Plays: ${done}/${total}…`,
+    asb_connect:        "Adolar Scrobbler verbinden",
+    asb_disconnect:     "Trennen",
     bm_add:             "Zu Playlist hinzufügen",
     bm_album_add:       "Album zu Playlist hinzufügen",
     bm_album_added:     (n, name) => `${n.toLocaleString("de")} Titel zu „${name}" hinzugefügt.`,
@@ -242,6 +244,8 @@ const LANG = {
     lfm_loved_syncing:   "Loading…",
     lfm_pc_sync:         "Load plays",
     lfm_pc_syncing:      (done, total) => `Plays: ${done}/${total}…`,
+    asb_connect:         "Connect Adolar Scrobbler",
+    asb_disconnect:      "Disconnect",
     bm_add:              "Add to playlist",
     bm_album_add:        "Add album to playlist",
     bm_album_added:      (n, name) => `${n.toLocaleString("en")} tracks added to "${name}".`,
@@ -1131,8 +1135,8 @@ function renderTracks(overrideTracks) {
       row.appendChild(dlBtn);
     }
 
-    // Last.fm love button for the current user's personal account
-    if (lfm.connected && _me) {
+    // Love button for the current user's personal scrobble account(s)
+    if ((lfm.connected || asb.connected) && _me) {
       const loveBtn = document.createElement("button");
       const loveKey = `${track.artist}||${track.title}`;
       const isLoved = Boolean(track.loved || lfm.lovedCache.get(loveKey));
@@ -1429,7 +1433,7 @@ function updatePlayView(track) {
   const jingle = isJingle(track);
   $("play-view-library").style.display = radio.active ? "inline-flex" : "none";
   const loveBtn = $("play-view-love");
-  loveBtn.style.display = lfm.connected && !jingle ? "inline-flex" : "none";
+  loveBtn.style.display = (lfm.connected || asb.connected) && !jingle ? "inline-flex" : "none";
   loveBtn.dataset.key = `${track.artist}||${track.title}`;
   const loved = Boolean(track.loved || lfm.lovedCache.get(loveBtn.dataset.key));
   applyLovedState(loveBtn, loved);
@@ -1501,12 +1505,21 @@ function updatePlayerUI(t) {
   $("player-favorite").style.display = _me ? "inline-flex" : "none";
   $("player-favorite").dataset.trackId = t.id;
   applyFavoriteState($("player-favorite"), _favoriteIds.has(Number(t.id)));
-  if (lfm.connected) {
+  if (lfm.connected || asb.connected) {
     const key = `${t.artist}||${t.title}`;
     const loved = Boolean(t.loved || lfm.lovedCache.get(key));
     lfm.lovedCache.set(key, loved);
     applyLovedState($("player-love"), loved);
+  }
+  if (lfm.connected) {
     fetch(`${API}/api/lastfm/nowplaying`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ artist: t.artist, title: t.title, duration: t.duration }),
+    }).catch(() => {});
+  }
+  if (asb.connected) {
+    fetch(`${API}/api/adolar-scrobbler/nowplaying`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ artist: t.artist, title: t.title, duration: t.duration }),
@@ -3979,7 +3992,7 @@ function broadcastTrack(t) {
   miniCh.postMessage({
     type: "track", track: t, playing: !audio.paused, loved,
     favorite: Boolean(t && _favoriteIds.has(Number(t.id))),
-    lfmConnected: lfm.connected,
+    lfmConnected: lfm.connected || asb.connected,
   });
 }
 
@@ -4022,7 +4035,7 @@ miniCh.onmessage = e => {
     // Popup just opened — send current state
     if (state.currentTrack) broadcastTrack(state.currentTrack);
     else miniCh.postMessage({ type: "playstate", playing: false });
-    miniCh.postMessage({ type: "lfm", connected: lfm.connected });
+    miniCh.postMessage({ type: "lfm", connected: lfm.connected || asb.connected });
     return;
   }
   if (msg.type === "popup-closed") { miniWin = null; return; }
@@ -4059,6 +4072,11 @@ async function lfmInit() {
   renderLfmStatus();
 }
 
+function updateLoveButtonVisibility() {
+  const btn = $("player-love");
+  if (btn) btn.style.display = (lfm.connected || asb.connected) ? "" : "none";
+}
+
 function renderLfmStatus() {
   const el = $("lastfm-status");
   if (!el) return;
@@ -4068,7 +4086,6 @@ function renderLfmStatus() {
            width="14" height="14" style="filter:invert(.5) sepia(1) saturate(3) hue-rotate(310deg);opacity:.8">
       <span>${esc(lfm.username)}</span>
       <button id="lastfm-connect" onclick="lfmDisconnect()" title="${t().lfm_disconnect}">✕</button>`;
-    $("player-love").style.display = "";
     $("btn-loved-filter").style.display = "flex";
     $("btn-loved-sync").style.display = "flex";
     $("btn-pc-sync").style.display = "flex";
@@ -4079,13 +4096,117 @@ function renderLfmStatus() {
              width="13" height="13" style="filter:invert(.5) sepia(1) saturate(3) hue-rotate(310deg)">
         ${t().lfm_connect}
       </button>`;
-    $("player-love").style.display = "none";
     $("btn-loved-filter").style.display = "none";
     $("btn-loved-sync").style.display = "none";
     $("btn-pc-sync").style.display = "none";
     state.filters.loved = false;
     updateLovedFilterButton();
   }
+  updateLoveButtonVisibility();
+}
+
+// ── Adolar Scrobbler (optional second scrobble target, next to Last.fm) ──
+const asb = { connected: false, username: null, autoLoveFavorites: true, configured: true };
+
+async function asbInit() {
+  try {
+    const res = await fetch(`${API}/api/adolar-scrobbler/status`);
+    const data = await res.json();
+    asb.connected = data.connected;
+    asb.username  = data.username;
+    asb.autoLoveFavorites = data.auto_love_favorites !== false;
+    asb.configured = data.configured;
+  } catch { asb.connected = false; }
+  renderAsbStatus();
+}
+
+function renderAsbStatus() {
+  const el = $("asb-status");
+  if (el) {
+    if (asb.connected) {
+      el.innerHTML = `
+        <span>🚀</span>
+        <span>${esc(asb.username)}</span>
+        <button id="asb-connect" onclick="asbDisconnect()" title="${t().asb_disconnect}">✕</button>`;
+    } else if (asb.configured) {
+      el.innerHTML = `
+        <button id="asb-connect" onclick="openAdolarScrobblerSettings()">🚀 ${t().asb_connect}</button>`;
+    } else {
+      el.innerHTML = "";
+    }
+  }
+  updateLoveButtonVisibility();
+}
+
+async function asbDisconnect() {
+  await fetch(`${API}/api/adolar-scrobbler/disconnect`, { method: "POST" });
+  asb.connected = false; asb.username = null;
+  renderAsbStatus();
+  renderAdolarScrobblerModal();
+}
+
+function openAdolarScrobblerSettings() {
+  $("user-dropdown").classList.remove("open");
+  $("asb-login-error").style.display = "none";
+  $("asb-username").value = "";
+  $("asb-password").value = "";
+  renderAdolarScrobblerModal();
+  $("asb-modal").style.display = "flex";
+}
+
+function renderAdolarScrobblerModal() {
+  const status = $("asb-modal-status");
+  if (!status) return;
+  status.textContent = !asb.configured
+    ? "Diese Adolar-Instanz hat (noch) keinen Adolar Scrobbler konfiguriert. Bitte einen Admin fragen."
+    : asb.connected
+    ? `Verbunden als ${asb.username}. Scrobbles und Loves gehen zusätzlich an deinen Adolar Scrobbler.`
+    : "Verbinde deinen eigenen Adolar-Scrobbler-Account mit Benutzername und Passwort.";
+  $("asb-login-fields").style.display = (!asb.connected && asb.configured) ? "flex" : "none";
+  $("asb-auto-love-row").style.display = asb.connected ? "flex" : "none";
+  $("asb-auto-love").checked = asb.autoLoveFavorites;
+  $("asb-modal-connect").style.display = (!asb.connected && asb.configured) ? "inline-flex" : "none";
+  $("asb-modal-disconnect").style.display = asb.connected ? "inline-flex" : "none";
+}
+
+async function asbConnect() {
+  const username = $("asb-username").value.trim();
+  const password = $("asb-password").value;
+  const errEl = $("asb-login-error");
+  errEl.style.display = "none";
+  if (!username || !password) return;
+  try {
+    const r = await fetch(`${API}/api/adolar-scrobbler/connect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      errEl.textContent = data.error === "invalid_credentials"
+        ? "Benutzername oder Passwort falsch."
+        : "Verbindung fehlgeschlagen.";
+      errEl.style.display = "block";
+      return;
+    }
+    asb.connected = true;
+    asb.username = data.username;
+    renderAsbStatus();
+    renderAdolarScrobblerModal();
+    renderTracks();
+  } catch {
+    errEl.textContent = "Verbindung fehlgeschlagen.";
+    errEl.style.display = "block";
+  }
+}
+
+async function saveAdolarScrobblerSettings() {
+  const enabled = $("asb-auto-love").checked;
+  const r = await fetch("/api/adolar-scrobbler/settings", {
+    method: "PATCH", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({auto_love_favorites: enabled}),
+  });
+  if (r.ok) asb.autoLoveFavorites = enabled;
 }
 
 function toggleWartung() {
@@ -4635,31 +4756,49 @@ async function saveLastFmSettings() {
 }
 
 async function lfmScrobble(track) {
-  if (!lfm.connected || !track || isJingle(track)) return;
-  fetch(`${API}/api/lastfm/scrobble`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ artist: track.artist, title: track.title }),
-  }).catch(() => {});
+  if ((!lfm.connected && !asb.connected) || !track || isJingle(track)) return;
+  if (lfm.connected) {
+    fetch(`${API}/api/lastfm/scrobble`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ artist: track.artist, title: track.title }),
+    }).catch(() => {});
+  }
+  if (asb.connected) {
+    fetch(`${API}/api/adolar-scrobbler/scrobble`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ artist: track.artist, title: track.title }),
+    }).catch(() => {});
+  }
 }
 
 async function lfmToggleLove(track, btn) {
-  if (!lfm.connected || !track || isJingle(track)) return;
+  if ((!lfm.connected && !asb.connected) || !track || isJingle(track)) return;
   const key    = `${track.artist}||${track.title}`;
   const isLoved = lfm.lovedCache.get(key) || false;
   const action  = isLoved ? "unlove" : "love";
   try {
-    await fetch(`${API}/api/lastfm/love`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ artist: track.artist, title: track.title, action }),
-    });
+    if (lfm.connected) {
+      await fetch(`${API}/api/lastfm/love`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artist: track.artist, title: track.title, action }),
+      });
+    }
+    if (asb.connected) {
+      fetch(`${API}/api/adolar-scrobbler/love`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artist: track.artist, title: track.title, action }),
+      }).catch(() => {});
+    }
     lfm.lovedCache.set(key, !isLoved);
     applyLovedState(btn, !isLoved);
     broadcastLoved(!isLoved);
     // update all matching heart buttons in track list
     document.querySelectorAll(`.btn-love[data-key="${CSS.escape(key)}"]`).forEach(b => applyLovedState(b, !isLoved));
-  } catch (e) { console.error("Last.fm love failed", e); }
+  } catch (e) { console.error("Love failed", e); }
 }
 
 function updateLovedFilterButton() {
@@ -6823,7 +6962,7 @@ setInterval(checkDiscoBadge, 30000);
   // Prioritize the visible track list on a cold NAS disk. Secondary metadata
   // queries run only after the first page has arrived (or refreshed the cache).
   await loadTracks(1);
-  await Promise.all([loadStats(), loadGenres(), lfmInit()]);
+  await Promise.all([loadStats(), loadGenres(), lfmInit(), asbInit()]);
 
   const res  = await fetch(`${API}/api/scan/status`);
   const data = await res.json();

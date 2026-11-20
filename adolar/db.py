@@ -202,6 +202,21 @@ def init_db():
                 playcounts_synced_at REAL
             );
 
+            -- A second, last.fm-protocol-compatible scrobble destination
+            -- (a self-hosted Adolar Scrobbler instance). Deliberately a
+            -- separate table rather than a generalized multi-service one:
+            -- it only needs auth + scrobble/love, not last.fm's loved/
+            -- playcount sync machinery, since Adolar Scrobbler is a write
+            -- destination here, not a second source of truth to read back.
+            -- See adolar/adolar_scrobbler.py.
+            CREATE TABLE IF NOT EXISTS control.user_adolar_scrobbler_accounts (
+                user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                username      TEXT NOT NULL,
+                session_key   TEXT NOT NULL,
+                auto_love_favorites INTEGER NOT NULL DEFAULT 1,
+                connected_at  REAL NOT NULL DEFAULT (unixepoch())
+            );
+
             CREATE TABLE IF NOT EXISTS control.lastfm_loved_tracks (
                 user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 artist_norm TEXT NOT NULL,
@@ -1208,6 +1223,40 @@ def set_lastfm_auto_love(user_id: int, enabled: bool) -> bool:
     with db() as conn:
         cur = conn.execute("""
             UPDATE user_lastfm_accounts SET auto_love_favorites=? WHERE user_id=?
+        """, (1 if enabled else 0, int(user_id)))
+    return cur.rowcount > 0
+
+
+def get_adolar_scrobbler_account(user_id: int) -> dict | None:
+    with db() as conn:
+        row = conn.execute("""
+            SELECT user_id, username, session_key, auto_love_favorites, connected_at
+            FROM user_adolar_scrobbler_accounts WHERE user_id=?
+        """, (int(user_id),)).fetchone()
+    return dict(row) if row else None
+
+
+def set_adolar_scrobbler_account(user_id: int, username: str, session_key: str) -> None:
+    with db() as conn:
+        conn.execute("""
+            INSERT INTO user_adolar_scrobbler_accounts (user_id, username, session_key)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username=excluded.username,
+                session_key=excluded.session_key,
+                connected_at=unixepoch()
+        """, (int(user_id), username, session_key))
+
+
+def disconnect_adolar_scrobbler_account(user_id: int) -> None:
+    with db() as conn:
+        conn.execute("DELETE FROM user_adolar_scrobbler_accounts WHERE user_id=?", (int(user_id),))
+
+
+def set_adolar_scrobbler_auto_love(user_id: int, enabled: bool) -> bool:
+    with db() as conn:
+        cur = conn.execute("""
+            UPDATE user_adolar_scrobbler_accounts SET auto_love_favorites=? WHERE user_id=?
         """, (1 if enabled else 0, int(user_id)))
     return cur.rowcount > 0
 
