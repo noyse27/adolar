@@ -4160,7 +4160,9 @@ function renderAdolarScrobblerModal() {
   status.textContent = !asb.configured
     ? "Diese Adolar-Instanz hat (noch) keinen Adolar Scrobbler konfiguriert. Bitte einen Admin fragen."
     : asb.connected
-    ? `Verbunden als ${asb.username}. Scrobbles und Loves gehen zusätzlich an deinen Adolar Scrobbler.`
+    ? `Verbunden als ${asb.username}. Scrobbles und Loves gehen an deinen Adolar Scrobbler.`
+    : lfm.connected
+    ? "Verbinde deinen Adolar-Scrobbler-Account. Achtung: trennt deine aktuelle Last.fm-Verbindung (nur ein Scrobble-Ziel gleichzeitig)."
     : "Verbinde deinen eigenen Adolar-Scrobbler-Account mit Benutzername und Passwort.";
   $("asb-login-fields").style.display = (!asb.connected && asb.configured) ? "flex" : "none";
   $("asb-auto-love-row").style.display = asb.connected ? "flex" : "none";
@@ -4191,6 +4193,9 @@ async function asbConnect() {
     }
     asb.connected = true;
     asb.username = data.username;
+    // Connecting here disconnects any active Last.fm session server-side
+    // (only one scrobble destination is active at a time) - refresh it.
+    await lfmInit();
     renderAsbStatus();
     renderAdolarScrobblerModal();
     renderTracks();
@@ -4738,6 +4743,8 @@ function renderLastFmModal() {
   if (!status) return;
   status.textContent = lfm.connected
     ? `Verbunden als ${lfm.username}. Scrobbles, Loved-Titel und Importe gehören nur zu diesem Adolar-Benutzer.`
+    : asb.connected
+    ? "Verbinde dein Last.fm-Konto. Achtung: trennt deine aktuelle Adolar-Scrobbler-Verbindung (nur ein Scrobble-Ziel gleichzeitig)."
     : "Verbinde dein eigenes Last.fm-Konto, ohne dein Passwort in Adolar einzugeben.";
   $("lastfm-auto-love-row").style.display = lfm.connected ? "flex" : "none";
   $("lastfm-sync-actions").style.display = lfm.connected ? "flex" : "none";

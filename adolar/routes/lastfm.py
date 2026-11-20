@@ -66,6 +66,9 @@ def api_lastfm_callback():
         return "Kein Token erhalten.", 400
     try:
         session = lastfm.get_session(token)
+        # Only one scrobble destination is active at a time - no parallel
+        # operation. See adolar/routes/adolar_scrobbler.py for the mirror.
+        db.disconnect_adolar_scrobbler_account(g.user["id"])
         db.set_lastfm_account(g.user["id"], session["name"], session["key"])
         db.get_or_create_lastfm_loved_radio_station(g.user["id"])
     except Exception as e:

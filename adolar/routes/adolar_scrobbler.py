@@ -45,6 +45,9 @@ def api_adolar_scrobbler_connect():
         session = adolar_scrobbler.get_mobile_session(username, password)
         if not session.get("key"):
             return jsonify({"error": "invalid_credentials"}), 401
+        # Only one scrobble destination is active at a time - no parallel
+        # operation. See adolar/routes/lastfm.py's callback for the mirror.
+        db.disconnect_lastfm_account(g.user["id"])
         db.set_adolar_scrobbler_account(g.user["id"], session["name"], session["key"])
         return jsonify({"ok": True, "username": session["name"]})
     except Exception as e:
