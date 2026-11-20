@@ -250,6 +250,16 @@ class AndroidApiTests(unittest.TestCase):
             }]}, headers=self._auth_headers(token))
         love.assert_called_once_with("session-key", "Mobile Listener", "Ping")
 
+    def test_loved_event_mirrors_to_adolar_scrobbler_when_auto_love_enabled(self):
+        token = self._register_device()
+        app_module.db.set_adolar_scrobbler_account(self.USER_ID, "listener", "asb-session-key")
+        with mock.patch.object(android_routes.android.favorites.adolar_scrobbler, "love") as love:
+            self.client.post("/api/android/v1/events/batch", json={"events": [{
+                "event_id": "evt-love-4", "event_type": "loved",
+                "local_track_id": "1", "artist": "Mobile Listener", "title": "Ping",
+            }]}, headers=self._auth_headers(token))
+        love.assert_called_once_with("asb-session-key", "Mobile Listener", "Ping")
+
     def test_loved_event_does_not_create_a_listening_event(self):
         token = self._register_device()
         self.client.post("/api/android/v1/events/batch", json={"events": [{
