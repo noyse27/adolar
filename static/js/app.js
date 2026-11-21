@@ -1522,7 +1522,10 @@ function updatePlayerUI(t) {
     fetch(`${API}/api/adolar-scrobbler/nowplaying`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ artist: t.artist, title: t.title, duration: t.duration }),
+      body: JSON.stringify({
+        artist: t.artist, title: t.title, album: t.album,
+        duration: t.duration, year: t.year,
+      }),
     }).catch(() => {});
   }
 }
@@ -4096,12 +4099,13 @@ function renderLfmStatus() {
              width="13" height="13" style="filter:invert(.5) sepia(1) saturate(3) hue-rotate(310deg)">
         ${t().lfm_connect}
       </button>`;
-    $("btn-loved-filter").style.display = "none";
-    $("btn-loved-sync").style.display = "none";
+    $("btn-loved-filter").style.display = asb.connected ? "flex" : "none";
+    $("btn-loved-sync").style.display = asb.connected ? "flex" : "none";
     $("btn-pc-sync").style.display = "none";
-    state.filters.loved = false;
+    if (!asb.connected) state.filters.loved = false;
     updateLovedFilterButton();
   }
+  updateScrobbleHeaderVisibility();
   updateLoveButtonVisibility();
 }
 
@@ -4135,14 +4139,29 @@ function renderAsbStatus() {
       el.innerHTML = "";
     }
   }
+  $("btn-loved-filter").style.display = (lfm.connected || asb.connected) ? "flex" : "none";
+  $("btn-loved-sync").style.display = (lfm.connected || asb.connected) ? "flex" : "none";
+  updateLovedFilterButton();
+  updateScrobbleHeaderVisibility();
   updateLoveButtonVisibility();
+}
+
+function updateScrobbleHeaderVisibility() {
+  const lfmStatus = $("lastfm-status");
+  const asbStatus = $("asb-status");
+  if (lfmStatus) lfmStatus.style.display = asb.connected ? "none" : "flex";
+  if (asbStatus) asbStatus.style.display = lfm.connected ? "none" : "flex";
 }
 
 async function asbDisconnect() {
   await fetch(`${API}/api/adolar-scrobbler/disconnect`, { method: "POST" });
   asb.connected = false; asb.username = null;
+  lfm.lovedCache.clear();
+  state.filters.loved = false;
   renderAsbStatus();
+  renderLfmStatus();
   renderAdolarScrobblerModal();
+  renderTracks();
 }
 
 function openAdolarScrobblerSettings() {
@@ -4775,7 +4794,10 @@ async function lfmScrobble(track) {
     fetch(`${API}/api/adolar-scrobbler/scrobble`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ artist: track.artist, title: track.title }),
+      body: JSON.stringify({
+        artist: track.artist, title: track.title, album: track.album,
+        duration: track.duration, year: track.year,
+      }),
     }).catch(() => {});
   }
 }
@@ -4812,7 +4834,9 @@ function updateLovedFilterButton() {
   const btn = $("btn-loved-filter");
   if (!btn) return;
   btn.classList.toggle("active", state.filters.loved);
-  btn.innerHTML = `<i class="ti ${state.filters.loved ? "ti-heart-filled" : "ti-heart"}"></i><span>${t().lfm_loved_filter}</span>`;
+  const provider = asb.connected ? "Adolar Scrobbler" : "Last.fm";
+  const label = lang === "en" ? `Loved in ${provider}` : `Geliebt bei ${provider}`;
+  btn.innerHTML = `<i class="ti ${state.filters.loved ? "ti-heart-filled" : "ti-heart"}"></i><span>${label}</span>`;
 }
 
 function updateLovedSyncButton(running = false) {
@@ -4831,7 +4855,8 @@ let _lovedPollTimer = null;
 
 async function pollLovedSync() {
   try {
-    const response = await fetch(`${API}/api/lastfm/loved/status`);
+    const provider = asb.connected ? "adolar-scrobbler" : "lastfm";
+    const response = await fetch(`${API}/api/${provider}/loved/status`);
     const status = await response.json();
     if (status.running) {
       updateLovedSyncButton(true);
@@ -4847,10 +4872,11 @@ async function pollLovedSync() {
 }
 
 async function startLovedSync() {
-  if (!lfm.connected) return;
+  if (!lfm.connected && !asb.connected) return;
   try {
     updateLovedSyncButton(true);
-    const response = await fetch(`${API}/api/lastfm/loved/sync`, { method: "POST" });
+    const provider = asb.connected ? "adolar-scrobbler" : "lastfm";
+    const response = await fetch(`${API}/api/${provider}/loved/sync`, { method: "POST" });
     if (!response.ok && response.status !== 409) throw new Error("sync failed");
     _lovedPollTimer = setTimeout(pollLovedSync, 500);
   } catch {
@@ -4859,7 +4885,7 @@ async function startLovedSync() {
 }
 
 $("btn-loved-filter").onclick = () => {
-  if (!lfm.connected) return;
+  if (!lfm.connected && !asb.connected) return;
   const activating = !state.filters.loved;
   if (activating) {
     clearPlaylist();

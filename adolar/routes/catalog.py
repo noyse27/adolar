@@ -99,7 +99,9 @@ def api_search():
         year_min=year_min, year_max=year_max,
         bpm_min=bpm_min, bpm_max=bpm_max,
         page=page, per_page=per_page, sort=sort, count=do_count,
-        loved_only=loved, include_loved=bool(user_id and db.get_lastfm_account(user_id)),
+        loved_only=loved, include_loved=bool(user_id and (
+            db.get_lastfm_account(user_id) or db.get_adolar_scrobbler_account(user_id)
+        )),
         user_id=user_id,
     )
     return jsonify({

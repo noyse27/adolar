@@ -1250,6 +1250,8 @@ def set_adolar_scrobbler_account(user_id: int, username: str, session_key: str) 
 
 def disconnect_adolar_scrobbler_account(user_id: int) -> None:
     with db() as conn:
+        conn.execute("DELETE FROM user_lastfm_sync_jobs WHERE user_id=?", (int(user_id),))
+        conn.execute("DELETE FROM lastfm_loved_tracks WHERE user_id=?", (int(user_id),))
         conn.execute("DELETE FROM user_adolar_scrobbler_accounts WHERE user_id=?", (int(user_id),))
 
 
@@ -1329,7 +1331,7 @@ def claim_lastfm_sync_job(user_id: int, job_type: str) -> bool:
     return cur.rowcount > 0
 
 
-def replace_lastfm_loved_tracks(user_id: int, items: list[dict]):
+def replace_lastfm_loved_tracks(user_id: int, items: list[dict], provider: str = "lastfm"):
     now = __import__("time").time()
     rows = [
         (
@@ -1351,10 +1353,11 @@ def replace_lastfm_loved_tracks(user_id: int, items: list[dict]):
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             rows,
         )
-        conn.execute(
-            "UPDATE user_lastfm_accounts SET loved_synced_at=? WHERE user_id=?",
-            (now, int(user_id)),
-        )
+        if provider == "lastfm":
+            conn.execute(
+                "UPDATE user_lastfm_accounts SET loved_synced_at=? WHERE user_id=?",
+                (now, int(user_id)),
+            )
     return len(rows)
 
 
@@ -2087,9 +2090,12 @@ def create_radio_station(name: str, description: str, filter_def: dict,
         return cur.lastrowid
 
 
-def get_or_create_lastfm_loved_radio_station(user_id: int) -> int:
-    """Return the user's private Last.fm-loved station, creating it if needed."""
-    name = "Loved on Last.fm"
+def get_or_create_lastfm_loved_radio_station(user_id: int, provider: str = "lastfm") -> int:
+    """Return the user's private loved-tracks station, creating or renaming it."""
+    is_scrobbler = provider == "adolar_scrobbler"
+    name = "Loved on Adolar Scrobbler" if is_scrobbler else "Loved on Last.fm"
+    description = ("Deine geliebten Tracks aus Adolar Scrobbler" if is_scrobbler
+                   else "Deine geliebten Tracks aus Last.fm")
     filter_def = {
         "mode": "all",
         "rules": [{"field": "loved", "op": "eq", "value": 1}],
@@ -2099,14 +2105,14 @@ def get_or_create_lastfm_loved_radio_station(user_id: int) -> int:
         row = conn.execute("""
             SELECT id FROM radio_stations
             WHERE scope='private' AND owner_id=? AND songster_managed=0
-              AND LOWER(name)=LOWER(?)
-        """, (int(user_id), name)).fetchone()
+              AND (engine='lastfm_loved' OR LOWER(name) IN (LOWER(?), LOWER(?)))
+        """, (int(user_id), "Loved on Last.fm", "Loved on Adolar Scrobbler")).fetchone()
         if row:
             conn.execute("""
                 UPDATE radio_stations
-                SET filter_json=?, engine='lastfm_loved', updated_at=datetime('now')
+                SET name=?, description=?, filter_json=?, engine='lastfm_loved', updated_at=datetime('now')
                 WHERE id=?
-            """, (json.dumps(clean, ensure_ascii=False), int(row["id"])))
+            """, (name, description, json.dumps(clean, ensure_ascii=False), int(row["id"])))
             return int(row["id"])
         cur = conn.execute("""
             INSERT INTO radio_stations
@@ -2115,7 +2121,7 @@ def get_or_create_lastfm_loved_radio_station(user_id: int) -> int:
             VALUES (?, ?, ?, 'private', ?, 0, ?, 0, 'lastfm_loved', datetime('now'))
         """, (
             name,
-            "Deine geliebten Tracks aus Last.fm",
+            description,
             json.dumps(clean, ensure_ascii=False),
             int(user_id),
             int(user_id),
