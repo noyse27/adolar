@@ -104,7 +104,9 @@ def api_shuffle():
                 bpm_min=parsed["bpm_min"], bpm_max=parsed["bpm_max"],
                 page=1, per_page=2147483647, sort=raw["sort"], count=need_stats,
                 loved_only=raw["loved"],
-                include_loved=bool(user_id and db.get_lastfm_account(user_id)),
+                include_loved=bool(user_id and (
+                    db.get_lastfm_account(user_id) or db.get_adolar_scrobbler_account(user_id)
+                )),
                 user_id=user_id, random_order=True,
             )
             if not need_stats:

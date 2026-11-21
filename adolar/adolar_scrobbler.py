@@ -41,30 +41,78 @@ def _post(params: dict) -> dict:
     return r.json()
 
 
+def _get(params: dict) -> dict:
+    p = dict(params)
+    p["api_key"] = API_KEY
+    p["format"] = "json"
+    r = requests.get(API_ROOT, params=p, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
 def get_mobile_session(username: str, password: str) -> dict:
     """Exchange username/password for a session key. Returns {"name": ..., "key": ...}."""
     data = _post({"method": "auth.getMobileSession", "username": username, "password": password})
     return data.get("session", {})
 
 
-def now_playing(session_key: str, artist: str, title: str, duration: int = None) -> dict:
+def now_playing(session_key: str, artist: str, title: str, duration: int = None,
+                album: str = None, year: int = None) -> dict:
     params = {"method": "track.updateNowPlaying", "sk": session_key,
               "artist": artist, "track": title}
     if duration:
         params["duration"] = duration
+    if album:
+        params["album"] = album
+    if year:
+        params["year"] = year
     return _post(params)
 
 
-def scrobble(session_key: str, artist: str, title: str, timestamp: int = None) -> dict:
+def scrobble(session_key: str, artist: str, title: str, timestamp: int = None,
+             album: str = None, duration: int = None, year: int = None) -> dict:
     if timestamp is None:
         timestamp = int(time.time())
-    return _post({
+    params = {
         "method":    "track.scrobble",
         "sk":        session_key,
         "artist":    artist,
         "track":     title,
         "timestamp": timestamp,
-    })
+    }
+    if album:
+        params["album"] = album
+    if duration:
+        params["duration"] = duration
+    if year:
+        params["year"] = year
+    return _post(params)
+
+
+def get_loved_tracks(username: str, limit: int = 200) -> list[dict]:
+    """Fetch all loved tracks from the compatible Adolar Scrobbler API."""
+    tracks = []
+    page = 1
+    total_pages = 1
+    while page <= total_pages:
+        data = _get({"method": "user.getLovedTracks", "user": username,
+                     "limit": limit, "page": page})
+        loved = data.get("lovedtracks", {})
+        attrs = loved.get("@attr", {})
+        total_pages = int(attrs.get("totalPages") or page)
+        items = loved.get("track", [])
+        if isinstance(items, dict):
+            items = [items]
+        for item in items:
+            artist = item.get("artist", {})
+            date = item.get("date", {})
+            tracks.append({
+                "artist": artist.get("name") if isinstance(artist, dict) else str(artist),
+                "title": item.get("name"),
+                "loved_at": int(date["uts"]) if isinstance(date, dict) and date.get("uts") else None,
+            })
+        page += 1
+    return tracks
 
 
 def love(session_key: str, artist: str, title: str) -> dict:
